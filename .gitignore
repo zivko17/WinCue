@@ -1,0 +1,15 @@
+.aider*
+ffmpeg-gui/bin/
+ffmpeg-gui/release/
+ffmpeg-gui/node_modules/
+ffmpeg-gui/dist/
+node_modules
+
+# Native runtime — descargar manualmente (ver WinCue/README.md)
+# Fuente: https://sourceforge.net/projects/mpv-player-windows/files/libmpv/
+WinCue/libmpv-2.dll
+
+# Python / WinCue
+__pycache__/
+*.pyc
+WinCue/debug_video*.log

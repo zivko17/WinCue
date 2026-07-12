@@ -1,0 +1,8 @@
+{
+  "_doc": "Teclas de acceso directo. Formato QKeySequence: Space, S, Ctrl+S, Left, F1...",
+  "go":   "Space",
+  "stop": "S",
+  "prev": "Left",
+  "save": "Ctrl+S",
+  "load": "Ctrl+O"
+}
