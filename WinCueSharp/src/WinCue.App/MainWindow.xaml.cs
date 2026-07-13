@@ -158,8 +158,20 @@ public partial class MainWindow : Window, IShowView
 
     public nint GetVideoOutputHandle()
     {
+        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
         _videoOutput ??= new VideoOutputWindow { Owner = this };
-        return _videoOutput.EnsureVisibleHandle();
+        nint handle = _videoOutput.EnsureVisibleHandle();
+        if (firstOpen)
+            PlaceVideoOutput();
+        return handle;
+    }
+
+    /// <summary>Coloca la salida en la pantalla configurada (Settings → Vídeo).</summary>
+    private void PlaceVideoOutput()
+    {
+        _videoOutput?.PlaceOnScreen(
+            _settings.Get("video_output_screen", 0),
+            _settings.Get("video_fullscreen_output", false));
     }
 
     public (double Width, double Height) SurfaceDimensions()
@@ -220,8 +232,15 @@ public partial class MainWindow : Window, IShowView
     private void OnVideoOutputClick(object sender, RoutedEventArgs e)
     {
         _videoOutput ??= new VideoOutputWindow { Owner = this };
-        if (_videoOutput.IsVisible) _videoOutput.Hide();
-        else _videoOutput.Show();
+        if (_videoOutput.IsVisible)
+        {
+            _videoOutput.Hide();
+        }
+        else
+        {
+            _videoOutput.Show();
+            PlaceVideoOutput();
+        }
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
@@ -232,6 +251,8 @@ public partial class MainWindow : Window, IShowView
             LoadKeyBindings();
             MasterSlider.Value = _settings.Get("master_volume", 100);
             _applyEngineSettings?.Invoke();
+            if (_videoOutput is { IsVisible: true })
+                PlaceVideoOutput();   // recolocar en la pantalla elegida
             FlashStatus("Configuración guardada y aplicada.");
         };
         dlg.ShowDialog();
