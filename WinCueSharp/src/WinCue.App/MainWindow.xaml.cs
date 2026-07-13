@@ -638,6 +638,7 @@ public partial class MainWindow : Window, IShowView
     {
         _pvw.Shutdown();
         _pgm.Shutdown();
+        Inspector.ShutdownPreview();
         _videoOutput?.CloseForShutdown();
         base.OnClosed(e);
     }

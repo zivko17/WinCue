@@ -115,6 +115,75 @@ public sealed class LiveMonitorControl : Border
         }
     }
 
+    /// <summary>Visor de edición: carga el archivo PAUSADO en el instante dado.
+    /// Si ya es el archivo actual, solo hace scrub.</summary>
+    public void ShowPaused(string path, double at)
+    {
+        if (!VideoEngine.MpvAvailable)
+            return;
+        if (!_host.IsLoaded)
+        {
+            // Aún sin layout (p.ej. arranque): reintentar cuando cargue
+            RoutedEventHandler? once = null;
+            once = (_, _) => { _host.Loaded -= once; ShowPaused(path, at); };
+            _host.Loaded += once;
+            return;
+        }
+        if (!EnsurePlayer())
+            return;
+
+        if (path != _currentPath)
+        {
+            _currentPath = path;
+            try
+            {
+                _player!.SetProperty("loop-file", "no");
+                _player.SetProperty("pause", true);
+                _player.SetProperty("start", at > 0.05
+                    ? at.ToString("F3", CultureInfo.InvariantCulture) : "none");
+                _player.Command("loadfile", path);
+            }
+            catch (Exception) { return; }
+            _host.Visibility = Visibility.Visible;
+            _status.Text = System.IO.Path.GetFileName(path);
+        }
+        else
+        {
+            Scrub(at);
+        }
+    }
+
+    /// <summary>Salta (pausado) al segundo dado — fotograma de referencia.</summary>
+    public void Scrub(double seconds)
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return;
+        try
+        {
+            _player.SetProperty("pause", true);
+            _player.Command("seek",
+                Math.Max(0.0, seconds).ToString("F3", CultureInfo.InvariantCulture),
+                "absolute");
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>Aplica zoom/pan/rotación al visor (misma matemática que la salida).</summary>
+    public void SetGeometry(double zoom, double panX, double panY, long rotate, bool keepAspect)
+    {
+        if (_player is null)
+            return;
+        try
+        {
+            _player.SetProperty("keepaspect", keepAspect ? "yes" : "no");
+            _player.SetProperty("video-zoom", zoom);
+            _player.SetProperty("video-pan-x", panX);
+            _player.SetProperty("video-pan-y", panY);
+            _player.SetProperty("video-rotate", rotate);
+        }
+        catch (Exception) { }
+    }
+
     /// <summary>Re-sincroniza el monitor con el reloj real del motor (PGM).</summary>
     public void SyncClock(double elapsed)
     {

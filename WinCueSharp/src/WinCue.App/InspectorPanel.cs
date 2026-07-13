@@ -51,13 +51,46 @@ public sealed class InspectorPanel : ContentControl
         Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)),
     };
 
+    // Visor de edición (fotograma de referencia para trim y geometría)
+    private readonly LiveMonitorControl _editPreview =
+        new("EDICIÓN", Color.FromRgb(0xe8, 0xa2, 0x00));
+    private readonly StackPanel _previewHost = new()
+    {
+        Width = 280,
+        Margin = new Thickness(8, 4, 8, 8),
+        Visibility = Visibility.Collapsed,
+    };
+
     public InspectorPanel()
     {
+        _previewHost.Children.Add(_editPreview);
+        _previewHost.Children.Add(new TextBlock
+        {
+            Text = "Arrastra el trim para ver el fotograma de corte.\n" +
+                   "Los cambios de geometría se reflejan aquí.",
+            FontSize = 10,
+            Foreground = Brushes.Gray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 0),
+        });
+
+        var body = new DockPanel();
+        DockPanel.SetDock(_previewHost, Dock.Right);
+        body.Children.Add(_previewHost);
+        body.Children.Add(_tabs);
+
         var root = new DockPanel();
         DockPanel.SetDock(_header, Dock.Top);
         root.Children.Add(_header);
-        root.Children.Add(_tabs);
+        root.Children.Add(body);
         Content = root;
+
+        // Scrub del trim → fotograma de referencia en el visor
+        _wave.Scrubbing += seconds =>
+        {
+            if (_cue is { Type: CueType.Video })
+                _editPreview.Scrub(seconds);
+        };
 
         _tabs.Items.Add(Tab("Basics", BuildBasics()));
         _tabs.Items.Add(Tab("Triggers", BuildTriggers()));
@@ -89,10 +122,49 @@ public sealed class InspectorPanel : ContentControl
             foreach (var (el, visibleIf) in _conditional)
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
             UpdateWave(cue);
+            UpdateEditPreview(cue);
         }
         finally
         {
             _loading = false;
+        }
+    }
+
+    /// <summary>Visor de edición: solo para cues de VÍDEO con archivo.</summary>
+    private void UpdateEditPreview(Cue cue)
+    {
+        if (cue.Type == CueType.Video && cue.FilePath.Length > 0)
+        {
+            _previewHost.Visibility = Visibility.Visible;
+            _editPreview.ShowPaused(cue.FilePath, cue.TrimStart);
+            ApplyPreviewGeometry(cue);
+        }
+        else
+        {
+            _previewHost.Visibility = Visibility.Collapsed;
+            _editPreview.Clear();
+        }
+    }
+
+    /// <summary>Refleja la geometría del cue en el visor (misma matemática que
+    /// VideoEngine; el canvas de referencia es 1920×1080).</summary>
+    private void ApplyPreviewGeometry(Cue cue)
+    {
+        if (cue.GeoMode == GeoMode.Custom)
+        {
+            long rot = ((long)(Math.Round(cue.RotateZ / 90.0) * 90) % 360 + 360) % 360;
+            _editPreview.SetGeometry(
+                zoom: Math.Log2(Math.Max(0.01, cue.ScaleX)),
+                panX: cue.TranslateX / 960.0,
+                panY: -cue.TranslateY / 540.0,
+                rotate: rot,
+                keepAspect: true);
+        }
+        else
+        {
+            double baseZoom = Math.Abs(cue.Scale - 100.0) < 0.01
+                ? 0.0 : Math.Log2(Math.Max(1.0, cue.Scale) / 100.0);
+            _editPreview.SetGeometry(baseZoom, 0.0, 0.0, 0L, cue.PreserveAspect);
         }
     }
 
@@ -127,10 +199,27 @@ public sealed class InspectorPanel : ContentControl
 
         // Sincronía barra de trim ↔ campos numéricos / archivo
         if (key is "trim_start" or "trim_end")
+        {
             _wave.SetMarkers(_cue.TrimStart, _cue.TrimEnd);
+            if (_cue.Type == CueType.Video)
+                _editPreview.Scrub(key == "trim_start" ? _cue.TrimStart : _cue.TrimEnd);
+        }
         else if (key == "file_path")
+        {
             UpdateWave(_cue, force: true);
+            UpdateEditPreview(_cue);
+        }
+        else if (GeoPreviewKeys.Contains(key) && _cue.Type == CueType.Video)
+        {
+            ApplyPreviewGeometry(_cue);
+        }
     }
+
+    private static readonly HashSet<string> GeoPreviewKeys = new()
+    {
+        "geo_mode", "preserve_aspect", "scale", "translate_x", "translate_y",
+        "scale_x", "rotate_z",
+    };
 
     // ==================================================================
     // Pestañas
@@ -384,6 +473,9 @@ public sealed class InspectorPanel : ContentControl
 
     /// <summary>El botón de audición fue pulsado (la ventana llama al controlador).</summary>
     public event Action? AuditionRequested;
+
+    /// <summary>Libera el mpv del visor de edición (al cerrar la app).</summary>
+    public void ShutdownPreview() => _editPreview.Shutdown();
 
     private static string VolumeLabel(double v) =>
         v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB ({v * 100:0}%)";

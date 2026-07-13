@@ -40,6 +40,9 @@ public sealed class WaveformControl : FrameworkElement
     /// <summary>Manejadores soltados: (startS, endS).</summary>
     public event Action<double, double>? MarkersChanged;
 
+    /// <summary>Arrastre EN CURSO: segundos del manejador activo (para scrub).</summary>
+    public event Action<double>? Scrubbing;
+
     private float[]? _mins, _maxs;
     private double _duration;
     private double _start, _end;
@@ -334,6 +337,7 @@ public sealed class WaveformControl : FrameworkElement
             _start = Math.Min(sec, _end > 0 ? _end : _duration);
         else
             _end = Math.Max(sec, _start);
+        Scrubbing?.Invoke(_drag == "start" ? _start : _end);
         InvalidateVisual();
     }
 
