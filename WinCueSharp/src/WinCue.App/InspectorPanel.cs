@@ -35,6 +35,10 @@ public sealed class InspectorPanel : ContentControl
     private Func<IReadOnlyList<Cue>>? _allCues;   // para el combo de target
     private bool _loading;                        // suprime commits al poblar
 
+    // Barra de trim con forma de onda (Time & Loops)
+    private readonly WaveformControl _wave = new();
+    private string _waveLoadedPath = "";
+
     // Registro clave → escribir valor al control (para poblar al seleccionar)
     private readonly Dictionary<string, Action<Cue>> _loaders = new();
     // Filas con visibilidad condicionada por tipo de cue
@@ -84,11 +88,33 @@ public sealed class InspectorPanel : ContentControl
                 loader(cue);
             foreach (var (el, visibleIf) in _conditional)
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
+            UpdateWave(cue);
         }
         finally
         {
             _loading = false;
         }
+    }
+
+    /// <summary>Carga la barra de trim (decodifica solo si cambia el archivo).</summary>
+    private void UpdateWave(Cue cue, bool force = false)
+    {
+        if (!cue.IsMedia() || cue.FilePath.Length == 0)
+        {
+            _wave.Clear();
+            _waveLoadedPath = "";
+            return;
+        }
+        if (!force && cue.FilePath == _waveLoadedPath)
+        {
+            _wave.SetMarkers(cue.TrimStart, cue.TrimEnd);
+            return;
+        }
+        _waveLoadedPath = cue.FilePath;
+        if (cue.Type == CueType.Audio)
+            _wave.LoadAudio(cue.FilePath, cue.TrimStart, cue.TrimEnd);
+        else
+            _wave.LoadVideo(cue.FilePath, cue.TrimStart, cue.TrimEnd);
     }
 
     private void Commit(string key, object? value)
@@ -98,6 +124,12 @@ public sealed class InspectorPanel : ContentControl
         CommitField?.Invoke(_cue.Id, key, value);
         // Actualizar cabecera si cambió nombre/número (sin repoblar el resto)
         _header.Text = $"Cue {_cue.DisplayNumber} · {_cue.Type.ToString().ToUpperInvariant()} · {_cue.Name}";
+
+        // Sincronía barra de trim ↔ campos numéricos / archivo
+        if (key is "trim_start" or "trim_end")
+            _wave.SetMarkers(_cue.TrimStart, _cue.TrimEnd);
+        else if (key == "file_path")
+            UpdateWave(_cue, force: true);
     }
 
     // ==================================================================
@@ -217,9 +249,24 @@ public sealed class InspectorPanel : ContentControl
         Num(panel, "fade_out", "Fade out (s):", c => c.FadeOut);
 
         Header(panel, "RECORTE (TRIM)");
+        _wave.Margin = new Thickness(0, 4, 0, 6);
+        _wave.MarkersChanged += (start, end) =>
+        {
+            if (_cue is null) return;
+            Commit("trim_start", Math.Round(start, 3));
+            Commit("trim_end", Math.Round(end, 3));
+            // Reflejar en los campos numéricos sin re-commitear
+            _loading = true;
+            try
+            {
+                _loaders["trim_start"](_cue);
+                _loaders["trim_end"](_cue);
+            }
+            finally { _loading = false; }
+        };
+        panel.Children.Add(_wave);
         Num(panel, "trim_start", "Inicio (s dentro del archivo):", c => c.TrimStart);
         Num(panel, "trim_end", "Fin (s; 0 = hasta el final):", c => c.TrimEnd);
-        Note(panel, "La barra de forma de onda para el trim llega en una fase posterior.");
 
         return scroll;
     }
