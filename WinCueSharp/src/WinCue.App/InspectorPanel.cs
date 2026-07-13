@@ -215,9 +215,20 @@ public sealed class InspectorPanel : ContentControl
             UpdateWave(_cue, force: true);
             UpdateEditPreview(_cue);
         }
-        else if (GeoPreviewKeys.Contains(key) && _cue.Type == CueType.Video)
+        else if (GeoPreviewKeys.Contains(key))
         {
-            ApplyPreviewGeometry(_cue);
+            // Reflejar en visor, lienzo y controles (sin re-commitear)
+            if (_cue.Type == CueType.Video)
+                ApplyPreviewGeometry(_cue);
+            bool was = _loading;
+            _loading = true;
+            try
+            {
+                if (_loaders.TryGetValue(key, out var loader))
+                    loader(_cue);
+                SyncGeometryUi(_cue);
+            }
+            finally { _loading = was; }
         }
     }
 
@@ -225,7 +236,7 @@ public sealed class InspectorPanel : ContentControl
     {
         "geo_mode", "preserve_aspect", "scale", "translate_x", "translate_y",
         "scale_x", "rotate_z",
-    };
+    };   // los cambios de estas claves se reflejan en visor + lienzo + controles
 
     // ==================================================================
     // Pestañas
@@ -381,29 +392,208 @@ public sealed class InspectorPanel : ContentControl
         return scroll;
     }
 
+    // ── Pestaña Geometry: controles + lienzo interactivo ───────────────
+    private readonly GeometryCanvasControl _geoCanvas = new();
+    private StackPanel _fullPanel = null!;
+    private StackPanel _customPanel = null!;
+    private RadioButton _rbFull = null!;
+    private RadioButton _rbCustom = null!;
+    private readonly List<System.Windows.Controls.Primitives.ToggleButton> _rotButtons = new();
+
     private UIElement BuildGeometry()
     {
-        var (scroll, panel) = Page();
+        var root = new DockPanel();
 
-        Cmb(panel, "geo_mode", "Modo:", c => c.GeoMode.ToString(),
-            ("Full", "FULL — superficie completa"),
-            ("Custom", "CUSTOM — posición manual"));
-        var aspectRow = ChkRow(panel);
-        Chk(aspectRow, "preserve_aspect", "Mantener relación de aspecto (FULL)",
+        var controls = new StackPanel { Margin = new Thickness(10, 6, 14, 10), Width = 340 };
+        var scrollLeft = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = controls,
+        };
+        DockPanel.SetDock(scrollLeft, Dock.Left);
+        root.Children.Add(scrollLeft);
+
+        // El lienzo ocupa TODO el espacio restante de la pestaña
+        _geoCanvas.Margin = new Thickness(0, 6, 10, 10);
+        _geoCanvas.Translated += (tx, ty) =>
+        {
+            Commit("translate_x", tx);
+            Commit("translate_y", ty);
+        };
+        root.Children.Add(_geoCanvas);
+
+        Header(controls, "MODO");
+        _rbFull = new RadioButton
+        {
+            Content = "Superficie completa — llena el canvas",
+            GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+        };
+        _rbCustom = new RadioButton
+        {
+            Content = "Posición manual — escala, posición y giro",
+            GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+        };
+        _rbFull.Checked += (_, _) => OnGeoModeChanged(false);
+        _rbCustom.Checked += (_, _) => OnGeoModeChanged(true);
+        controls.Children.Add(_rbFull);
+        controls.Children.Add(_rbCustom);
+
+        // ── Panel FULL ──────────────────────────────────────────────────
+        _fullPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        controls.Children.Add(_fullPanel);
+        var aspectRow = ChkRow(_fullPanel);
+        Chk(aspectRow, "preserve_aspect", "Mantener relación de aspecto",
             c => c.PreserveAspect);
-        Num(panel, "scale", "Escala (%):", c => c.Scale);
+        SliderF(_fullPanel, "scale", "Escala (%):", 10, 400, c => c.Scale, "0");
 
-        Header(panel, "CUSTOM");
-        Num(panel, "translate_x", "Desplazar X (px):", c => c.TranslateX);
-        Num(panel, "translate_y", "Desplazar Y (px):", c => c.TranslateY);
-        Num(panel, "scale_x", "Escala (×):", c => c.ScaleX);
-        Num(panel, "rotate_z", "Rotación (°, se cuantiza a 90):", c => c.RotateZ);
+        // ── Panel CUSTOM ────────────────────────────────────────────────
+        _customPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        controls.Children.Add(_customPanel);
+        SliderF(_customPanel, "scale_x", "Escala (×):", 0.1, 4.0, c => c.ScaleX, "0.00");
+        SliderF(_customPanel, "translate_x", "Posición X (px):", -960, 960, c => c.TranslateX, "0");
+        SliderF(_customPanel, "translate_y", "Posición Y (px):", -540, 540, c => c.TranslateY, "0");
 
-        Header(panel, "COMPOSITOR (fase 3b)");
-        Txt(panel, "layer", "Layer (top/bottom/1..999):", c => c.Layer);
-        Num(panel, "opacity", "Opacidad (%):", c => c.Opacity);
+        var rotRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
+        rotRow.Children.Add(new TextBlock
+        {
+            Text = "Rotación:", Width = 112,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        foreach (int deg in new[] { 0, 90, 180, 270 })
+        {
+            var tb = new System.Windows.Controls.Primitives.ToggleButton
+            {
+                Content = $"{deg}°", Width = 46, Tag = deg,
+                Margin = new Thickness(0, 0, 4, 0),
+                Background = new SolidColorBrush(Color.FromRgb(0x3c, 0x3c, 0x3c)),
+                Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            };
+            tb.Click += (_, _) =>
+            {
+                if (_loading || _cue is null) return;
+                Commit("rotate_z", (double)deg);
+            };
+            _rotButtons.Add(tb);
+            rotRow.Children.Add(tb);
+        }
+        _customPanel.Children.Add(rotRow);
 
-        return scroll;
+        var btnRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var btnCenter = new Button { Content = "⌖ Centrar", Padding = new Thickness(10, 4, 10, 4) };
+        var btnReset = new Button
+        { Content = "↺ Restablecer", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
+        btnCenter.Click += (_, _) =>
+        {
+            Commit("translate_x", 0.0);
+            Commit("translate_y", 0.0);
+        };
+        btnReset.Click += (_, _) =>
+        {
+            Commit("scale_x", 1.0);
+            Commit("translate_x", 0.0);
+            Commit("translate_y", 0.0);
+            Commit("rotate_z", 0.0);
+        };
+        btnRow.Children.Add(btnCenter);
+        btnRow.Children.Add(btnReset);
+        _customPanel.Children.Add(btnRow);
+
+        Header(controls, "COMPOSITOR (fase 3b)");
+        Txt(controls, "layer", "Layer (top/bottom/1..999):", c => c.Layer);
+        Num(controls, "opacity", "Opacidad (%):", c => c.Opacity);
+
+        // Sincroniza radios/paneles/lienzo al cargar un cue
+        _loaders["__geo_sync"] = SyncGeometryUi;
+
+        return root;
+    }
+
+    private void OnGeoModeChanged(bool custom)
+    {
+        if (_loading || _cue is null)
+            return;
+        Commit("geo_mode", custom ? "CUSTOM" : "FULL");
+    }
+
+    /// <summary>Radios, visibilidad de paneles, botones de rotación y lienzo.</summary>
+    private void SyncGeometryUi(Cue c)
+    {
+        bool wasLoading = _loading;
+        _loading = true;
+        try
+        {
+            bool custom = c.GeoMode == GeoMode.Custom;
+            _rbFull.IsChecked = !custom;
+            _rbCustom.IsChecked = custom;
+            _fullPanel.Visibility = custom ? Visibility.Collapsed : Visibility.Visible;
+            _customPanel.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
+
+            long rot = (((long)(Math.Round(c.RotateZ / 90.0) * 90)) % 360 + 360) % 360;
+            foreach (var tb in _rotButtons)
+                tb.IsChecked = (int)tb.Tag == rot;
+
+            _geoCanvas.SetValues(custom, c.Scale, c.PreserveAspect,
+                c.ScaleX, c.TranslateX, c.TranslateY, rot);
+        }
+        finally
+        {
+            _loading = wasLoading;
+        }
+    }
+
+    /// <summary>Slider + caja numérica sincronizados; commit EN VIVO al deslizar.</summary>
+    private void SliderF(StackPanel panel, string key, string label,
+                         double min, double max, Func<Cue, double> read, string fmt)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
+        row.Children.Add(new TextBlock
+        {
+            Text = label, Width = 112,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        var slider = new Slider
+        {
+            Minimum = min, Maximum = max, Width = 140,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var box = MakeTextBox(52);
+        box.Margin = new Thickness(6, 0, 0, 0);
+
+        slider.ValueChanged += (_, e) =>
+        {
+            if (_loading) return;
+            box.Text = e.NewValue.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
+            Commit(key, e.NewValue);
+        };
+        WireTextCommit(box, key, () =>
+        {
+            if (!double.TryParse(box.Text.Replace(',', '.'),
+                    System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double v))
+                return null;
+            v = Math.Clamp(v, min, max);
+            bool was = _loading;
+            _loading = true;
+            try { slider.Value = v; } finally { _loading = was; }
+            return v;
+        });
+
+        row.Children.Add(slider);
+        row.Children.Add(box);
+        panel.Children.Add(row);
+        _loaders[key] = c =>
+        {
+            double v = read(c);
+            slider.Value = Math.Clamp(v, min, max);
+            box.Text = v.ToString(fmt, System.Globalization.CultureInfo.InvariantCulture);
+        };
     }
 
     private UIElement BuildLevels()

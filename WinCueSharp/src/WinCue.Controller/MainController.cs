@@ -1029,12 +1029,20 @@ public class MainController
     // UNDO / REDO — snapshots JSON del modelo
     // ==================================================================
 
+    private long _lastUndoPushTicks;
+
     private void PushUndo()
     {
+        _redoStack.Clear();
+        // Coalescencia de ráfagas: un slider o un arrastre commitean decenas de
+        // veces por segundo — solo la PRIMERA instantánea del gesto va al undo.
+        if (_lastUndoPushTicks != 0 &&
+            Stopwatch.GetElapsedTime(_lastUndoPushTicks).TotalMilliseconds < 800)
+            return;
+        _lastUndoPushTicks = Stopwatch.GetTimestamp();
         _undoStack.Add((_model.ToJson(), _playhead));
         if (_undoStack.Count > MaxUndo)
             _undoStack.RemoveAt(0);
-        _redoStack.Clear();
     }
 
     public bool CanUndo => _undoStack.Count > 0;
