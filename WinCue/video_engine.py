@@ -53,11 +53,12 @@
 
 from __future__ import annotations
 
+import math
 import time
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import QObject, QSize, QThread, Qt, Signal
+from PySide6.QtCore import QObject, QSize, QThread, QTimer, Qt, Signal
 from PySide6.QtGui import QColor, QPainter, QResizeEvent
 from PySide6.QtWidgets import QSizePolicy, QWidget
 
@@ -81,11 +82,16 @@ _MPV_NOT_FOUND_MSG: str = (
     "El resto del sistema (AUDIO, WAIT, SCRIPT) sigue operativo."
 )
 
-# Formatos de vídeo soportados (extensiones en minúsculas)
+# Formatos de imagen (mpv los muestra como fotogramas fijos)
+IMAGE_FORMATS: frozenset[str] = frozenset({
+    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp",
+})
+
+# Formatos de vídeo soportados (extensiones en minúsculas) + imágenes
 SUPPORTED_FORMATS: frozenset[str] = frozenset({
     ".mp4", ".mov", ".avi", ".mkv", ".webm",
     ".prores", ".mxf", ".m4v", ".ts", ".mts",
-})
+}) | IMAGE_FORMATS
 
 # Intentos de salida de vídeo en orden de prioridad
 _VO_FALLBACKS: tuple[str, ...] = ("gpu", "gpu-next", "null")
@@ -278,6 +284,18 @@ class VideoEngine(QObject):
         # cue_id → (QThread, _FileVerifierWorker) en vuelo
         self._loaders: dict[int, tuple[QThread, _FileVerifierWorker]] = {}
 
+        # cue_id → parámetros de reproducción (volume 0..1, loop) pendientes
+        self._play_params: dict[int, dict] = {}
+
+        # cue_id → volumen actual (0..1) para gestionar fades
+        self._volumes: dict[int, float] = {}
+
+        # cue_id → (QTimer, dict de estado) de un fade de volumen en curso
+        self._fade_timers: dict[int, tuple[QTimer, dict]] = {}
+
+        # Volumen master global (multiplicador sobre el volumen de cada player)
+        self._master: float = 1.0
+
     # ------------------------------------------------------------------
     # API pública — llamar SOLO desde el main thread
     # ------------------------------------------------------------------
@@ -315,7 +333,27 @@ class VideoEngine(QObject):
         print(f"[VIDEO] get_state() cue_id={cue_id} → {state}")
         return state
 
-    def play(self, cue_id: int, file_path: str) -> None:
+    def set_container(self, container: "VideoContainer") -> None:
+        """Cambia el contenedor de renderizado (p.ej. ventana de salida en otro
+        monitor). Solo afecta a los vídeos que se inicien a partir de ahora."""
+        if container is not None and container is not self._container:
+            print(f"[VIDEO] set_container → nuevo HWND objetivo", flush=True)
+            self._container = container
+
+    def play(
+        self,
+        cue_id: int,
+        file_path: str,
+        volume: float = 1.0,
+        loop: bool = False,
+        scale: float = 100.0,
+        trim_start: float = 0.0,
+        trim_end: float = 0.0,
+        rate: float = 1.0,
+        play_count: int = 1,
+        preserve_pitch: bool = True,
+        geometry: dict = None,
+    ) -> None:
         """Reproduce el cue. Autosuficiente: gestiona verificación interna si hace falta.
 
         Flujo por estado:
@@ -326,6 +364,19 @@ class VideoEngine(QObject):
                             re-verifica el archivo y reproduce al terminar
         """
         import traceback as _tb
+
+        # Guardar parámetros de reproducción para _start_playback
+        self._play_params[cue_id] = {
+            "volume":     max(0.0, min(1.0, float(volume))),
+            "loop":       bool(loop),
+            "scale":      max(1.0, float(scale)),
+            "trim_start": max(0.0, float(trim_start)),
+            "trim_end":   max(0.0, float(trim_end)),
+            "rate":       max(0.1, float(rate)),
+            "play_count": max(1, int(play_count)),
+            "preserve_pitch": bool(preserve_pitch),
+            "geometry":   geometry or {},
+        }
 
         try:
             state = self._states.get(cue_id, "IDLE")
@@ -396,21 +447,17 @@ class VideoEngine(QObject):
             f"  known_players={list(self._players.keys())}",
             flush=True,
         )
-        player = self._players.get(cue_id)
-        print(f"[VIDEO] stop() player_found={player is not None}", flush=True)
-        if player is not None:
-            try:
-                print(
-                    f"[VIDEO] stop() → llamando command('stop') sobre player"
-                    f" de cue_id={cue_id}",
-                    flush=True,
-                )
-                player.command("stop")   # type: ignore[union-attr]
-                # No cerrar el player — keep-open=yes mantiene el último frame
-            except Exception as exc:
-                print(f"[VIDEO] stop() command('stop') falló: {exc}", flush=True)
+        self._cancel_fade(cue_id)
+        had_player = cue_id in self._players
+        # TERMINAR el player (no solo command('stop')): con keep-open el último
+        # frame quedaba congelado y superpuesto al siguiente vídeo. Al terminar
+        # el player y limpiar el contenedor a negro, la salida queda limpia y
+        # se garantiza un único vídeo activo por contenedor.
+        self._terminate_player(cue_id)
+        if had_player:
+            self._container.clear()   # pinta negro
         self._set_state(cue_id, "STOPPED")
-        print(f"[VIDEO] stop() OK cue_id={cue_id}", flush=True)
+        print(f"[VIDEO] stop() OK cue_id={cue_id} (player terminado, negro)", flush=True)
 
     def preload_next(self, cue_id: int, file_path: str) -> None:
         """Pre-verifica el siguiente cue mientras el actual está en PLAYING.
@@ -425,6 +472,174 @@ class VideoEngine(QObject):
     def list_supported_formats() -> list[str]:
         """Devuelve las extensiones de vídeo soportadas."""
         return sorted(SUPPORTED_FORMATS)
+
+    # ------------------------------------------------------------------
+    # Volumen / fade / pausa / stop — control estilo QLab
+    # ------------------------------------------------------------------
+
+    def is_playing(self, cue_id: int) -> bool:
+        return self._states.get(cue_id) == "PLAYING" and cue_id in self._players
+
+    def get_duration(self, cue_id: int) -> float:
+        """Duración total del vídeo en segundos (0 si mpv aún no la conoce)."""
+        player = self._players.get(cue_id)
+        if player is None:
+            return 0.0
+        try:
+            d = player.duration            # type: ignore[union-attr]
+            return float(d) if d else 0.0
+        except Exception:
+            return 0.0
+
+    def get_elapsed(self, cue_id: int) -> float:
+        """Segundos reproducidos del vídeo (time-pos de mpv)."""
+        player = self._players.get(cue_id)
+        if player is None:
+            return 0.0
+        try:
+            t = player.time_pos            # type: ignore[union-attr]
+            return float(t) if t else 0.0
+        except Exception:
+            return 0.0
+
+    def any_playing(self) -> bool:
+        return any(s == "PLAYING" for s in self._states.values())
+
+    def apply_geometry(self, cue_id: int, geo: dict) -> None:
+        """Aplica la geometría a un vídeo EN REPRODUCCIÓN (en vivo)."""
+        player = self._players.get(cue_id)
+        if player is not None:
+            self._apply_geo(player, geo)
+
+    def _apply_geo(self, player, geo: dict) -> None:
+        """Fija en mpv la parte factible de Display & Geometry."""
+        try:
+            mode = geo.get("mode", "FULL")
+            if mode == "CUSTOM":
+                sx = float(geo.get("scale_x", 1.0))
+                half_w = max(1.0, float(geo.get("surf_w", 1920)) / 2.0)
+                half_h = max(1.0, float(geo.get("surf_h", 1080)) / 2.0)
+                player["keepaspect"] = "yes"                    # type: ignore[index]
+                player["video-zoom"] = math.log2(max(0.01, sx)) # type: ignore[index]
+                player["video-pan-x"] = float(geo.get("translate_x", 0.0)) / half_w   # type: ignore[index]
+                player["video-pan-y"] = -float(geo.get("translate_y", 0.0)) / half_h  # type: ignore[index]
+                player["video-rotate"] = int(round(float(geo.get("rotate_z", 0.0)) / 90.0) * 90) % 360  # type: ignore[index]
+            else:  # FULL surface
+                player["keepaspect"] = "yes" if geo.get("preserve_aspect", True) else "no"  # type: ignore[index]
+                player["video-zoom"] = 0.0                      # type: ignore[index]
+                player["video-pan-x"] = 0.0                     # type: ignore[index]
+                player["video-pan-y"] = 0.0                     # type: ignore[index]
+                player["video-rotate"] = 0                      # type: ignore[index]
+        except Exception as exc:
+            print(f"[VIDEO] _apply_geo error: {exc}", flush=True)
+
+    def set_master_volume(self, volume: float) -> None:
+        """Volumen master global (0..1); reajusta todos los players activos."""
+        self._master = max(0.0, min(1.0, float(volume)))
+        for cue_id, player in self._players.items():
+            try:
+                player.volume = self._volumes.get(cue_id, 1.0) * 100.0 * self._master  # type: ignore[union-attr]
+            except Exception:
+                pass
+
+    def set_volume(self, cue_id: int, volume: float) -> None:
+        """Fija el volumen (0..1) de un vídeo en reproducción, si existe."""
+        v = max(0.0, min(1.0, float(volume)))
+        self._volumes[cue_id] = v
+        player = self._players.get(cue_id)
+        if player is not None:
+            try:
+                player.volume = v * 100.0 * self._master   # type: ignore[union-attr]
+            except Exception:
+                pass
+
+    def fade_volume(
+        self,
+        cue_id: int,
+        target: float,
+        duration: float,
+        stop_after: bool = False,
+    ) -> bool:
+        """Funde el volumen del vídeo hacia `target` (0..1) en `duration` s.
+
+        Implementado con un QTimer que actualiza la propiedad `volume` de mpv.
+        Devuelve True si el cue estaba en reproducción.
+        """
+        if cue_id not in self._players:
+            return False
+
+        self._cancel_fade(cue_id)
+
+        target = max(0.0, min(1.0, float(target)))
+        start = self._volumes.get(cue_id, 1.0)
+
+        if duration <= 0.0:
+            self.set_volume(cue_id, target)
+            if stop_after:
+                self.stop(cue_id)
+            return True
+
+        interval_ms = 30
+        steps = max(1, int((duration * 1000) / interval_ms))
+        state = {"i": 0, "steps": steps, "start": start, "target": target,
+                 "stop_after": stop_after}
+
+        timer = QTimer(self)
+        timer.setInterval(interval_ms)
+
+        def _step() -> None:
+            state["i"] += 1
+            frac = min(1.0, state["i"] / state["steps"])
+            vol = state["start"] + (state["target"] - state["start"]) * frac
+            self.set_volume(cue_id, vol)
+            if state["i"] >= state["steps"]:
+                self._cancel_fade(cue_id)
+                if state["stop_after"]:
+                    self.stop(cue_id)
+
+        timer.timeout.connect(_step)
+        self._fade_timers[cue_id] = (timer, state)
+        timer.start()
+        return True
+
+    def _cancel_fade(self, cue_id: int) -> None:
+        entry = self._fade_timers.pop(cue_id, None)
+        if entry is not None:
+            timer, _ = entry
+            timer.stop()
+            timer.deleteLater()
+
+    def pause_all(self) -> None:
+        """Pausa todos los vídeos en reproducción."""
+        for player in self._players.values():
+            try:
+                player.pause = True   # type: ignore[union-attr]
+            except Exception:
+                pass
+
+    def resume_all(self) -> None:
+        """Reanuda todos los vídeos pausados."""
+        for cue_id, player in self._players.items():
+            if self._states.get(cue_id) == "PLAYING":
+                try:
+                    player.pause = False   # type: ignore[union-attr]
+                except Exception:
+                    pass
+
+    def stop_all(self) -> None:
+        """Detiene todos los vídeos en reproducción."""
+        for cue_id in list(self._players.keys()):
+            if self._states.get(cue_id) == "PLAYING":
+                self.stop(cue_id)
+
+    def cleanup(self) -> None:
+        """Termina todos los players y loaders (al salir de la aplicación)."""
+        for cue_id in list(self._fade_timers.keys()):
+            self._cancel_fade(cue_id)
+        for cue_id in list(self._players.keys()):
+            self._terminate_player(cue_id)
+        for cue_id in list(self._loaders.keys()):
+            self._cleanup_verifier(cue_id)
 
     # ------------------------------------------------------------------
     # Lanzamiento y limpieza de verificadores
@@ -509,6 +724,15 @@ class VideoEngine(QObject):
                 "Asegúrate de que el widget es visible.",
             )
             return
+
+        # ── Salida única: terminar CUALQUIER otro player ────────────────
+        # Un solo contenedor de vídeo = un solo mpv activo. Si quedara otro
+        # player (p.ej. congelado), terminarlo evita la superposición de dos
+        # vídeos sobre el mismo HWND.
+        for other_id in list(self._players.keys()):
+            if other_id != cue_id:
+                print(f"[VIDEO] salida única → terminando player huérfano cue_id={other_id}", flush=True)
+                self._terminate_player(other_id)
 
         # ── Cerrar player anterior de este cue si existía ───────────────
         self._terminate_player(cue_id)
@@ -607,6 +831,49 @@ class VideoEngine(QObject):
                     pass
 
         player.observe_property("time-pos", _on_time_pos)    # type: ignore[union-attr]
+
+        # ── Aplicar volumen, loop, escala, trim e imagen del cue ─────────
+        params = self._play_params.get(cue_id, {})
+        vol = float(params.get("volume", 1.0))
+        loop = bool(params.get("loop", False))
+        scale = float(params.get("scale", 100.0))
+        trim_start = float(params.get("trim_start", 0.0))
+        trim_end = float(params.get("trim_end", 0.0))
+        rate = float(params.get("rate", 1.0))
+        play_count = int(params.get("play_count", 1))
+        preserve_pitch = bool(params.get("preserve_pitch", True))
+        is_image = Path(file_path).suffix.lower() in IMAGE_FORMATS
+        self._volumes[cue_id] = vol
+        try:
+            player.volume = max(0.0, min(100.0, vol * 100.0)) * self._master   # type: ignore[union-attr]
+            # Loop infinito, o play_count repeticiones, o una sola vez
+            if loop:
+                player["loop-file"] = "inf"                     # type: ignore[index]
+            elif play_count > 1:
+                player["loop-file"] = play_count - 1            # type: ignore[index]
+            else:
+                player["loop-file"] = "no"                      # type: ignore[index]
+            # Velocidad + corrección de tono
+            if abs(rate - 1.0) > 0.001:
+                player["speed"] = rate                          # type: ignore[index]
+            player["audio-pitch-correction"] = preserve_pitch   # type: ignore[index]
+            # Escala: mpv video-zoom es log2 (0 = nativo, 1 = 2×, -1 = ½×)
+            if abs(scale - 100.0) > 0.01:
+                player["video-zoom"] = math.log2(max(1.0, scale) / 100.0)  # type: ignore[index]
+            # Recorte (in/out) dentro del archivo
+            if trim_start > 0.0:
+                player["start"] = trim_start                    # type: ignore[index]
+            if trim_end > 0.0:
+                player["end"] = trim_end                        # type: ignore[index]
+            # Imagen fija: mantenerla en pantalla hasta que se pare/cambie
+            if is_image:
+                player["image-display-duration"] = "inf"        # type: ignore[index]
+
+        except Exception as exc:
+            print(f"[VIDEO] no se pudo fijar volume/loop/scale/trim: {exc}", flush=True)
+
+        # ── Display & Geometry (se aplica también en vivo) ───────────────
+        self._apply_geo(player, params.get("geometry") or {})
 
         # ── Iniciar reproducción — T0 justo antes de play() ─────────────
         self._players[cue_id] = player

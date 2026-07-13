@@ -36,6 +36,11 @@ DEFAULTS: dict[str, Any] = {
     "video_default_volume":     100,
     "video_loop_default":       False,
     "video_fade_frames":        0,      # frames de fade in/out
+    # Superficie / canvas: dimensiones del lienzo sobre el que se posiciona el
+    # vídeo. 0×0 = usar la resolución de la pantalla de salida.
+    "surface_preset":           "screen",   # "screen" | "custom" | "WxH"
+    "surface_width":            0,
+    "surface_height":           0,
 
     # ── Red / Control externo ────────────────────────────────────────────────
     "osc_enabled":      False,
@@ -47,6 +52,14 @@ DEFAULTS: dict[str, Any] = {
     "midi_device_name": "",
     "midi_go_note":     60,             # nota MIDI para GO
     "midi_stop_note":   61,             # nota MIDI para STOP
+
+    # ── Comportamiento de GO ─────────────────────────────────────────────────
+    # "concurrent" — estilo QLab: los audios se solapan; el vídeo es exclusivo
+    #                (disparar un vídeo corta el vídeo anterior — una sola salida).
+    # "sequential" — cada GO de un media detiene los demás media (un cue a la vez).
+    # "per_cue"    — se solapa por defecto, pero cada cue con la casilla
+    #                "detener los demás al empezar" corta el resto al dispararse.
+    "go_mode":              "concurrent",
 
     # ── Interfaz ─────────────────────────────────────────────────────────────
     "show_latency_column":  True,

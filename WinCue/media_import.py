@@ -41,10 +41,14 @@ AUDIO_FORMATS: frozenset[str] = frozenset({
     ".ogg", ".mp3", ".aac", ".m4a", ".opus",
 })
 
+IMAGE_FORMATS: frozenset[str] = frozenset({
+    ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".tif", ".tiff", ".webp",
+})
+
 VIDEO_FORMATS: frozenset[str] = frozenset({
     ".mp4", ".mov", ".avi", ".mkv",
     ".webm", ".prores", ".mxf",
-})
+}) | IMAGE_FORMATS   # las imágenes se tratan como cues de VÍDEO (mpv las muestra)
 
 ALL_FORMATS: frozenset[str] = AUDIO_FORMATS | VIDEO_FORMATS
 

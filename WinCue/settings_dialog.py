@@ -524,8 +524,71 @@ class SettingsDialog(QDialog):
         p_lo.addRow("Volumen por defecto vídeo:", spin_vol)
 
         form.addWidget(grp_pb)
+
+        # ── Sección: Superficie / Canvas ───────────────────────────────
+        grp_surf = QGroupBox("SUPERFICIE (CANVAS)")
+        sf_lo = QFormLayout(grp_surf)
+        sf_lo.setSpacing(6)
+
+        combo_surf = QComboBox()
+        combo_surf.addItem("Igual que la pantalla de salida", ("screen", 0, 0))
+        for label, w_, h_ in (
+            ("3840 × 2160  (4K UHD)", 3840, 2160),
+            ("2560 × 1440  (QHD)", 2560, 1440),
+            ("1920 × 1080  (Full HD)", 1920, 1080),
+            ("1680 × 1050  (WSXGA+)", 1680, 1050),
+            ("1600 × 900", 1600, 900),
+            ("1440 × 900  (WXGA+)", 1440, 900),
+            ("1366 × 768", 1366, 768),
+            ("1280 × 1024  (SXGA)", 1280, 1024),
+            ("1280 × 720  (HD)", 1280, 720),
+            ("1024 × 768  (XGA)", 1024, 768),
+            ("800 × 600  (SVGA)", 800, 600),
+        ):
+            combo_surf.addItem(label, (f"{w_}x{h_}", w_, h_))
+        combo_surf.addItem("Personalizado…", ("custom", 0, 0))
+        self._widgets["surface_preset"] = combo_surf
+        sf_lo.addRow("Resolución:", combo_surf)
+
+        dim_row = QHBoxLayout(); dim_row.setSpacing(6)
+        spin_sw = QSpinBox(); spin_sw.setRange(1, 16384); spin_sw.setFixedWidth(80)
+        spin_sh = QSpinBox(); spin_sh.setRange(1, 16384); spin_sh.setFixedWidth(80)
+        self._widgets["surface_width"] = spin_sw
+        self._widgets["surface_height"] = spin_sh
+        dim_row.addWidget(spin_sw); dim_row.addWidget(QLabel("×")); dim_row.addWidget(spin_sh)
+        dim_row.addWidget(QLabel("px")); dim_row.addStretch()
+        dim_c = QWidget(); dim_c.setLayout(dim_row)
+        sf_lo.addRow("Dimensiones:", dim_c)
+
+        combo_surf.currentIndexChanged.connect(self._on_surface_preset)
+        form.addWidget(grp_surf)
+
         form.addStretch()
         return scroll
+
+    def _collect_surface(self) -> dict:
+        combo: QComboBox = self._widgets["surface_preset"]  # type: ignore[assignment]
+        key, w_, h_ = combo.currentData() or ("screen", 0, 0)
+        if key == "screen":
+            sw_val, sh_val = 0, 0
+        elif key == "custom":
+            sw_val, sh_val = self._spin_get("surface_width"), self._spin_get("surface_height")
+        else:
+            sw_val, sh_val = w_, h_
+        return {"surface_preset": key, "surface_width": sw_val, "surface_height": sh_val}
+
+    def _on_surface_preset(self, _idx: int) -> None:
+        combo: QComboBox = self._widgets["surface_preset"]  # type: ignore[assignment]
+        data = combo.currentData() or ("screen", 0, 0)
+        key, w_, h_ = data
+        sw: QSpinBox = self._widgets["surface_width"]   # type: ignore[assignment]
+        sh: QSpinBox = self._widgets["surface_height"]  # type: ignore[assignment]
+        custom = (key == "custom")
+        sw.setEnabled(custom); sh.setEnabled(custom)
+        if key not in ("screen", "custom"):
+            sw.setValue(w_); sh.setValue(h_)
+        elif key == "screen":
+            sw.setValue(1920); sh.setValue(1080)
 
     def _on_preview_video_output(self) -> None:
         """Muestra una ventana negra de test en la pantalla elegida durante 3 s."""
@@ -723,6 +786,31 @@ class SettingsDialog(QDialog):
         form = QVBoxLayout(scroll.widget())
         form.setSpacing(10)
 
+        # ── Comportamiento de GO ───────────────────────────────────────
+        grp_go = QGroupBox("COMPORTAMIENTO DE GO")
+        go_lo = QFormLayout(grp_go)
+        go_lo.setSpacing(6)
+
+        combo_go = QComboBox()
+        # (texto visible, clave interna)
+        combo_go.addItem("Concurrente (QLab): audios se solapan, vídeo exclusivo", "concurrent")
+        combo_go.addItem("Secuencial: cada GO corta los demás media", "sequential")
+        combo_go.addItem("Por cue: solapa salvo casilla «detener los demás»", "per_cue")
+        self._widgets["go_mode"] = combo_go
+        go_lo.addRow("Al pulsar GO:", combo_go)
+
+        lbl_go_help = QLabel(
+            "Concurrente = como QLab (una música sigue mientras lanzas un efecto; "
+            "un vídeo nuevo corta el anterior porque hay una sola salida).\n"
+            "Secuencial = un cue de audio/vídeo a la vez.\n"
+            "Por cue = tú decides en cada cue (casilla en sus propiedades)."
+        )
+        lbl_go_help.setStyleSheet("color: #888888; font-size: 10px;")
+        lbl_go_help.setWordWrap(True)
+        go_lo.addRow("", lbl_go_help)
+
+        form.addWidget(grp_go)
+
         grp_ui = QGroupBox("VISTA")
         u_lo = QFormLayout(grp_ui)
         u_lo.setSpacing(6)
@@ -870,6 +958,20 @@ class SettingsDialog(QDialog):
         self._chk_set("video_loop_default", sm.get("video_loop_default", False))
         self._spin_set("video_fade_frames", sm.get("video_fade_frames", 0))
 
+        # Superficie / canvas
+        surf_preset = sm.get("surface_preset", "screen")
+        combo_surf: QComboBox = self._widgets["surface_preset"]  # type: ignore[assignment]
+        target = 0
+        for i in range(combo_surf.count()):
+            d = combo_surf.itemData(i)
+            if d and d[0] == surf_preset:
+                target = i
+                break
+        combo_surf.setCurrentIndex(target)
+        self._spin_set("surface_width", sm.get("surface_width", 0) or 1920)
+        self._spin_set("surface_height", sm.get("surface_height", 0) or 1080)
+        self._on_surface_preset(target)
+
         # Red — OSC
         osc_on = sm.get("osc_enabled", False)
         self._chk_set("osc_enabled", osc_on)
@@ -893,6 +995,11 @@ class SettingsDialog(QDialog):
             self._spin_set("midi_go_note", sm.get("midi_go_note", 60))
             self._spin_set("midi_stop_note", sm.get("midi_stop_note", 61))
             self._on_midi_enabled_changed(midi_on)   # sincronizar enable/disable inicial
+
+        # Interfaz — comportamiento de GO
+        combo_go: QComboBox = self._widgets["go_mode"]  # type: ignore[assignment]
+        gi = combo_go.findData(sm.get("go_mode", "concurrent"))
+        combo_go.setCurrentIndex(gi if gi >= 0 else 0)
 
         # Interfaz
         self._chk_set("show_latency_column", sm.get("show_latency_column", True))
@@ -949,6 +1056,7 @@ class SettingsDialog(QDialog):
             "video_default_volume":    self._spin_get("video_default_volume"),
             "video_loop_default":      self._chk_get("video_loop_default"),
             "video_fade_frames":       self._spin_get("video_fade_frames"),
+            **self._collect_surface(),
             # Red — OSC
             "osc_enabled":      self._chk_get("osc_enabled"),
             "osc_listen_port":  self._spin_get("osc_listen_port"),
@@ -964,6 +1072,7 @@ class SettingsDialog(QDialog):
             "midi_go_note":   self._spin_get("midi_go_note")   if _MIDO_AVAILABLE else self._sm.get("midi_go_note",   60),
             "midi_stop_note": self._spin_get("midi_stop_note") if _MIDO_AVAILABLE else self._sm.get("midi_stop_note", 61),
             # Interfaz
+            "go_mode": self._widgets["go_mode"].currentData() or "concurrent",  # type: ignore[union-attr]
             "show_latency_column": self._chk_get("show_latency_column"),
             "show_next_cue_label": self._chk_get("show_next_cue_label"),
             "confirm_last_cue":    self._chk_get("confirm_last_cue"),

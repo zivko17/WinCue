@@ -51,7 +51,9 @@ from PySide6.QtGui import (
 )
 from PySide6.QtWidgets import (
     QAbstractItemView,
+    QApplication,
     QFileDialog,
+    QFrame,
     QHBoxLayout,
     QHeaderView,
     QLabel,
@@ -60,14 +62,18 @@ from PySide6.QtWidgets import (
     QMessageBox,
     QPushButton,
     QSizePolicy,
+    QSlider,
     QSplitter,
+    QStackedLayout,
     QTableView,
     QVBoxLayout,
     QWidget,
 )
 
 from cue_edit_dialog import CueEditDialog
-from cue_model import STATE_COLORS, Cue, CueModel
+from inspector_panel import InspectorPanel
+from monitor_widget import MonitorWidget
+from cue_model import CUE_COLORS, STATE_COLORS, Cue, CueModel
 from media_import import ALL_FORMATS, MediaImporter
 from settings_dialog import SettingsDialog
 from video_engine import VideoContainer  # Paso 3
@@ -98,8 +104,8 @@ _MEDIA_EXTS: frozenset[str] = ALL_FORMATS
 
 # Estilos del countdown según zona (cambia solo al cruzar umbral, no cada tick)
 _CD_STYLE = (
-    "QLabel {{ color: {color}; font-size: 20pt; font-weight: bold; "
-    "background-color: #0d0d0d; border-radius: 3px; "
+    "QLabel {{ color: {color}; font-size: 30pt; font-weight: bold; "
+    "background-color: #0d0d0d; border: 1px solid #222; border-radius: 5px; "
     f'font-family: "{FONT_MONO}", monospace; }}}}'
 )
 _CD_IDLE_STYLE  = _CD_STYLE.format(color="#3a3a3a")
@@ -109,19 +115,36 @@ _CD_RED_STYLE   = _CD_STYLE.format(color="#e74c3c")
 
 # Teclas por defecto (sobrescritas por keybindings.json si existe)
 _DEFAULT_KB: dict[str, str] = {
-    "go":   "Space",
-    "stop": "S",
-    "prev": "Left",
-    "save": "Ctrl+S",
-    "load": "Ctrl+O",
+    "go":    "Space",
+    "stop":  "S",
+    "panic": "Esc",
+    "pause": "P",
+    "prev":  "Up",
+    "next":  "Down",
+    "save":  "Ctrl+S",
+    "load":  "Ctrl+O",
 }
 
-# Anchos de columna (px)
+# Columnas de la tabla (estilo QLab: número, tipo, nombre, temporización, estado)
+COL_NUM, COL_TYPE, COL_NAME, COL_PRE, COL_DUR, COL_POST, COL_CONT, COL_TARGET, COL_STATE = range(9)
+COL_HEADERS = ["#", "TIPO", "NOMBRE", "PRE", "ACCIÓN", "POST", "CONT", "→", "ESTADO"]
 COL_WIDTHS: dict[int, int] = {
-    0: 50, 1: 80, 2: 260, 3: 100, 4: 110, 5: 120,
+    COL_NUM: 46, COL_TYPE: 66, COL_NAME: 240, COL_PRE: 56, COL_DUR: 70,
+    COL_POST: 56, COL_CONT: 44, COL_TARGET: 44, COL_STATE: 88,
 }
-COL_HEADERS = ["#", "TIPO", "NOMBRE", "DURACIÓN", "ESTADO", "LATENCIA ms"]
-COL_ID, COL_TYPE, COL_NAME, COL_DUR, COL_STATE, COL_LAT = range(6)
+
+# Símbolos del modo de continuación en la columna CONT
+_CONT_SYMBOL: dict[str, str] = {
+    "NONE": "", "AUTO_CONTINUE": "▸", "AUTO_FOLLOW": "↳",
+}
+
+# Etiqueta corta del modo de un grupo (mostrada junto al nombre)
+_GROUP_MODE_TAG: dict[str, str] = {
+    "TIMELINE": "todos a la vez",
+    "ENTER":    "entrar",
+    "GO_NEXT":  "1º + salir",
+    "RANDOM":   "azar",
+}
 
 
 # ---------------------------------------------------------------------------
@@ -137,12 +160,15 @@ class CueTableView(QTableView):
     """
 
     file_assigned:  Signal = Signal(int, str)   # (row, absolute_filepath)
+    files_dropped:  Signal = Signal(int, list)  # (target_row, list[path]) — crear cues
     status_message: Signal = Signal(str, int)   # (message, timeout_ms)
     cue_removed:    Signal = Signal(list)        # list[int] filas a borrar
     cue_moved:      Signal = Signal(int, int)    # (from_row, to_row)
+    collapse_clicked: Signal = Signal(int)       # clic en el triángulo ▼/▶ de un grupo
 
     def __init__(self, parent=None) -> None:
         super().__init__(parent)
+        self.edit_enabled = True          # False en modo Show: bloquea edición
         self.setAcceptDrops(True)
         self.setDragEnabled(True)
         # DragDrop permite tanto drag interno (reordenar) como drop externo
@@ -154,6 +180,8 @@ class CueTableView(QTableView):
 
     def keyPressEvent(self, event) -> None:
         if event.key() == Qt.Key.Key_Delete:
+            if not self.edit_enabled:
+                return   # modo Show: no borrar cues
             indexes = self.selectedIndexes()
             if not indexes:
                 super().keyPressEvent(event)
@@ -169,6 +197,19 @@ class CueTableView(QTableView):
                 self.cue_removed.emit(rows)
         else:
             super().keyPressEvent(event)
+
+    # ── Clic en el triángulo de colapso de un grupo ──────────────────────
+
+    def mousePressEvent(self, event) -> None:
+        idx = self.indexAt(event.position().toPoint())
+        if idx.isValid() and idx.column() == COL_NUM:
+            mdl = self.model()
+            item = mdl.item(idx.row(), COL_NUM) if mdl is not None else None
+            if item is not None and bool(item.data(Qt.ItemDataRole.UserRole)):
+                # Es la celda de número de un GROUP → alternar colapso
+                self.collapse_clicked.emit(idx.row())
+                return
+        super().mousePressEvent(event)
 
     # ── Eventos de arrastre ───────────────────────────────────────────────
 
@@ -200,10 +241,24 @@ class CueTableView(QTableView):
         else:
             self._handle_external_drop(event)
 
+    def _index_at_drop(self, event: QDropEvent) -> QModelIndex:
+        """Fila bajo el cursor al soltar.
+
+        `indexAt()` espera coordenadas del viewport; si `event.position()` viene
+        en coordenadas de la vista (incluye el header), el crudo da inválido y
+        el archivo acababa en el primer cue libre ("cualquier cue"). Probamos el
+        crudo y, si falla, lo remapeamos al viewport.
+        """
+        pos = event.position().toPoint()
+        idx = self.indexAt(pos)
+        if not idx.isValid():
+            idx = self.indexAt(self.viewport().mapFrom(self, pos))
+        return idx
+
     def _handle_internal_drop(self, event: QDropEvent) -> None:
         """Reordenado de filas: drag desde la misma tabla."""
         source_row = self.currentIndex().row()
-        target_idx = self.indexAt(event.position().toPoint())
+        target_idx = self._index_at_drop(event)
         target_row = (
             target_idx.row() if target_idx.isValid()
             else (self.model().rowCount() - 1 if self.model() else 0)
@@ -215,14 +270,14 @@ class CueTableView(QTableView):
         event.acceptProposedAction()
 
     def _handle_external_drop(self, event: QDropEvent) -> None:
-        """Asignación de archivos desde el explorador."""
+        """Suelta archivos desde el explorador → crea un cue nuevo por archivo
+        (tipado según el medio), insertándolos donde se suelta (estilo QLab)."""
         self._set_drop_bg(COLOR_BG)
         mime = event.mimeData()
         if not mime.hasUrls():
             event.ignore()
             return
 
-        # Validar todos los archivos arrastrados
         valid_paths: list[str] = []
         for url in mime.urls():
             if url.isLocalFile():
@@ -234,59 +289,10 @@ class CueTableView(QTableView):
             event.ignore()
             return
 
-        # Determinar fila objetivo
-        idx = self.indexAt(event.position().toPoint())
-        target_row = idx.row() if idx.isValid() else -1
-
-        if target_row == -1:
-            target_row = self._first_free_row()
-            if target_row == -1:
-                QMessageBox.warning(
-                    self,
-                    "Sin cues disponibles",
-                    "No hay cues sin archivo asignado.\n"
-                    "Arrastre el archivo directamente sobre una fila para reemplazarlo.",
-                )
-                event.ignore()
-                return
-
-        total_rows = self.model().rowCount() if self.model() else 0
-        rows_affected: list[int] = []
-
-        for i, path in enumerate(valid_paths):
-            row = target_row + i
-            if row >= total_rows:
-                break
-
-            if len(valid_paths) == 1:
-                existing = self.model().item(row, COL_NAME)
-                has_existing = bool(
-                    existing and existing.data(Qt.ItemDataRole.UserRole)
-                )
-                if has_existing:
-                    cue_id_item = self.model().item(row, COL_ID)
-                    cue_id = cue_id_item.text() if cue_id_item else str(row + 1)
-                    reply = QMessageBox.question(
-                        self,
-                        "Reemplazar archivo",
-                        f"El cue #{cue_id} ya tiene un archivo asignado.\n¿Desea reemplazarlo?",
-                        QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No,
-                    )
-                    if reply != QMessageBox.StandardButton.Yes:
-                        event.ignore()
-                        return
-
-            self.file_assigned.emit(row, path)
-            rows_affected.append(row + 1)
-
-        if rows_affected:
-            if len(rows_affected) == 1:
-                msg = f"Archivo asignado al cue {rows_affected[0]}."
-            else:
-                nums = ", ".join(str(r) for r in rows_affected)
-                msg = f"{len(rows_affected)} archivos asignados a cues {nums}."
-            self.status_message.emit(msg, 4000)
-
+        # Insertar justo debajo de la fila sobre la que se suelta; -1 = al final.
+        idx = self._index_at_drop(event)
+        target_row = idx.row() + 1 if idx.isValid() else -1
+        self.files_dropped.emit(target_row, valid_paths)
         event.acceptProposedAction()
 
     # ── Helpers ──────────────────────────────────────────────────────────
@@ -322,10 +328,20 @@ class CueTableView(QTableView):
 class MainWindow(QMainWindow):
     """Ventana principal. Construye la UI y expone señales para el controlador."""
 
-    # ── Señales existentes ────────────────────────────────────────────────
-    go_pressed:          Signal = Signal()
-    stop_pressed:        Signal = Signal()
-    stress_test_pressed: Signal = Signal()
+    # ── Transporte ────────────────────────────────────────────────────────
+    go_pressed:      Signal = Signal()
+    stop_pressed:    Signal = Signal()   # Stop All (Esc / S)
+    panic_pressed:   Signal = Signal()   # fade-out global + parada
+    pause_pressed:   Signal = Signal()   # pausa/reanuda
+    next_pressed:    Signal = Signal()   # mover playhead abajo
+    playhead_set:    Signal = Signal(int)  # fijar playhead a una fila (clic)
+    stop_cue:        Signal = Signal(int)  # detener el cue de una fila concreta
+    cue_insert_requested: Signal = Signal(str, int)  # (tipo, fila destino)
+    master_volume_changed: Signal = Signal(int)   # volumen master 0-100 (modo Show)
+    group_requested:  Signal = Signal(list)  # agrupar las filas seleccionadas
+    ungroup_requested: Signal = Signal(int)  # deshacer el grupo de una fila
+    collapse_toggled:  Signal = Signal(int)  # contraer/expandir un grupo
+    hotkey_triggered:  Signal = Signal(int)  # disparar un cue por su hotkey (cue_id)
 
     # ── Paso 4: guardar / cargar / editar ─────────────────────────────────
     cue_edit_committed: Signal = Signal(int, dict)  # (row_index, fields)
@@ -338,13 +354,20 @@ class MainWindow(QMainWindow):
 
     # ── Añadir cue nuevo ─────────────────────────────────────────────────
     cue_add_requested: Signal = Signal(str)  # (cue_type)
+    # Soltar archivos → crear cues nuevos (target_row, list[path]); -1 = al final
+    cues_from_files_requested: Signal = Signal(int, list)
 
     def __init__(self, model: CueModel) -> None:
         super().__init__()
         self._model:        CueModel           = model
         self._qt_model:     QStandardItemModel = QStandardItemModel()
-        self._active_index: int = 0
-        self._prev_active:  int = -1
+        self._playhead:     int = 0            # índice del cue standby (GO lo dispara)
+        self._running_rows: set[int] = set()   # filas con cues en ejecución
+        self._syncing_sel:  bool = False       # evita bucle selección↔playhead
+        self._hotkeys:      list = []          # QShortcuts de hotkeys por cue
+        self._output_window = None             # ventana de salida a otro monitor
+        self._output_content: str = "NEGRO"    # qué hay ahora en la salida
+        self._show_mode:    bool = False       # False = Edit, True = Show (bloqueado)
 
         # Buffer para acumular dígitos de salto de cue (ej: "1","5" → 15)
         self._key_buffer:   str    = ""
@@ -389,9 +412,9 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def _setup_window(self) -> None:
-        self.setWindowTitle("CUE CONTROLLER v0.1 — OFFLINE")
+        self.setWindowTitle("WinCue — reproductor de cues (estilo QLab)")
         self.setMinimumSize(1024, 600)
-        self.resize(1280, 720)
+        self.resize(1320, 760)
 
     def _apply_global_stylesheet(self) -> None:
         self.setStyleSheet(f"""
@@ -445,6 +468,19 @@ class MainWindow(QMainWindow):
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
         root.addWidget(self._build_top_bar())
+
+        # Inspector acoplado BAJO LA LISTA de cues (columna derecha). Toggle Ctrl+I.
+        self._root_layout = root
+        self._inspector = InspectorPanel()
+        self._inspector.setMinimumHeight(150)
+        self._inspector.changed.connect(self._on_inspector_changed)
+        self._inspector.goto_target.connect(
+            lambda cid: self.playhead_set.emit(self._model.index_of_id(cid)))
+        self._inspector.popout_requested.connect(self.toggle_inspector_popout)
+        self._inspector_popped = False
+
+        # Splitter horizontal: izquierda (transporte, altura completa) | derecha
+        # (lista de cues + inspector debajo).
         root.addWidget(self._build_splitter(), stretch=1)
 
     # ------------------------------------------------------------------
@@ -453,112 +489,129 @@ class MainWindow(QMainWindow):
 
     def _build_top_bar(self) -> QWidget:
         bar = QWidget()
-        bar.setFixedHeight(36)
+        bar.setFixedHeight(40)
         bar.setStyleSheet(
             f"background-color: #111111; border-bottom: 1px solid {COLOR_BORDER};"
         )
         lo = QHBoxLayout(bar)
-        lo.setContentsMargins(12, 0, 12, 0)
+        lo.setContentsMargins(10, 0, 12, 0)
         lo.setSpacing(6)
 
-        lbl = QLabel("CUE LIST")
-        lbl.setStyleSheet(
+        # ── Toggle EDIT / SHOW (izquierda) ────────────────────────────────
+        self._btn_edit = QPushButton("EDIT")
+        self._btn_show = QPushButton("SHOW")
+        for b in (self._btn_edit, self._btn_show):
+            b.setCheckable(True)
+            b.setFixedSize(58, 26)
+            b.setStyleSheet("""
+                QPushButton { background:#222; color:#888; font-size:10px;
+                    font-weight:bold; letter-spacing:1px; border:1px solid #333; }
+                QPushButton:checked { background:#e8a200; color:#000; border-color:#e8a200; }
+            """)
+        self._btn_edit.setChecked(True)
+        self._btn_edit.clicked.connect(lambda: self.set_mode(False))
+        self._btn_show.clicked.connect(lambda: self.set_mode(True))
+        lo.addWidget(self._btn_edit)
+        lo.addWidget(self._btn_show)
+        lo.addSpacing(14)
+
+        self._lbl_title = QLabel("CUE LIST")
+        self._lbl_title.setStyleSheet(
             f"color: {COLOR_ACCENT}; font-size: 11px; font-weight: bold; letter-spacing: 2px;"
         )
-        lo.addWidget(lbl)
+        lo.addWidget(self._lbl_title)
         lo.addStretch()
 
-        self._btn_save = QPushButton("GUARDAR")
-        self._btn_save.setFixedSize(78, 24)
-        self._btn_save.setToolTip("Guardar la cue list en JSON  (Ctrl+S)")
-        self._btn_save.setStyleSheet("""
-            QPushButton {
-                background-color: #1a3a1a; color: #81c784;
-                font-size: 10px; letter-spacing: 1px; border-radius: 3px;
-            }
-            QPushButton:hover   { background-color: #254a25; color: #a5d6a7; }
-            QPushButton:pressed { background-color: #1a2a1a; }
-        """)
-        self._btn_save.clicked.connect(self.save_requested)
-        lo.addWidget(self._btn_save)
+        # ── Volumen master (siempre visible; único control en modo Show) ──
+        mlbl = QLabel("MASTER")
+        mlbl.setStyleSheet("color:#888; font-size:9px; font-weight:bold; letter-spacing:1px;")
+        lo.addWidget(mlbl)
+        self._master_slider = QSlider(Qt.Orientation.Horizontal)
+        self._master_slider.setRange(0, 100)
+        self._master_slider.setValue(100)
+        self._master_slider.setFixedWidth(130)
+        self._master_slider.setToolTip("Volumen general de toda la reproducción")
+        self._master_slider.setStyleSheet(
+            "QSlider::groove:horizontal{height:5px;background:#333;border-radius:2px;}"
+            "QSlider::handle:horizontal{width:14px;background:#e8a200;border-radius:3px;margin:-5px 0;}"
+            "QSlider::sub-page:horizontal{background:#e8a200;border-radius:2px;}")
+        self._lbl_master_val = QLabel("100%")
+        self._lbl_master_val.setStyleSheet("color:#e0e0e0; font-size:10px; min-width:34px;")
+        self._master_slider.valueChanged.connect(self._on_master_slider)
+        lo.addWidget(self._master_slider)
+        lo.addWidget(self._lbl_master_val)
+        lo.addSpacing(10)
 
-        self._btn_load = QPushButton("ABRIR")
-        self._btn_load.setFixedSize(64, 24)
-        self._btn_load.setToolTip("Cargar cue list desde JSON  (Ctrl+O)")
-        self._btn_load.setStyleSheet("""
-            QPushButton {
-                background-color: #1a2a3a; color: #64b5f6;
-                font-size: 10px; letter-spacing: 1px; border-radius: 3px;
-            }
-            QPushButton:hover   { background-color: #253a4a; color: #90caf9; }
-            QPushButton:pressed { background-color: #1a2030; }
-        """)
-        self._btn_load.clicked.connect(self.load_requested)
-        lo.addWidget(self._btn_load)
+        # ── Grupo de edición (oculto en modo Show) ────────────────────────
+        def _sep():
+            s = QLabel(); s.setFixedSize(1, 22)
+            s.setStyleSheet("background:#333;")
+            return s
 
-        self._btn_stress = QPushButton("STRESS TEST")
-        self._btn_stress.setFixedSize(120, 24)
-        self._btn_stress.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLOR_STRESS}; color: #aaaaaa;
-                font-size: 10px; letter-spacing: 1px; border-radius: 3px;
-            }}
-            QPushButton:hover {{ background-color: #555555; color: #ffffff; }}
-            QPushButton[active="true"] {{ background-color: #e8a200; color: #000000; }}
-        """)
-        self._btn_stress.clicked.connect(self.stress_test_pressed)
-        lo.addWidget(self._btn_stress)
-
-        self._btn_add_cue = QPushButton("＋ CUE")
-        self._btn_add_cue.setFixedHeight(24)
-        self._btn_add_cue.setStyleSheet("""
-            QPushButton {
-                background: #2a2a2a; color: #e8a200;
-                border: 1px solid #e8a200;
-                border-radius: 3px;
-                padding: 0 12px;
-                font-size: 10px; font-weight: bold;
-            }
-            QPushButton:hover   { background: #3a3a00; }
-            QPushButton:pressed { background: #1a1a00; }
-        """)
+        self._btn_save = self._topbtn("GUARDAR", "#1a3a1a", "#81c784", 78,
+                                      "Guardar la cue list (Ctrl+S)", self.save_requested)
+        self._btn_load = self._topbtn("ABRIR", "#1a2a3a", "#64b5f6", 64,
+                                      "Cargar cue list (Ctrl+O)", self.load_requested)
+        self._btn_add_cue = self._topbtn("＋ CUE", "#2a2a2a", "#e8a200", 74,
+                                         "Añadir cue", None)
         self._btn_add_cue.clicked.connect(self._on_add_cue_clicked)
-        lo.addWidget(self._btn_add_cue)
-
-        self._btn_media = QPushButton("📁 MEDIA")
-        self._btn_media.setFixedSize(88, 24)
-        self._btn_media.setToolTip("Importar archivos de media a cues libres")
-        self._btn_media.setStyleSheet("""
-            QPushButton {
-                background-color: #1a2a3a; color: #80b0d0;
-                font-size: 10px; letter-spacing: 1px; border-radius: 3px;
-                border: 1px solid #2a4050;
-            }
-            QPushButton:hover   { background-color: #253545; color: #a0c8e8; }
-            QPushButton:pressed { background-color: #152030; }
-        """)
+        self._btn_media = self._topbtn("📁 MEDIA", "#1a2a3a", "#80b0d0", 88,
+                                       "Importar media", None)
         self._btn_media.clicked.connect(self._on_import_media)
-        lo.addWidget(self._btn_media)
-
-        self._btn_settings = QPushButton("⚙ SETTINGS")
-        self._btn_settings.setFixedSize(96, 24)
-        self._btn_settings.setToolTip("Abrir configuración")
-        self._btn_settings.setStyleSheet("""
-            QPushButton {
-                background-color: #1a1a2a; color: #9090c0;
-                font-size: 10px; letter-spacing: 1px; border-radius: 3px;
-                border: 1px solid #333355;
-            }
-            QPushButton:hover   { background-color: #252535; color: #b0b0e0; }
-            QPushButton:pressed { background-color: #111120; }
-        """)
+        self._btn_settings = self._topbtn("⚙ SETTINGS", "#1a1a2a", "#9090c0", 96,
+                                          "Configuración", None)
         self._btn_settings.clicked.connect(self._open_settings)
-        lo.addWidget(self._btn_settings)
+
+        s1, s2 = _sep(), _sep()
+        self._edit_widgets = [self._btn_save, self._btn_load, s1,
+                              self._btn_add_cue, self._btn_media, s2, self._btn_settings]
+        for wdg in self._edit_widgets:
+            lo.addWidget(wdg)
 
         return bar
 
+    def _topbtn(self, text, bg, fg, width, tip, signal):
+        b = QPushButton(text)
+        b.setFixedSize(width, 26)
+        b.setToolTip(tip)
+        b.setStyleSheet(f"""
+            QPushButton {{ background-color:{bg}; color:{fg}; font-size:10px;
+                letter-spacing:1px; border-radius:3px; border:1px solid #2a2a2a; }}
+            QPushButton:hover {{ border-color:{fg}; }}
+        """)
+        if signal is not None:
+            b.clicked.connect(signal)
+        return b
+
+    def _on_master_slider(self, v: int) -> None:
+        self._lbl_master_val.setText(f"{v}%")
+        self.master_volume_changed.emit(v)
+
+    # ------------------------------------------------------------------
+    # Modo Edit / Show
+    # ------------------------------------------------------------------
+
+    def set_mode(self, show: bool) -> None:
+        """Alterna entre modo edición (todo) y modo show (mínimo, bloqueado)."""
+        self._show_mode = show
+        self._btn_edit.setChecked(not show)
+        self._btn_show.setChecked(show)
+        self._lbl_title.setText("▶ SHOW" if show else "CUE LIST")
+        # Ocultar botones de edición y el inspector en modo Show
+        for wdg in self._edit_widgets:
+            wdg.setVisible(not show)
+        if not self._inspector_popped:
+            self._inspector.setVisible(not show)
+        # Bloquear edición de la lista
+        self._table_view.edit_enabled = not show
+        self._table_view.setDragEnabled(not show)
+        self._table_view.setAcceptDrops(not show)
+        self.flash_status("MODO SHOW — edición bloqueada (solo reproducción)"
+                          if show else "MODO EDIT")
+
     def _open_settings(self) -> None:
         dlg = SettingsDialog(self)
+        dlg.settings_saved.connect(self.refresh_video_output)
         dlg.exec()
 
     def _on_add_cue_clicked(self) -> None:
@@ -623,15 +676,14 @@ class MainWindow(QMainWindow):
         for row in sorted(rows, reverse=True):
             self._model.remove_cue(row)
             self._qt_model.removeRow(row)
-        # Ajustar índice activo
+        # Ajustar playhead
         count = self._model.count()
+        self._running_rows.clear()
         if count == 0:
-            self._active_index = 0
-            self._prev_active = -1
+            self._playhead = 0
+            self._update_playhead_labels()
         else:
-            self._active_index = min(self._active_index, count - 1)
-            self._prev_active = self._active_index
-            self.highlight_active_row(self._active_index)
+            self.set_playhead(min(self._playhead, count - 1))
 
     def _on_cue_moved(self, from_row: int, to_row: int) -> None:
         """Reordena el modelo de datos y reconstruye la tabla Qt."""
@@ -644,117 +696,211 @@ class MainWindow(QMainWindow):
 
     def _build_splitter(self) -> QSplitter:
         splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.setHandleWidth(0)
+        splitter.setHandleWidth(4)
         splitter.setChildrenCollapsible(False)
         splitter.addWidget(self._build_left_column())
         splitter.addWidget(self._build_right_column())
-        splitter.setStretchFactor(0, 35)
-        splitter.setStretchFactor(1, 65)
-        splitter.setSizes([448, 832])
+        splitter.setStretchFactor(0, 0)
+        splitter.setStretchFactor(1, 1)
+        splitter.setSizes([400, 900])
         return splitter
 
     def _build_left_column(self) -> QWidget:
-        """Columna izquierda: video + VU + countdown + GO + STOP + etiquetas."""
+        """Columna izquierda organizada en tarjetas: monitor, transporte, cues."""
         col = QWidget()
         col.setObjectName("leftPanel")
-        col.setMinimumWidth(340)
+        col.setMinimumWidth(376)
+        col.setMaximumWidth(420)
         col.setStyleSheet(f"#leftPanel {{ background-color: {COLOR_LEFT_BG}; }}")
 
         lo = QVBoxLayout(col)
-        lo.setContentsMargins(10, 10, 10, 10)
-        lo.setSpacing(6)
-        lo.setAlignment(Qt.AlignmentFlag.AlignTop)
+        lo.setContentsMargins(12, 12, 12, 12)
+        lo.setSpacing(10)
 
-        # ── VideoContainer ───────────────────────────────────────────────
+        def _card(title):
+            frame = QFrame()
+            frame.setObjectName("card")
+            frame.setStyleSheet(
+                "QFrame#card{background:#141414; border:1px solid #2a2a2a; border-radius:8px;}")
+            v = QVBoxLayout(frame)
+            v.setContentsMargins(12, 10, 12, 12)
+            v.setSpacing(9)
+            if title:
+                h = QLabel(title)
+                h.setStyleSheet("color:#e8a200; font-size:10px; font-weight:bold; "
+                                "letter-spacing:2px; background:transparent; border:none;")
+                v.addWidget(h)
+            return frame, v
+
+        # ══ TARJETA: MONITOR ══════════════════════════════════════════════
+        card_mon, cm = _card("MONITOR DE SALIDA")
+
+        # Conmutador PROGRAMA / PREVIEW
+        self._monitor_toggle = QWidget()
+        mt = QHBoxLayout(self._monitor_toggle)
+        mt.setContentsMargins(0, 0, 0, 0); mt.setSpacing(6)
+        self._btn_pgm = QPushButton("● PROGRAMA")
+        self._btn_pvw = QPushButton("■ PREVIEW")
+        for b in (self._btn_pgm, self._btn_pvw):
+            b.setCheckable(True); b.setFixedHeight(28)
+            b.setStyleSheet("""
+                QPushButton { background:#1a1a1a; color:#999; font-size:11px;
+                    font-weight:bold; letter-spacing:1px; border:1px solid #2a2a2a; border-radius:4px; }
+                QPushButton#pgm:checked { background:#7a1010; color:#fff; border-color:#a03030; }
+                QPushButton#pvw:checked { background:#106a3a; color:#fff; border-color:#2a9a5a; }
+            """)
+        self._btn_pgm.setObjectName("pgm"); self._btn_pvw.setObjectName("pvw")
+        self._btn_pvw.setChecked(True)
+        self._monitor_mode = "PVW"
+        self._btn_pgm.clicked.connect(lambda: self._set_monitor_mode("PGM"))
+        self._btn_pvw.clicked.connect(lambda: self._set_monitor_mode("PVW"))
+        mt.addWidget(self._btn_pgm); mt.addWidget(self._btn_pvw)
+        cm.addWidget(self._monitor_toggle)
+
+        # Monitor (mpv local o miniatura PGM/PVW)
+        mon_holder = QWidget(); mon_holder.setFixedSize(320, 180)
+        self._monitor_stack = QStackedLayout(mon_holder)
+        self._monitor_stack.setContentsMargins(0, 0, 0, 0)
         self._video_container = VideoContainer()
         self._video_container.setFixedSize(320, 180)
-        lo.addWidget(self._video_container)
+        self._monitor = MonitorWidget()
+        self._monitor_stack.addWidget(self._video_container)
+        self._monitor_stack.addWidget(self._monitor)
+        self._monitor_stack.setCurrentWidget(self._video_container)
+        self._monitor.set_badge("PVW", "#2ecc71")
+        cm.addWidget(mon_holder, 0, Qt.AlignmentFlag.AlignHCenter)
 
-        # ── VU meter ────────────────────────────────────────────────────
-        # Debajo del video para confirmar visualmente que el audio sale.
+        # Testigo de salida
+        self._lbl_output_status = QLabel("○ Salida: ventana local")
+        self._lbl_output_status.setStyleSheet(
+            "color:#888; font-size:11px; background:#0d0d0d; "
+            "border:1px solid #222; border-radius:4px; padding:4px 8px;")
+        cm.addWidget(self._lbl_output_status)
+
+        # VU meter
         self._vu_meter = VuMeter()
-        lo.addWidget(self._vu_meter)
+        cm.addWidget(self._vu_meter, 0, Qt.AlignmentFlag.AlignHCenter)
+        lo.addWidget(card_mon)
 
-        # ── Countdown ───────────────────────────────────────────────────
-        # Muestra el tiempo restante del cue activo. Verde → ámbar → rojo.
+        # ══ TARJETA: TRANSPORTE ═══════════════════════════════════════════
+        card_tr, ct = _card("TRANSPORTE")
+
         self._lbl_countdown = QLabel("—")
-        self._lbl_countdown.setFixedSize(320, 38)
+        self._lbl_countdown.setFixedHeight(58)
         self._lbl_countdown.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._lbl_countdown.setStyleSheet(_CD_IDLE_STYLE)
-        lo.addWidget(self._lbl_countdown)
+        ct.addWidget(self._lbl_countdown)
 
-        # ── GO ──────────────────────────────────────────────────────────
         self._btn_go = QPushButton("▶  GO")
-        self._btn_go.setFixedSize(320, 52)
+        self._btn_go.setFixedHeight(66)
         self._btn_go.setStyleSheet(f"""
             QPushButton {{
                 background-color: {COLOR_GO}; color: #ffffff;
-                font-size: 16pt; font-weight: bold;
-                border: none; border-radius: 4px;
+                font-size: 22pt; font-weight: bold; border: none; border-radius: 6px;
             }}
             QPushButton:hover   {{ background-color: #27ae60; }}
             QPushButton:pressed {{ background-color: #1e8449; }}
         """)
         self._btn_go.clicked.connect(self.go_pressed)
-        lo.addWidget(self._btn_go)
+        ct.addWidget(self._btn_go)
 
-        # ── STOP ─────────────────────────────────────────────────────────
-        self._btn_stop = QPushButton("■  STOP")
-        self._btn_stop.setFixedSize(320, 34)
+        transport = QWidget()
+        tlo = QHBoxLayout(transport)
+        tlo.setContentsMargins(0, 0, 0, 0); tlo.setSpacing(8)
+
+        self._btn_stop = QPushButton("■\nSTOP ALL")
+        self._btn_stop.setFixedHeight(50)
         self._btn_stop.setStyleSheet(f"""
-            QPushButton {{
-                background-color: {COLOR_STOP}; color: #ffffff;
-                font-size: 11pt; font-weight: bold;
-                border: none; border-radius: 4px;
-            }}
+            QPushButton {{ background-color: {COLOR_STOP}; color: #ffffff;
+                font-size: 11pt; font-weight: bold; border: none; border-radius: 6px; }}
             QPushButton:hover   {{ background-color: #c0392b; }}
             QPushButton:pressed {{ background-color: #922b21; }}
         """)
+        self._btn_stop.setToolTip("Detener todos los cues  (S)")
         self._btn_stop.clicked.connect(self.stop_pressed)
-        lo.addWidget(self._btn_stop)
+        tlo.addWidget(self._btn_stop, stretch=3)
 
-        # ── Cue activo ───────────────────────────────────────────────────
-        self._lbl_active_cue = QLabel("Cue activo: —")
-        self._lbl_active_cue.setStyleSheet(
-            f"color: {COLOR_TEXT}; font-size: 11px; "
-            "background-color: transparent; padding: 3px 2px 1px 2px;"
-        )
+        self._btn_panic = QPushButton("⚠\nPANIC")
+        self._btn_panic.setFixedHeight(50)
+        self._btn_panic.setToolTip("PANIC: fundido global y parada  (Esc)")
+        self._btn_panic.setStyleSheet("""
+            QPushButton { background-color: #7a1f10; color: #ffb199;
+                font-size: 11pt; font-weight: bold; border: none; border-radius: 6px; }
+            QPushButton:hover   { background-color: #9a2a15; color: #ffffff; }
+            QPushButton:pressed { background-color: #5a160b; }
+        """)
+        self._btn_panic.clicked.connect(self.panic_pressed)
+        tlo.addWidget(self._btn_panic, stretch=2)
+
+        self._btn_pause = QPushButton("❚❚\nPAUSE")
+        self._btn_pause.setFixedHeight(50)
+        self._btn_pause.setToolTip("Pausar / reanudar  (P)")
+        self._btn_pause.setStyleSheet("""
+            QPushButton { background-color: #333355; color: #c0c0e8;
+                font-size: 11pt; font-weight: bold; border: none; border-radius: 6px; }
+            QPushButton:hover   { background-color: #40406a; color: #ffffff; }
+            QPushButton[paused="true"] { background-color: #e8a200; color: #000000; }
+        """)
+        self._btn_pause.clicked.connect(self.pause_pressed)
+        tlo.addWidget(self._btn_pause, stretch=3)
+        ct.addWidget(transport)
+        lo.addWidget(card_tr)
+
+        # ══ TARJETA: STANDBY / SIGUIENTE ══════════════════════════════════
+        card_sb, cs = _card("SIGUIENTE (STANDBY)")
+        self._lbl_active_cue = QLabel("STANDBY → —")
         self._lbl_active_cue.setWordWrap(True)
-        lo.addWidget(self._lbl_active_cue)
-
-        # ── Siguiente cue ────────────────────────────────────────────────
+        self._lbl_active_cue.setStyleSheet(
+            "color:#ffffff; font-size:14px; font-weight:bold; "
+            "background:#1c1400; border:1px solid #3a2e00; border-radius:4px; padding:6px 8px;")
+        cs.addWidget(self._lbl_active_cue)
         self._lbl_next_cue = QLabel("NEXT → —")
-        self._lbl_next_cue.setStyleSheet(
-            "background-color: #1a1200; color: #e8a200; "
-            "font-size: 11px; padding: 4px 6px;"
-        )
         self._lbl_next_cue.setWordWrap(True)
-        lo.addWidget(self._lbl_next_cue)
+        self._lbl_next_cue.setStyleSheet(
+            "color:#e8a200; font-size:12px; background:transparent; padding:2px 4px;")
+        cs.addWidget(self._lbl_next_cue)
+        lo.addWidget(card_sb)
 
-        # ── Teclas activas (mini-leyenda) ────────────────────────────────
-        # Se actualiza en _setup_shortcuts con las teclas reales cargadas.
+        # ══ TARJETA: EN EJECUCIÓN (crece con el espacio) ══════════════════
+        card_ex, ce = _card("EN EJECUCIÓN")
+        self._lbl_active_panel = QLabel(
+            "<span style='color:#555'>— sin cues en ejecución —</span>")
+        self._lbl_active_panel.setWordWrap(True)
+        self._lbl_active_panel.setTextFormat(Qt.TextFormat.RichText)
+        self._lbl_active_panel.setAlignment(
+            Qt.AlignmentFlag.AlignTop | Qt.AlignmentFlag.AlignLeft)
+        self._lbl_active_panel.setStyleSheet(
+            "background-color:#0d0d0d; border:1px solid #222; border-radius:4px; "
+            "font-size:12px; padding:8px 10px;")
+        self._lbl_active_panel.setSizePolicy(
+            QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        ce.addWidget(self._lbl_active_panel, stretch=1)
+        lo.addWidget(card_ex, stretch=1)
+
+        # Leyenda de teclas (pie)
         self._lbl_keys = QLabel("")
-        self._lbl_keys.setStyleSheet(
-            "color: #444444; font-size: 9px; padding: 2px 2px;"
-        )
+        self._lbl_keys.setStyleSheet("color:#555; font-size:10px; padding:2px;")
         lo.addWidget(self._lbl_keys)
 
         # Estado del sistema — invisible, mantiene update_status_bar() API
         self._lbl_sys_state = QLabel("")
         self._lbl_sys_state.setVisible(False)
         lo.addWidget(self._lbl_sys_state)
-
-        lo.addStretch()
         return col
 
     def _build_right_column(self) -> QWidget:
-        col = QWidget()
-        lo = QVBoxLayout(col)
-        lo.setContentsMargins(0, 0, 0, 0)
-        lo.setSpacing(0)
+        # Divisor vertical arrastrable: lista de cues arriba, inspector debajo.
         self._table_view = self._build_table()
-        lo.addWidget(self._table_view)
-        return col
+        vs = QSplitter(Qt.Orientation.Vertical)
+        vs.setChildrenCollapsible(False)
+        vs.setHandleWidth(4)
+        vs.addWidget(self._table_view)
+        vs.addWidget(self._inspector)
+        vs.setStretchFactor(0, 1)
+        vs.setStretchFactor(1, 0)
+        vs.setSizes([620, 320])
+        self._vsplit = vs
+        return vs
 
     # ------------------------------------------------------------------
     # Tabla de cues
@@ -765,7 +911,7 @@ class MainWindow(QMainWindow):
         view.setModel(self._qt_model)
         view.setAlternatingRowColors(True)
         view.setSelectionBehavior(QTableView.SelectionBehavior.SelectRows)
-        view.setSelectionMode(QTableView.SelectionMode.SingleSelection)
+        view.setSelectionMode(QTableView.SelectionMode.ExtendedSelection)
         view.setEditTriggers(QTableView.EditTrigger.NoEditTriggers)
         view.setShowGrid(True)
         view.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
@@ -783,15 +929,86 @@ class MainWindow(QMainWindow):
             view.setColumnWidth(col, w)
 
         view.doubleClicked.connect(self._on_row_double_clicked)
+        # La selección de la tabla ES el playhead (navegación con flechas incluida)
+        view.selectionModel().currentRowChanged.connect(self._on_selection_changed)
         view.file_assigned.connect(
             lambda row, path: self.cue_edit_committed.emit(row, {"file_path": path})
         )
+        view.files_dropped.connect(self.cues_from_files_requested)
         view.status_message.connect(
             lambda msg, ms: self.statusBar().showMessage(msg, ms)
         )
         view.cue_removed.connect(self._on_cues_removed)
         view.cue_moved.connect(self._on_cue_moved)
+
+        view.collapse_clicked.connect(self.collapse_toggled)
+        view.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        view.customContextMenuRequested.connect(self._show_cue_menu)
         return view
+
+    def _selected_rows(self) -> list:
+        """Filas seleccionadas actualmente (ordenadas)."""
+        sel = self._table_view.selectionModel()
+        if sel is None:
+            return []
+        return sorted({i.row() for i in sel.selectedRows()})
+
+    def _show_cue_menu(self, pos) -> None:
+        """Menú contextual estilo QLab sobre la fila bajo el cursor."""
+        index = self._table_view.indexAt(pos)
+        menu = QMenu(self)
+        row = index.row() if index.isValid() else -1
+
+        if row >= 0:
+            cue = self._model.get_cue(row)
+            menu.addAction("▶  Disparar (GO desde aquí)",
+                           lambda: (self.playhead_set.emit(row), self.go_pressed.emit()))
+            menu.addAction("◉  Fijar como standby",
+                           lambda: self.playhead_set.emit(row))
+            menu.addAction("■  Detener este cue",
+                           lambda: self.stop_cue.emit(row))
+
+        # En modo Show solo acciones de reproducción, nada de edición.
+        if self._show_mode:
+            if row >= 0:
+                menu.exec(self._table_view.viewport().mapToGlobal(pos))
+            return
+
+        if row >= 0:
+            menu.addSeparator()
+            menu.addAction("✎  Editar propiedades…",
+                           lambda: self._on_row_double_clicked(
+                               self._qt_model.index(row, 0)))
+            menu.addSeparator()
+
+            # ── Grupos ────────────────────────────────────────────────
+            sel_rows = self._selected_rows()
+            if not sel_rows:
+                sel_rows = [row]
+            act_group = menu.addAction(
+                f"⧉  Agrupar {len(sel_rows)} cue(s)  (Ctrl+G)",
+                lambda: self.group_requested.emit(sel_rows))
+            if cue is not None and cue.type == "GROUP":
+                menu.addAction(
+                    ("▶ Expandir grupo" if cue.collapsed else "▼ Contraer grupo"),
+                    lambda: self.collapse_toggled.emit(row))
+                menu.addAction("⤨  Desagrupar",
+                               lambda: self.ungroup_requested.emit(row))
+
+        insert = menu.addMenu("＋  Insertar cue")
+        labels = [("Audio", "AUDIO"), ("Vídeo", "VIDEO"), ("Espera", "WAIT"),
+                  ("Fade", "FADE"), ("Start", "START"), ("Stop", "STOP"),
+                  ("Script", "SCRIPT"), ("Memo", "MEMO"), ("Grupo", "GROUP")]
+        for label, ctype in labels:
+            insert.addAction(
+                label, lambda ct=ctype: self.cue_insert_requested.emit(ct, row))
+
+        if row >= 0:
+            menu.addSeparator()
+            menu.addAction("🗑  Borrar cue",
+                           lambda: self._on_cues_removed([row]))
+
+        menu.exec(self._table_view.viewport().mapToGlobal(pos))
 
     # ------------------------------------------------------------------
     # Shortcuts + keybindings
@@ -809,16 +1026,38 @@ class MainWindow(QMainWindow):
             except Exception:
                 pass   # tecla inválida en el JSON → ignorar silenciosamente
 
-        _sc(kb["go"],   self.go_pressed)
-        _sc(kb["stop"], self.stop_pressed)
-        _sc(kb["prev"], self.prev_pressed)
-        _sc(kb["save"], self.save_requested)
-        _sc(kb["load"], self.load_requested)
+        _sc(kb["go"],    self.go_pressed)
+        _sc(kb["stop"],  self.stop_pressed)
+        _sc(kb["panic"], self.panic_pressed)
+        _sc(kb["pause"], self.pause_pressed)
+        _sc(kb["save"],  self.save_requested)
+        _sc(kb["load"],  self.load_requested)
+
+        # Ctrl+G — agrupar la selección
+        try:
+            sc_group = QShortcut(QKeySequence("Ctrl+G"), self)
+            sc_group.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc_group.activated.connect(
+                lambda: self.group_requested.emit(self._selected_rows()))
+        except Exception:
+            pass
+
+        # Ctrl+I — mostrar/ocultar el inspector acoplado
+        try:
+            sc_insp = QShortcut(QKeySequence("Ctrl+I"), self)
+            sc_insp.setContext(Qt.ShortcutContext.WindowShortcut)
+            sc_insp.activated.connect(self.toggle_inspector)
+        except Exception:
+            pass
+
+        # PREV/NEXT (▲▼) NO se enlazan como shortcuts globales para no chocar
+        # con la navegación nativa de la tabla: mover la selección mueve el
+        # playhead (ver _on_selection_changed).
 
         # Leyenda visible de las teclas activas
         self._lbl_keys.setText(
-            f"GO: {kb['go']}   STOP: {kb['stop']}   PREV: {kb['prev']}   "
-            f"0-9: saltar a cue"
+            f"GO: {kb['go']}   STOP: {kb['stop']}   PANIC: {kb['panic']}   "
+            f"PAUSE: {kb['pause']}   ▲▼: standby   0-9: saltar"
         )
 
     @staticmethod
@@ -877,23 +1116,97 @@ class MainWindow(QMainWindow):
         self._qt_model.setHorizontalHeaderLabels(COL_HEADERS)
         for cue in self._model.cues:
             self._qt_model.appendRow(self._build_row_items(cue))
+        self.apply_group_visibility()
+        self.rebuild_hotkeys()
         if self._model.count() > 0:
-            self.highlight_active_row(0)
+            self.set_playhead(0)
+
+    def rebuild_hotkeys(self) -> None:
+        """Recrea los QShortcut de las hotkeys por cue definidas en el modelo."""
+        for sc in self._hotkeys:
+            sc.setEnabled(False)
+            sc.deleteLater()
+        self._hotkeys = []
+        for cue in self._model.cues:
+            if not cue.hotkey:
+                continue
+            try:
+                sc = QShortcut(QKeySequence(cue.hotkey), self)
+                sc.setContext(Qt.ShortcutContext.WindowShortcut)
+                sc.activated.connect(
+                    lambda cid=cue.id: self.hotkey_triggered.emit(cid))
+                self._hotkeys.append(sc)
+            except Exception:
+                pass
+
+    def apply_group_visibility(self) -> None:
+        """Oculta las filas cuyos grupos ancestros estén colapsados."""
+        for row, cue in enumerate(self._model.cues):
+            hidden = self._model.is_ancestor_collapsed(cue)
+            self._table_view.setRowHidden(row, hidden)
+
+    @staticmethod
+    def _fmt_time(v: float) -> str:
+        """Formatea un tiempo en segundos de forma compacta ('' si es 0)."""
+        if v <= 0.0:
+            return ""
+        if v >= 60.0:
+            m = int(v) // 60
+            s = v - m * 60
+            return f"{m}:{s:04.1f}"
+        return f"{v:.1f}"
 
     def _build_row_items(self, cue: Cue) -> list[QStandardItem]:
-        lat = f"{cue.latency_ms:.1f}" if cue.latency_ms is not None else ""
-        items = [
-            self._make_item(str(cue.id),            Qt.AlignmentFlag.AlignCenter),
-            self._make_item(cue.type,               Qt.AlignmentFlag.AlignCenter),
-            self._make_item(cue.name,               Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter),
-            self._make_item(f"{cue.duration:.1f}s", Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter),
-            self._make_item(cue.state,              Qt.AlignmentFlag.AlignCenter),
-            self._make_item(lat,                    Qt.AlignmentFlag.AlignCenter),
-        ]
+        L  = Qt.AlignmentFlag.AlignLeft | Qt.AlignmentFlag.AlignVCenter
+        C  = Qt.AlignmentFlag.AlignCenter
+        R  = Qt.AlignmentFlag.AlignRight | Qt.AlignmentFlag.AlignVCenter
+
+        target_num = ""
+        if cue.target_id is not None:
+            tgt = self._model.get_by_id(cue.target_id)
+            target_num = tgt.display_number if tgt else "?"
+
+        depth = self._model.depth(cue)
+        is_group = (cue.type == "GROUP")
+        indent = "   " * depth
+
+        # Número: para grupos, triángulo de colapso ▼/▶ antes del número.
+        if is_group:
+            tri = "▶" if cue.collapsed else "▼"
+            num_text = f"{indent}{tri} {cue.display_number}"
+        else:
+            num_text = f"{indent}{cue.display_number}"
+
+        # Nombre: indentado; ⚑ si está flagged; grupos añaden su modo.
+        flag = "⚑ " if cue.flagged else ""
+        if is_group:
+            name_text = f"{indent}{flag}▸ {cue.name}  ({_GROUP_MODE_TAG.get(cue.group_mode, cue.group_mode.lower())})"
+        else:
+            name_text = f"{indent}{flag}{cue.name}"
+
+        items = [None] * 9
+        items[COL_NUM]    = self._make_item(num_text, L if (is_group or depth) else C)
+        items[COL_TYPE]   = self._make_item(cue.type, C)
+        items[COL_NAME]   = self._make_item(name_text, L)
+        items[COL_PRE]    = self._make_item(self._fmt_time(cue.pre_wait), R)
+        items[COL_DUR]    = self._make_item(self._fmt_time(cue.duration), R)
+        items[COL_POST]   = self._make_item(self._fmt_time(cue.post_wait), R)
+        items[COL_CONT]   = self._make_item(_CONT_SYMBOL.get(cue.continue_mode, ""), C)
+        items[COL_TARGET] = self._make_item(target_num, C)
+        items[COL_STATE]  = self._make_item("" if is_group else cue.state, C)
+
         items[COL_STATE].setForeground(QColor(STATE_COLORS.get(cue.state, COLOR_TEXT)))
-        # UserRole en COL_NAME: True si el cue tiene archivo asignado (usado por
-        # CueTableView para detectar filas libres y por CueDelegate para ●/○).
+        # UserRole en COL_NAME: has_media (para el icono ●/○ del delegado).
         items[COL_NAME].setData(bool(cue.file_path), Qt.ItemDataRole.UserRole)
+        # UserRole en COL_NUM: marca de grupo (para detectar clic en el triángulo).
+        items[COL_NUM].setData(is_group, Qt.ItemDataRole.UserRole)
+        if is_group:
+            gfont = QFont(FONT_MONO, 11); gfont.setBold(True)
+            items[COL_NAME].setFont(gfont)
+            items[COL_NUM].setFont(gfont)
+        if not cue.armed:
+            for it in items:
+                it.setForeground(QColor("#555555"))
         return items
 
     @staticmethod
@@ -908,92 +1221,222 @@ class MainWindow(QMainWindow):
     # ------------------------------------------------------------------
 
     def refresh_row(self, index: int) -> None:
+        """Reconstruye el texto de una fila y reaplica sus colores."""
         cue = self._model.get_cue(index)
         if cue is None:
             return
         row_items = self._build_row_items(cue)
-        is_active = (index == self._active_index)
         for col, item in enumerate(row_items):
             existing = self._qt_model.item(index, col)
             if existing is None:
+                self._qt_model.setItem(index, col, item)
                 continue
             existing.setText(item.text())
             existing.setTextAlignment(item.textAlignment())
-            # BUG 1: propagar UserRole (has_media) para que ●/○ se actualice
             if col == COL_NAME:
                 existing.setData(
-                    item.data(Qt.ItemDataRole.UserRole),
-                    Qt.ItemDataRole.UserRole,
-                )
-            if is_active:
-                existing.setBackground(QColor(COLOR_ACCENT))
-                existing.setForeground(QColor(COLOR_ACCENT_TEXT))
-            else:
-                existing.setBackground(QColor(0, 0, 0, 0))
-                if col == COL_STATE:
-                    existing.setForeground(QColor(STATE_COLORS.get(cue.state, COLOR_TEXT)))
+                    item.data(Qt.ItemDataRole.UserRole), Qt.ItemDataRole.UserRole)
+        self._apply_row_colors(index)
+        # NEXT/STANDBY labels dependen del contenido del playhead
+        if index in (self._playhead, self._playhead + 1):
+            self._update_playhead_labels()
+
+    def set_playhead(self, index: int) -> None:
+        """Fija el playhead (standby) y actualiza resaltado + etiquetas."""
+        old = self._playhead
+        self._playhead = index
+        if 0 <= old < self._qt_model.rowCount():
+            self._apply_row_colors(old)
+        if 0 <= index < self._qt_model.rowCount():
+            self._apply_row_colors(index)
+            # Sincronizar la selección de la tabla sin reentrar en el slot
+            self._syncing_sel = True
+            self._table_view.selectRow(index)
+            self._syncing_sel = False
+            self._table_view.scrollTo(
+                self._qt_model.index(index, 0),
+                QTableView.ScrollHint.EnsureVisible)
+        self._update_playhead_labels()
+        self._update_inspector()
+        self.update_pvw()
+
+    def _on_selection_changed(self, current, previous) -> None:
+        """La fila seleccionada pasa a ser el playhead (salvo sync programático)."""
+        if self._syncing_sel:
+            return
+        if current.isValid():
+            self.playhead_set.emit(current.row())
+
+    def append_cue_row(self, cue: Cue) -> None:
+        """Añade una fila al final de la tabla (sin reconstruir todo)."""
+        self._qt_model.appendRow(self._build_row_items(cue))
+
+    def update_active_cues(self, rows: list) -> None:
+        """Recibe la lista de cues en ejecución y actualiza panel + resaltado
+        + cuenta atrás en la propia fila de cada cue (columna ACCIÓN)."""
+        new_running: set[int] = set()
+        id_to_time: dict[int, str] = {}
+        for r in rows:
+            idx = self._model.index_of_id(r.get("id", -1))
+            if idx >= 0:
+                new_running.add(idx)
+                rem = r.get("remaining")
+                if rem is not None:
+                    m = int(rem) // 60
+                    id_to_time[idx] = f"↓{m}:{int(rem) % 60:02d}"
                 else:
-                    existing.setForeground(QColor(COLOR_TEXT))
+                    el = r.get("elapsed", 0.0)
+                    m = int(el) // 60
+                    id_to_time[idx] = f"▲{m}:{int(el) % 60:02d}"
 
-    def highlight_active_row(self, new_index: int) -> None:
-        """Mueve el resaltado ámbar y actualiza etiquetas de cue activo y next."""
-        # Restaurar fila anterior
-        if 0 <= self._prev_active < self._qt_model.rowCount():
-            prev_cue = self._model.get_cue(self._prev_active)
-            if prev_cue is not None:
-                for col in range(self._qt_model.columnCount()):
-                    item = self._qt_model.item(self._prev_active, col)
-                    if item:
-                        item.setBackground(QColor(0, 0, 0, 0))
-                        if col == COL_STATE:
-                            item.setForeground(QColor(STATE_COLORS.get(prev_cue.state, COLOR_TEXT)))
-                        else:
-                            item.setForeground(QColor(COLOR_TEXT))
+        # Restaurar el texto estático de las filas que dejaron de sonar
+        stopped = self._running_rows - new_running
+        changed = new_running.symmetric_difference(self._running_rows)
+        self._running_rows = new_running
+        for idx in changed:
+            if 0 <= idx < self._qt_model.rowCount():
+                self._apply_row_colors(idx)
+        for idx in stopped:
+            cue = self._model.get_cue(idx)
+            item = self._qt_model.item(idx, COL_DUR)
+            if cue is not None and item is not None:
+                item.setText(self._fmt_time(cue.duration))
 
-        self._active_index = new_index
-        self._prev_active  = new_index
+        # Escribir la cuenta atrás en la columna ACCIÓN de cada cue activo
+        for idx, txt in id_to_time.items():
+            item = self._qt_model.item(idx, COL_DUR)
+            if item is not None:
+                item.setText(txt)
 
-        for col in range(self._qt_model.columnCount()):
-            item = self._qt_model.item(new_index, col)
-            if item:
-                item.setBackground(QColor(COLOR_ACCENT))
-                item.setForeground(QColor(COLOR_ACCENT_TEXT))
+        self._render_active_panel(rows)
 
-        self._table_view.scrollTo(
-            self._qt_model.index(new_index, 0), QTableView.ScrollHint.EnsureVisible
-        )
+    def update_transport(self, paused: bool) -> None:
+        """Actualiza el botón de pausa según el estado del transporte."""
+        self._btn_pause.setText("▶ RESUME" if paused else "❚❚ PAUSE")
+        self._btn_pause.setProperty("paused", str(paused).lower())
+        self._btn_pause.style().unpolish(self._btn_pause)
+        self._btn_pause.style().polish(self._btn_pause)
 
-        # Etiqueta cue activo
-        active_cue = self._model.get_cue(new_index)
-        if active_cue is not None:
-            self._lbl_active_cue.setText(
-                f"Cue activo:  [{active_cue.id:02d}]  —  {active_cue.name}"
-            )
+    def flash_status(self, message: str, ms: int = 4000) -> None:
+        self.statusBar().showMessage(message, ms)
 
-        # Etiqueta NEXT
-        total = self._model.count()
-        if total > 1:
-            next_cue = self._model.get_cue((new_index + 1) % total)
-            self._lbl_next_cue.setText(
-                f"NEXT → [{next_cue.id:02d}]  {next_cue.name}"
-                if next_cue else "NEXT → —"
-            )
-        else:
-            self._lbl_next_cue.setText("NEXT → —")
+    # ── Helpers internos de pintado / etiquetas ──────────────────────────
 
-    def update_status_bar(self, cue_index: int, system_state: str) -> None:
-        """Actualiza la etiqueta de cue activo y el estado interno del sistema."""
-        cue = self._model.get_cue(cue_index)
+    def _apply_row_colors(self, row: int) -> None:
+        cue = self._model.get_cue(row)
         if cue is None:
             return
-        self._lbl_active_cue.setText(f"Cue activo:  [{cue.id:02d}]  —  {cue.name}")
-        _styles = {
-            "READY":   f"color: {COLOR_GO};     font-size: 11px; font-weight: bold;",
-            "RUNNING": f"color: {COLOR_ACCENT}; font-size: 11px; font-weight: bold;",
-            "STOPPED": f"color: {COLOR_STOP};   font-size: 11px; font-weight: bold;",
-        }
-        self._lbl_sys_state.setText(f"Estado: {system_state}")
-        self._lbl_sys_state.setStyleSheet(_styles.get(system_state, _styles["READY"]))
+        is_playhead = (row == self._playhead)
+        is_running  = (row in self._running_rows)
+        for col in range(self._qt_model.columnCount()):
+            item = self._qt_model.item(row, col)
+            if item is None:
+                continue
+            if is_playhead:
+                item.setBackground(QColor(COLOR_ACCENT))
+                item.setForeground(QColor(COLOR_ACCENT_TEXT))
+            elif is_running:
+                item.setBackground(QColor("#173d24"))
+                item.setForeground(
+                    QColor("#2ecc71") if col == COL_STATE else QColor("#eafff0"))
+            else:
+                # Tira de color del cue en la celda de número (estilo QLab)
+                if col == COL_NUM and cue.color and CUE_COLORS.get(cue.color):
+                    item.setBackground(QColor(CUE_COLORS[cue.color]))
+                    item.setForeground(QColor("#ffffff"))
+                    continue
+                item.setBackground(QColor(0, 0, 0, 0))
+                if col == COL_STATE:
+                    item.setForeground(QColor(STATE_COLORS.get(cue.state, COLOR_TEXT)))
+                elif not cue.armed:
+                    item.setForeground(QColor("#555555"))
+                else:
+                    item.setForeground(QColor(COLOR_TEXT))
+
+    def _update_inspector(self) -> None:
+        """Sincroniza el inspector acoplado con el cue del playhead."""
+        if not hasattr(self, "_inspector"):
+            return
+        # No repoblar el inspector si el cambio viene DEL propio inspector:
+        # evita re-decodificar audio / re-extraer frames en cada edición y
+        # que se robe el foco a los campos.
+        if getattr(self, "_suppress_inspector", False):
+            return
+        cue = self._model.get_cue(self._playhead)
+        count = len(self._selected_rows()) or (1 if cue else 0)
+        self._inspector.set_cue(cue, self._model.cues, count)
+
+    def _on_inspector_changed(self, fields: dict) -> None:
+        """Un cambio en el inspector se aplica al cue del playhead (sin repoblarlo)."""
+        if 0 <= self._playhead < self._model.count():
+            self._suppress_inspector = True
+            try:
+                self.cue_edit_committed.emit(self._playhead, fields)
+            finally:
+                self._suppress_inspector = False
+
+    def toggle_inspector(self) -> None:
+        self._inspector.setVisible(not self._inspector.isVisible())
+
+    def toggle_inspector_popout(self) -> None:
+        """Saca el inspector a una ventana flotante (o lo vuelve a acoplar)."""
+        if not self._inspector_popped:
+            self._inspector.setParent(None)
+            self._inspector.setWindowTitle("WinCue — Inspector")
+            self._inspector.setWindowFlags(Qt.WindowType.Window)
+            self._inspector.resize(820, 340)
+            self._inspector.show()
+            self._inspector_popped = True
+        else:
+            self._inspector.setWindowFlags(Qt.WindowType.Widget)
+            self._vsplit.addWidget(self._inspector)
+            self._vsplit.setSizes([460, 300])
+            self._inspector.show()
+            self._inspector_popped = False
+
+    def _update_playhead_labels(self) -> None:
+        standby = self._model.get_cue(self._playhead)
+        if standby is not None:
+            self._lbl_active_cue.setText(
+                f"STANDBY → [{standby.display_number}]  {standby.name}")
+        else:
+            self._lbl_active_cue.setText("STANDBY → — (fin de la lista)")
+        nxt = self._model.get_cue(self._playhead + 1)
+        self._lbl_next_cue.setText(
+            f"NEXT → [{nxt.display_number}]  {nxt.name}" if nxt else "NEXT → —")
+
+    def _render_active_panel(self, rows: list) -> None:
+        """Dibuja el panel de cues en ejecución (texto con barra de progreso)."""
+        if not rows:
+            self._lbl_active_panel.setText(
+                "<span style='color:#555'>— sin cues en ejecución —</span>")
+            return
+        lines: list[str] = []
+        for r in rows:
+            color = CUE_COLORS.get(r.get("color", ""), "") or "#2ecc71"
+            num = r.get("number", "")
+            name = r.get("name", "")
+            if len(name) > 22:
+                name = name[:21] + "…"
+            rem = r.get("remaining")
+            frac = r.get("fraction")
+            if rem is not None:
+                m = int(rem) // 60
+                s = rem - m * 60
+                time_txt = f"{m}:{s:04.1f}"
+                bar_n = int((frac or 0.0) * 12)
+                bar = "█" * bar_n + "░" * (12 - bar_n)
+            else:
+                el = r.get("elapsed", 0.0)
+                m = int(el) // 60
+                s = el - m * 60
+                time_txt = f"{m}:{s:04.1f}↑"
+                bar = "▶ " + "·" * 10
+            lines.append(
+                f"<span style='color:{color}'>●</span> "
+                f"<b>[{num}]</b> {name}<br>"
+                f"<span style='color:#888;font-size:10px'>{bar} {time_txt}</span>")
+        self._lbl_active_panel.setText("<br>".join(lines))
 
     def update_countdown(self, seconds: float | None) -> None:
         """Actualiza el label del countdown.
@@ -1035,15 +1478,18 @@ class MainWindow(QMainWindow):
         self._lbl_countdown.setText(text)
 
     def update_vu_meter(self, rms: float) -> None:
-        """Pasa el nivel RMS al VU meter. Llamado por el controlador."""
+        """Pasa el nivel RMS al VU meter y al del inspector (Audio Levels)."""
         self._vu_meter.set_level(rms)
+        if hasattr(self, "_inspector"):
+            self._inspector.set_vu_level(rms)
 
     def reload_table(self) -> None:
         """Reconstruye la tabla. Llamar tras reemplazar el modelo (load show)."""
-        self._active_index = 0
-        self._prev_active  = -1
+        self._playhead = 0
+        self._running_rows.clear()
         self._vu_meter.reset()
         self.update_countdown(None)
+        self.update_active_cues([])
         self._populate_table()
 
     def show_error(self, title: str, message: str) -> None:
@@ -1053,24 +1499,187 @@ class MainWindow(QMainWindow):
     def video_container(self) -> VideoContainer:
         return self._video_container
 
-    def set_stress_button_state(self, active: bool) -> None:
-        self._btn_stress.setProperty("active", str(active).lower())
-        self._btn_stress.style().unpolish(self._btn_stress)
-        self._btn_stress.style().polish(self._btn_stress)
-        self._btn_stress.setText("■ STRESS RUNNING" if active else "STRESS TEST")
+    # ------------------------------------------------------------------
+    # Salida de vídeo a otro monitor (pantalla completa)
+    # ------------------------------------------------------------------
+
+    def surface_dimensions(self) -> tuple:
+        """Dimensiones del canvas: las de Settings, o las de la pantalla de salida."""
+        from settings_manager import SettingsManager
+        sm = SettingsManager.instance()
+        w = int(sm.get("surface_width", 0) or 0)
+        h = int(sm.get("surface_height", 0) or 0)
+        if w > 0 and h > 0:
+            return w, h
+        scr = self._output_target_screen() or self.screen()
+        if scr is not None:
+            g = scr.geometry()
+            if g.width() > 0:
+                return g.width(), g.height()
+        return 1920, 1080
+
+    def _output_target_screen(self):
+        """Devuelve la QScreen de salida según Settings, o None si es local."""
+        from settings_manager import SettingsManager
+        sm = SettingsManager.instance()
+        try:
+            idx = int(sm.get("video_output_screen", 0) or 0)
+        except (TypeError, ValueError):
+            idx = 0
+        fullscreen = bool(sm.get("video_fullscreen_output", False))
+        screens = QApplication.screens()
+        if not screens:
+            return None
+        main_screen = self.screen()
+        try:
+            main_idx = screens.index(main_screen)
+        except ValueError:
+            main_idx = 0
+        valid = 0 <= idx < len(screens)
+        if valid and (fullscreen or idx != main_idx):
+            return screens[idx]
+        return None
+
+    def refresh_video_output(self) -> None:
+        """Crea o cierra la ventana de salida (blackout permanente) según Settings.
+
+        Llamar al arrancar y cada vez que se guardan los ajustes: en cuanto se
+        elige una pantalla de salida, aparece una ventana negra a pantalla
+        completa en ese monitor (nunca se ve el escritorio).
+        """
+        scr = self._output_target_screen()
+        if scr is not None:
+            self._ensure_output_window(scr)
+        else:
+            self.close_video_output()
+        self._update_output_tally()
+        self._set_monitor_external(scr is not None)
+
+    # ------------------------------------------------------------------
+    # Mini-monitor PGM / PVW
+    # ------------------------------------------------------------------
+
+    def _set_monitor_external(self, external: bool) -> None:
+        """Con salida externa muestra el mini-monitor PGM/PVW; local → mpv directo."""
+        if not hasattr(self, "_monitor_stack"):
+            return
+        if external:
+            self._monitor_stack.setCurrentWidget(self._monitor)
+            # Ocultar explícitamente la ventana nativa de mpv (si no, su HWND
+            # se queda visible/solapado por encima de la miniatura).
+            self._video_container.setVisible(False)
+            self._monitor.setVisible(True)
+            self._monitor.raise_()
+            self._monitor_toggle.setVisible(True)
+            self._set_monitor_mode(self._monitor_mode)
+        else:
+            self._monitor_stack.setCurrentWidget(self._video_container)
+            self._monitor.setVisible(False)
+            self._video_container.setVisible(True)
+            self._video_container.raise_()
+            self._monitor_toggle.setVisible(False)
+
+    def _set_monitor_mode(self, mode: str) -> None:
+        self._monitor_mode = mode
+        self._btn_pgm.setChecked(mode == "PGM")
+        self._btn_pvw.setChecked(mode == "PVW")
+        if mode == "PGM":
+            self._monitor.set_badge("PGM", "#e74c3c")
+            self._monitor.clear("PGM — esperando salida")
+        else:
+            self._monitor.set_badge("PVW", "#2ecc71")
+            self.update_pvw()
+
+    def update_pvw(self) -> None:
+        """Preview: primer frame del cue de vídeo en standby."""
+        if getattr(self, "_monitor_mode", "PVW") != "PVW":
+            return
+        if not hasattr(self, "_monitor_stack") or self._monitor_stack.currentWidget() is not self._monitor:
+            return
+        cue = self._model.get_cue(self._playhead)
+        from media_import import IMAGE_FORMATS
+        if (cue and cue.type == "VIDEO" and cue.file_path
+                and Path(cue.file_path).suffix.lower() not in IMAGE_FORMATS):
+            self._monitor.show_frame(cue.file_path, cue.trim_start, force=True)
+        else:
+            self._monitor.clear("PVW — standby sin vídeo")
+
+    def update_program(self, path: str, t: float) -> None:
+        """Programa: frame del vídeo que está en la salida ahora mismo."""
+        if getattr(self, "_monitor_mode", "PVW") != "PGM":
+            return
+        if not hasattr(self, "_monitor_stack") or self._monitor_stack.currentWidget() is not self._monitor:
+            return
+        if path:
+            self._monitor.show_frame(path, t)
+        else:
+            self._monitor.clear("PGM — nada en salida")
+
+    def video_output_container(self) -> VideoContainer:
+        """Contenedor donde mpv debe renderizar: la ventana de salida si está
+        activa, o el preview empotrado en caso contrario."""
+        if self._output_window is not None and self._output_window.isVisible():
+            return self._output_window
+        return self._video_container
+
+    def _ensure_output_window(self, screen) -> VideoContainer:
+        """Crea (si hace falta) y muestra la ventana de salida en `screen`."""
+        if self._output_window is None:
+            ow = VideoContainer()
+            ow.setWindowTitle("WinCue — Salida de vídeo")
+            ow.setWindowFlags(
+                Qt.WindowType.Window | Qt.WindowType.FramelessWindowHint)
+            self._output_window = ow
+        ow = self._output_window
+        ow.setGeometry(screen.geometry())
+        ow.showFullScreen()
+        ow.raise_()
+        return ow
+
+    def close_video_output(self) -> None:
+        """Cierra la ventana de salida (al apagar la app o volver a preview)."""
+        if self._output_window is not None:
+            self._output_window.close()
+            self._output_window = None
+
+    def set_output_content(self, name) -> None:
+        """Registra qué cue está en la salida (o None → NEGRO) y refresca el testigo."""
+        self._output_content = f"EN PANTALLA: {name}" if name else "NEGRO"
+        self._update_output_tally()
+
+    def _update_output_tally(self) -> None:
+        """Actualiza el testigo de salida (monitor externo + contenido)."""
+        if not hasattr(self, "_lbl_output_status"):
+            return
+        ow = self._output_window
+        if ow is not None and ow.isVisible():
+            screens = QApplication.screens()
+            scr = self._output_target_screen()
+            idx = screens.index(scr) if (scr in screens) else 0
+            g = ow.geometry()
+            self._lbl_output_status.setText(
+                f"◉ SALIDA → Monitor {idx + 1}  ({g.width()}×{g.height()})   ·   {self._output_content}")
+            self._lbl_output_status.setStyleSheet(
+                "color:#2ecc71; font-size:10px; background:#0d1a0d; "
+                "border:1px solid #1a3a1a; border-radius:3px; padding:3px 6px;")
+        else:
+            self._lbl_output_status.setText("○ Salida: ventana local (elige monitor en ⚙ Settings)")
+            self._lbl_output_status.setStyleSheet(
+                "color:#888; font-size:10px; background:#0d0d0d; "
+                "border:1px solid #222; border-radius:3px; padding:3px 6px;")
 
     # ------------------------------------------------------------------
     # Slots privados — tabla
     # ------------------------------------------------------------------
 
     def _on_row_double_clicked(self, index: QModelIndex) -> None:
-        if not index.isValid():
+        if self._show_mode or not index.isValid():
             return
         row = index.row()
         cue = self._model.get_cue(row)
         if cue is None:
             return
-        dlg = CueEditDialog(cue, parent=self)
+        dlg = CueEditDialog(cue, all_cues=self._model.cues, parent=self)
         if dlg.exec() == CueEditDialog.DialogCode.Accepted:
             self.cue_edit_committed.emit(row, dlg.get_values())
 

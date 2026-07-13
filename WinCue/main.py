@@ -61,15 +61,15 @@ if not _MPV_OK:
 
 def main() -> int:
     app = QApplication(sys.argv)
-    app.setApplicationName("CUE CONTROLLER")
-    app.setApplicationVersion("0.1")
+    app.setApplicationName("WinCue")
+    app.setApplicationVersion("0.2")
 
     # ----------------------------------------------------------------
     # 2. Construir el Modelo con datos de ejemplo
     # ----------------------------------------------------------------
     model = CueModel()
-    for cue in CueModel.create_sample_data():
-        model.add_cue(cue)
+    # Arranca en blanco (estilo QLab): la lista se construye arrastrando
+    # archivos o con el botón ＋ CUE. (Antes cargaba create_sample_data().)
 
     # ----------------------------------------------------------------
     # 3. Construir la Vista (requiere el modelo para la tabla inicial)
@@ -81,24 +81,49 @@ def main() -> int:
     # ----------------------------------------------------------------
     controller = MainController(model, window)
 
-    # Señales de la vista conectadas a métodos del controlador
+    # Transporte (modelo QLab: GO dispara + avanza sin cortar; Stop/Panic/Pause)
     window.go_pressed.connect(controller.on_go_pressed)
     window.stop_pressed.connect(controller.on_stop_pressed)
-    window.stress_test_pressed.connect(controller.on_stress_test_pressed)
+    window.panic_pressed.connect(controller.on_panic)
+    window.pause_pressed.connect(controller.on_pause_toggle)
 
-    # Paso 4 — guardar/cargar show y edición de cues
+    # Guardar/cargar show y edición de cues
     window.save_requested.connect(controller.on_save_requested)
     window.load_requested.connect(controller.on_load_requested)
     window.cue_edit_committed.connect(controller.on_cue_edit_committed)
 
-    # Paso 5 — navegación por teclado
+    # Navegación del playhead (standby)
     window.prev_pressed.connect(controller.on_prev_pressed)
+    window.next_pressed.connect(controller.on_next_pressed)
     window.jump_to_cue.connect(controller.on_jump_to_cue)
+    window.playhead_set.connect(controller.on_set_playhead)
+    window.stop_cue.connect(controller.on_stop_selected)
+    window.cue_insert_requested.connect(controller.on_insert_cue)
+
+    # Grupos (estilo QLab)
+    window.group_requested.connect(controller.on_group_selected)
+    window.ungroup_requested.connect(controller.on_ungroup)
+    window.collapse_toggled.connect(controller.on_toggle_collapse)
+
+    # Hotkeys por cue (Triggers): disparan el cue esté o no en standby
+    window.hotkey_triggered.connect(controller.trigger_cue_id)
+
+    # Volumen master (top bar): aplica a audio y vídeo
+    window.master_volume_changed.connect(controller.on_master_volume)
+    from settings_manager import SettingsManager as _SM
+    window._master_slider.setValue(int(_SM.instance().get("master_volume", 100)))
+
+    # Cierre limpio: detener motores y timers al salir
+    app.aboutToQuit.connect(controller.shutdown)
 
     # ----------------------------------------------------------------
-    # 5. Mostrar y lanzar el event loop
+    # 5. Mostrar (maximizada) y lanzar el event loop
     # ----------------------------------------------------------------
-    window.show()
+    # Arrancar maximizada: da sitio a la lista + inspector + preview y evita
+    # que los paneles queden apretados en una ventana pequeña.
+    window.showMaximized()
+    # Activar la salida de vídeo (blackout en el monitor elegido) si procede
+    window.refresh_video_output()
     return app.exec()
 
 
