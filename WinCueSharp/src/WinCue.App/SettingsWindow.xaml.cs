@@ -108,7 +108,8 @@ public partial class SettingsWindow : Window
                 $"Pantalla {i}{(s.Primary ? " (principal)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}"))
             .ToArray();
         Combo("video_output_screen", scr, "Monitor:", screens);
-        Check("video_fullscreen_output", scr, "Salida a pantalla completa");
+        Check("video_fullscreen_output", scr, "Salida a pantalla completa (blackout)");
+        Note(scr, "Desmárcalo solo para probar en una ventana con bordes.");
 
         var pb = Group(root, "REPRODUCCIÓN");
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
@@ -149,8 +150,8 @@ public partial class SettingsWindow : Window
         Check("midi_enabled", midi, "Habilitar disparo por MIDI (backend en fase 6)");
         _midiDevices = Combo("midi_device_name", midi, "Dispositivo de entrada:");
         RefreshMidiDevices();
-        var goNote = Text("midi_go_note", midi, "Nota MIDI para GO:");
-        var stopNote = Text("midi_stop_note", midi, "Nota MIDI para STOP:");
+        var goNote = Spin("midi_go_note", midi, "Nota MIDI para GO:", 0, 127);
+        var stopNote = Spin("midi_stop_note", midi, "Nota MIDI para STOP:", 0, 127);
         _midiNotes = (goNote, stopNote);
         var learnRow = Row(midi, "");
         var btnLearnGo = new Button { Content = "🎹 Learn GO (5 s)" };

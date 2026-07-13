@@ -43,7 +43,9 @@ public class SettingsManager
 
         // ── Vídeo ────────────────────────────────────────────────────
         ["video_output_screen"]     = 0,     // índice de pantalla (0 = principal)
-        ["video_fullscreen_output"] = false,
+        // Divergencia deliberada con Python (era false): al elegir un monitor
+        // de salida se espera blackout a pantalla completa (estilo QLab).
+        ["video_fullscreen_output"] = true,
         ["video_default_volume"]    = 100,
         ["video_loop_default"]      = false,
         ["video_fade_frames"]       = 0,
