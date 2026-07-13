@@ -9,6 +9,7 @@ using System.Collections.ObjectModel;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
+using System.Windows.Media;
 using System.Windows.Threading;
 using Microsoft.Win32;
 using WinCue.Controller;
@@ -24,6 +25,11 @@ public partial class MainWindow : Window, IShowView
     private Action? _applyEngineSettings;   // lo inyecta App (reconfigurar audio)
     private VideoOutputWindow? _videoOutput;
     private readonly DispatcherTimer _statusTimer;
+
+    // Mini-monitores PVW/PGM (fase 5c)
+    private readonly MonitorControl _pvw = new("PVW", Color.FromRgb(0x27, 0x86, 0x5a));
+    private readonly MonitorControl _pgm = new("PGM", Color.FromRgb(0xc0, 0x39, 0x2b));
+    private DispatcherTimer? _pgmTimer;
 
     // Atajos configurables (Interfaz → Atajos de teclado)
     private Key _keyGo = Key.Space;
@@ -67,7 +73,43 @@ public partial class MainWindow : Window, IShowView
                     new Dictionary<string, object?> { [key] = value });
         };
 
+        // Mini-monitores PVW (siguiente) y PGM (programa, ~1.2 s como en Python)
+        MonitorHost.Children.Add(_pvw);
+        _pvw.Margin = new Thickness(0, 0, 0, 6);
+        MonitorHost.Children.Add(_pgm);
+        _pvw.Clear("—");
+        _pgm.Clear("NEGRO");
+        _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _pgmTimer.Tick += (_, _) => UpdateProgramMonitor();
+        _pgmTimer.Start();
+
         ReloadTable();
+    }
+
+    private void UpdateProgramMonitor()
+    {
+        var info = _controller.GetProgramVideo();
+        if (info is null)
+        {
+            if (_pgm.LastPath.Length > 0)
+                _pgm.Clear("NEGRO");
+            return;
+        }
+        _pgm.ShowFrame(info.Value.FilePath, info.Value.Elapsed);
+    }
+
+    /// <summary>PVW: primer frame del cue en standby (si es media con archivo).</summary>
+    private void UpdatePreviewMonitor()
+    {
+        var cue = _model.GetCue(_playheadIndex);
+        if (cue is null || !cue.IsMedia() || cue.FilePath.Length == 0)
+        {
+            if (_pvw.LastPath.Length > 0)
+                _pvw.Clear("—");
+            return;
+        }
+        if (cue.FilePath != _pvw.LastPath)
+            _pvw.ShowFrame(cue.FilePath, cue.TrimStart, force: true);
     }
 
     private void UpdateInspector()
@@ -121,6 +163,8 @@ public partial class MainWindow : Window, IShowView
             CueGrid.ScrollIntoView(_rows[index]);
             _suppressSelection = false;
         }
+        if (_controller is not null)
+            UpdatePreviewMonitor();
     }
 
     public void RefreshRow(int index)

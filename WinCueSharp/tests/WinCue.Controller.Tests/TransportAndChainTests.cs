@@ -416,6 +416,24 @@ public class TransportAndChainTests : ControllerTestBase
     }
 
     [Fact]
+    public void GetProgramVideo_ReturnsPlayingVideoOrNull()
+    {
+        Assert.Null(Controller.GetProgramVideo());
+
+        var v = AddCue(CueType.Video, "clip");
+        Controller.OnGoPressed();
+        Video.Elapsed[v.Id] = 4.2;
+
+        var info = Controller.GetProgramVideo();
+        Assert.NotNull(info);
+        Assert.Equal(@"C:\fake\media.wav", info!.Value.FilePath);
+        Assert.Equal(4.2, info.Value.Elapsed);
+
+        Controller.OnStopPressed();
+        Assert.Null(Controller.GetProgramVideo());
+    }
+
+    [Fact]
     public void LatencyReport_StoredInModel()
     {
         var a = AddCue(CueType.Audio);

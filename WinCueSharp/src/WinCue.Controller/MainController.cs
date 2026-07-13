@@ -819,6 +819,19 @@ public class MainController
         _view.RefreshRow(index);
     }
 
+    /// <summary>Vídeo actualmente en la salida (para el monitor PGM):
+    /// (ruta, segundos reproducidos), o null si la salida está en negro.
+    /// Port de _update_program_monitor de Python.</summary>
+    public (string FilePath, double Elapsed)? GetProgramVideo()
+    {
+        Cue? last = null;
+        foreach (var (cid, r) in _running)
+            if (r.Kind == CueType.Video && _video.IsPlaying(cid)
+                && _model.GetById(cid) is Cue c)
+                last = c;
+        return last is null ? null : (last.FilePath, _video.GetElapsed(last.Id));
+    }
+
     private void RefreshVideoTally()
     {
         Cue? last = null;
