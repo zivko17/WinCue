@@ -93,7 +93,13 @@ public partial class SettingsWindow : Window
 
         var vol = Group(root, "VOLUMEN");
         Spin("master_volume", vol, "Volumen master (%):", 0, 100);
-        Spin("pre_roll_ms", vol, "Pre-roll (ms de silencio antes de reproducir):", 0, 2000);
+
+        var aud = Group(root, "AUDICIÓN (PREVIEW LOCAL)");
+        var audCombo = Combo("audition_device_name", aud, "Dispositivo de audición:");
+        audCombo.Items.Add(new ComboBoxItem { Content = "(salida principal)", Tag = "" });
+        foreach (var audDev in AudioEngine.ListDevices())
+            audCombo.Items.Add(new ComboBoxItem { Content = audDev.Name, Tag = audDev.Name });
+        Note(aud, "Los cues se pre-escuchan por aquí (cascos) sin salir a la sala.");
 
         return root;
     }
@@ -114,7 +120,6 @@ public partial class SettingsWindow : Window
         var pb = Group(root, "REPRODUCCIÓN");
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
         Check("video_loop_default", pb, "Loop por defecto en cues nuevos");
-        Spin("video_fade_frames", pb, "Frames de fade in/out:", 0, 120);
 
         var surf = Group(root, "SUPERFICIE (CANVAS)");
         Combo("surface_preset", surf, "Preset:",
@@ -176,6 +181,8 @@ public partial class SettingsWindow : Window
             ("concurrent", "Concurrente (QLab): los audios se solapan"),
             ("sequential", "Secuencial: cada GO detiene los demás"),
             ("per_cue", "Por cue: según la casilla \"detener los demás\""));
+        Spin("go_min_interval_ms", go, "Anti doble-GO (ms; 0 = desactivado):", 0, 2000);
+        Spin("fade_all_seconds", go, "Duración del FADE ALL (s):", 1, 60);
 
         var ui = Group(root, "VISTA");
         Check("show_latency_column", ui, "Mostrar columna de latencia");

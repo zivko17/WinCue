@@ -161,6 +161,41 @@ public class MainController
         _view.FlashStatus($"⚠ PANIC — fundido de {PanicFade:F0}s y parada");
     }
 
+    /// <summary>FADE ALL: fundido elegante de todo (distinto del PANIC de
+    /// emergencia). El tiempo se configura en fade_all_seconds.</summary>
+    public void OnFadeAll()
+    {
+        double t = Math.Max(0.1, _settings.Get("fade_all_seconds", 5.0));
+        Log($"FADE ALL ({t:0.#}s)");
+        StopEverything(fade: t);
+        _view.FlashStatus($"◢ FADE ALL — fundido de {t:0.#}s");
+    }
+
+    /// <summary>Id reservado para la audición local (nunca colisiona con cues).</summary>
+    public const int AuditionCueId = -9999;
+
+    /// <summary>Audición local: reproduce el cue de la fila por el dispositivo
+    /// de audición (cascos) SIN pasar por el flujo del show. Toggle.</summary>
+    public void AuditionToggle(int row)
+    {
+        if (_audio.IsPlaying(AuditionCueId))
+        {
+            _audio.Stop(AuditionCueId);
+            _view.FlashStatus("🎧 Audición detenida");
+            return;
+        }
+        var cue = _model.GetCue(row);
+        if (cue is null || cue.Type != CueType.Audio || cue.FilePath.Length == 0)
+        {
+            _view.FlashStatus("Audición: selecciona un cue de AUDIO con archivo");
+            return;
+        }
+        _audio.Play(AuditionCueId, cue.FilePath, new AudioPlayParams(
+            Volume: cue.Volume, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
+            OutputDevice: _settings.Get("audition_device_name", "")));
+        _view.FlashStatus($"🎧 Audición: {cue.Name}");
+    }
+
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
     public void StopCueById(int cueId)
     {
@@ -467,7 +502,7 @@ public class MainController
                 _audio.Play(cue.Id, cue.FilePath, new AudioPlayParams(
                     Volume: cue.Volume, FadeIn: cue.FadeIn, FadeOut: cue.FadeOut,
                     Loop: cue.Loop, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
-                    PlayCount: cue.PlayCount));
+                    PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput));
                 run.Duration = cue.Duration;
                 if (cue.Duration > 0.0 && !cue.Loop)
                     Schedule(run, (int)(cue.Duration * 1000), () => DurationElapsed(cue.Id));
@@ -820,8 +855,40 @@ public class MainController
     // TICK — panel de activos + countdown (la UI lo llama cada ~100 ms)
     // ==================================================================
 
+    /// <summary>Reloj inyectable (los tests fijan la hora para el wall-clock).</summary>
+    public Func<DateTime> NowProvider { get; set; } = () => DateTime.Now;
+
+    private string _lastWallclockSecond = "";
+
+    /// <summary>Disparo por hora del día (Triggers → Wall-clock). Se evalúa una
+    /// vez por segundo desde el Tick de la UI.</summary>
+    private void CheckWallclock()
+    {
+        var now = NowProvider();
+        string hhmmss = now.ToString("HH:mm:ss");
+        if (hhmmss == _lastWallclockSecond)
+            return;
+        _lastWallclockSecond = hhmmss;
+
+        int dayBit = ((int)now.DayOfWeek + 6) % 7;   // lunes=0 … domingo=6
+        for (int i = 0; i < _model.Count; i++)
+        {
+            var c = _model.Cues[i];
+            if (c.WallclockEnabled && c.Armed &&
+                c.WallclockTime == hhmmss &&
+                ((c.WallclockDays >> dayBit) & 1) == 1 &&
+                !_running.ContainsKey(c.Id))
+            {
+                Log($"WALL-CLOCK {hhmmss} → {c.DisplayNumber} · {c.Name}");
+                Trigger(i, advanceChain: false);
+            }
+        }
+    }
+
     public void Tick()
     {
+        CheckWallclock();
+
         if (_running.Count == 0)
         {
             if (_lastHadRunning)

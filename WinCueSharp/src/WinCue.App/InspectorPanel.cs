@@ -136,12 +136,22 @@ public sealed class InspectorPanel : ContentControl
     // Pestañas
     // ==================================================================
 
+    private TextBox? _nameBox;
+
+    /// <summary>F2: enfoca el campo Nombre (renombrado rápido).</summary>
+    public void FocusName()
+    {
+        _tabs.SelectedIndex = 0;
+        _nameBox?.Focus();
+        _nameBox?.SelectAll();
+    }
+
     private UIElement BuildBasics()
     {
         var (scroll, panel) = Page();
 
         Txt(panel, "number", "Número:", c => c.Number);
-        Txt(panel, "name", "Nombre:", c => c.Name);
+        _nameBox = Txt(panel, "name", "Nombre:", c => c.Name);
         ColorSwatches(panel);
         var armedRow = ChkRow(panel);
         Chk(armedRow, "armed", "Armado", c => c.Armed);
@@ -193,10 +203,6 @@ public sealed class InspectorPanel : ContentControl
             ("Stop", "Parar"),
             ("HardStop", "Parada dura"),
             ("HardRestart", "Reiniciar"));
-        var relRow = ChkRow(panel);
-        Chk(relRow, "second_trigger_on_release", "Segundo disparo al SOLTAR la tecla",
-            c => c.SecondTriggerOnRelease);
-
         Header(panel, "FUNDIR Y PARAR OTROS");
         var foRow = ChkRow(panel);
         Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
@@ -206,7 +212,13 @@ public sealed class InspectorPanel : ContentControl
             ("List", "LIST — toda la lista"),
             ("All", "ALL — todo"));
 
-        Header(panel, "MIDI · WALL-CLOCK · TIMECODE · DUCK  (backend en fase 6)");
+        Header(panel, "WALL-CLOCK (disparo por hora del día)");
+        var wcRow = ChkRow(panel);
+        Chk(wcRow, "wallclock_enabled", "Disparar a una hora del día", c => c.WallclockEnabled);
+        Txt(panel, "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
+        Note(panel, "Se dispara cada día a esa hora mientras el show esté abierto.");
+
+        Header(panel, "MIDI (backend en fase 6)");
         var midiRow = ChkRow(panel);
         Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
         Cmb(panel, "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
@@ -215,19 +227,6 @@ public sealed class InspectorPanel : ContentControl
         Int(panel, "midi_channel", "Canal:", c => c.MidiChannel);
         Int(panel, "midi_note", "Nota / CC:", c => c.MidiNote);
         Int(panel, "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
-
-        var wcRow = ChkRow(panel);
-        Chk(wcRow, "wallclock_enabled", "Disparo por hora del día", c => c.WallclockEnabled);
-        Txt(panel, "wallclock_time", "Hora (HH:MM:SS):", c => c.WallclockTime);
-
-        var tcRow = ChkRow(panel);
-        Chk(tcRow, "timecode_enabled", "Disparo por timecode", c => c.TimecodeEnabled);
-        Txt(panel, "timecode_value", "Timecode (HH:MM:SS:FF):", c => c.TimecodeValue);
-
-        var duckRow = ChkRow(panel);
-        Chk(duckRow, "duck_enabled", "Duck/boost del resto al sonar", c => c.DuckEnabled);
-        Num(panel, "duck_level", "Nivel (dB, − = duck):", c => c.DuckLevel);
-        Num(panel, "duck_time", "Tiempo del fundido (s):", c => c.DuckTime);
 
         return scroll;
     }
@@ -286,15 +285,12 @@ public sealed class InspectorPanel : ContentControl
         Header(panel, "CUSTOM");
         Num(panel, "translate_x", "Desplazar X (px):", c => c.TranslateX);
         Num(panel, "translate_y", "Desplazar Y (px):", c => c.TranslateY);
-        Num(panel, "scale_x", "Escala X (×):", c => c.ScaleX);
-        Num(panel, "scale_y", "Escala Y (× — necesita compositor):", c => c.ScaleY);
-        Num(panel, "rotate_z", "Rotación Z (°, se cuantiza a 90):", c => c.RotateZ);
+        Num(panel, "scale_x", "Escala (×):", c => c.ScaleX);
+        Num(panel, "rotate_z", "Rotación (°, se cuantiza a 90):", c => c.RotateZ);
 
         Header(panel, "COMPOSITOR (fase 3b)");
         Txt(panel, "layer", "Layer (top/bottom/1..999):", c => c.Layer);
         Num(panel, "opacity", "Opacidad (%):", c => c.Opacity);
-        Num(panel, "rotate_x", "Rotación X (°):", c => c.RotateX);
-        Num(panel, "rotate_y", "Rotación Y (°):", c => c.RotateY);
 
         return scroll;
     }
@@ -331,8 +327,63 @@ public sealed class InspectorPanel : ContentControl
         };
         Note(panel, "El volumen se aplica EN VIVO si el cue está sonando. " +
                     "El VU master está en la barra superior.");
+
+        // ── Salida de audio por cue ─────────────────────────────────────
+        Header(panel, "SALIDA DE AUDIO DE ESTE CUE");
+        var outRow = Conditional(panel, c => c.Type == CueType.Audio);
+        outRow.Children.Add(new TextBlock
+        {
+            Text = "Dispositivo:", Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        var outCombo = new ComboBox { MinWidth = 260 };
+        outCombo.SelectionChanged += (_, _) =>
+        {
+            if ((outCombo.SelectedItem as ComboBoxItem)?.Tag is string dev)
+                Commit("audio_output", dev);
+        };
+        outRow.Children.Add(outCombo);
+        _loaders["audio_output"] = c =>
+        {
+            outCombo.Items.Clear();
+            outCombo.Items.Add(new ComboBoxItem
+            { Content = "(salida principal)", Tag = "" });
+            try
+            {
+                foreach (var dev in WinCue.Audio.AudioEngine.ListDevices())
+                    outCombo.Items.Add(new ComboBoxItem { Content = dev.Name, Tag = dev.Name });
+                foreach (string asio in WinCue.Audio.AudioEngine.ListAsioDrivers())
+                    outCombo.Items.Add(new ComboBoxItem { Content = $"[ASIO] {asio}", Tag = asio });
+            }
+            catch (Exception) { }
+            foreach (ComboBoxItem item in outCombo.Items)
+                if ((string)item.Tag == c.AudioOutput)
+                {
+                    outCombo.SelectedItem = item;
+                    return;
+                }
+            outCombo.SelectedIndex = 0;
+        };
+
+        // ── Audición local ──────────────────────────────────────────────
+        var audRow = Conditional(panel, c => c.Type == CueType.Audio);
+        var audBtn = new Button
+        {
+            Content = "🎧 Audición (cascos)",
+            Margin = new Thickness(0, 8, 0, 0),
+            Padding = new Thickness(12, 5, 12, 5),
+        };
+        audBtn.Click += (_, _) => AuditionRequested?.Invoke();
+        audRow.Children.Add(audBtn);
+        Note(panel, "Reproduce este cue por el dispositivo de audición " +
+                    "(Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.");
+
         return scroll;
     }
+
+    /// <summary>El botón de audición fue pulsado (la ventana llama al controlador).</summary>
+    public event Action? AuditionRequested;
 
     private static string VolumeLabel(double v) =>
         v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB ({v * 100:0}%)";

@@ -253,6 +253,87 @@ public class EditingAndSafetyTests : ControllerTestBase
         Assert.Empty(View.Statuses);   // silencioso: sin flashes
     }
 
+    // ------------------------------------------------------------------
+    // Salida por cue / audición / fade-all / wall-clock
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void AudioOutput_PerCue_ReachesEngine()
+    {
+        AddCue(CueType.Audio, setup: c => c.AudioOutput = "Monitores");
+        Controller.OnGoPressed();
+        Assert.Equal("Monitores", Audio.Plays[0].P.OutputDevice);
+    }
+
+    [Fact]
+    public void Audition_PlaysOnAuditionDevice_AndToggles()
+    {
+        Settings.Set("audition_device_name", "Cascos");
+        var a = AddCue(CueType.Audio, "tema", setup: c => c.TrimStart = 2.0);
+
+        Controller.AuditionToggle(0);
+        var play = Assert.Single(Audio.Plays);
+        Assert.Equal(MainController.AuditionCueId, play.CueId);
+        Assert.Equal("Cascos", play.P.OutputDevice);
+        Assert.Equal(2.0, play.P.TrimStart);
+        Assert.Empty(Controller.RunningCueIds);   // no entra en el flujo del show
+
+        Controller.AuditionToggle(0);              // segundo toque = parar
+        Assert.False(Audio.IsPlaying(MainController.AuditionCueId));
+    }
+
+    [Fact]
+    public void FadeAll_UsesConfiguredSeconds()
+    {
+        Settings.Set("fade_all_seconds", 3.0);
+        var a = AddCue(CueType.Audio);
+        Controller.TriggerCueId(a.Id);
+
+        Controller.OnFadeAll();
+
+        var stop = Assert.Single(Audio.Stops);
+        Assert.Equal(3.0, stop.Fade);
+    }
+
+    [Fact]
+    public void Wallclock_FiresCueAtConfiguredTime()
+    {
+        var target = new DateTime(2026, 7, 14, 20, 30, 0);   // martes
+        var cue = AddCue(CueType.Audio, "apertura", setup: c =>
+        {
+            c.WallclockEnabled = true;
+            c.WallclockTime = "20:30:00";
+            c.WallclockDays = 127;   // todos los días
+        });
+
+        Controller.NowProvider = () => target.AddSeconds(-1);
+        Controller.Tick();                       // 20:29:59 → nada
+        Assert.Empty(Audio.Plays);
+
+        Controller.NowProvider = () => target;
+        Controller.Tick();                       // 20:30:00 → dispara
+        Assert.Single(Audio.Plays);
+
+        Controller.Tick();                       // mismo segundo → no repite
+        Assert.Single(Audio.Plays);
+    }
+
+    [Fact]
+    public void Wallclock_RespectsDayMask()
+    {
+        var tuesday = new DateTime(2026, 7, 14, 10, 0, 0);   // martes = bit 1
+        AddCue(CueType.Audio, setup: c =>
+        {
+            c.WallclockEnabled = true;
+            c.WallclockTime = "10:00:00";
+            c.WallclockDays = 1;     // SOLO lunes (bit 0)
+        });
+
+        Controller.NowProvider = () => tuesday;
+        Controller.Tick();
+        Assert.Empty(Audio.Plays);   // martes no está en la máscara
+    }
+
     [Fact]
     public void ShowLog_EmitsTransportEvents()
     {

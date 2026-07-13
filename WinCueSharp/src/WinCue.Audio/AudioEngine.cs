@@ -58,8 +58,9 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private string _driver;                       // "wasapi" | "asio"
     private string? _asioDriverName;
 
-    private IWavePlayer? _output;
-    private MixingSampleProvider? _mixer;
+    // MULTI-SALIDA: un bus (dispositivo + mixer persistente) por nombre de
+    // dispositivo. La clave "" es la salida principal configurada en settings.
+    private readonly Dictionary<string, OutputBus> _outputs = new();
     private bool _paused;
 
     private readonly Dictionary<int, AudioBuffer> _buffers = new();
@@ -71,7 +72,8 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private float _master = 1.0f;
     private bool _disposed;
 
-    private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput);
+    private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer);
+    private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput, string Bus);
 
     // ------------------------------------------------------------------
     // Construcción
@@ -270,19 +272,21 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// <summary>Pausa todas las reproducciones activas (congela posición).</summary>
     public void PauseAll()
     {
-        if (_paused || _output is null)
+        if (_paused || _outputs.Count == 0)
             return;
         _paused = true;
-        try { _output.Pause(); } catch (Exception) { }
+        foreach (var bus in _outputs.Values)
+            try { bus.Player.Pause(); } catch (Exception) { }
     }
 
     /// <summary>Reanuda las reproducciones pausadas desde su posición congelada.</summary>
     public void ResumeAll()
     {
-        if (!_paused || _output is null)
+        if (!_paused || _outputs.Count == 0)
             return;
         _paused = false;
-        try { _output.Play(); } catch (Exception) { }
+        foreach (var bus in _outputs.Values)
+            try { bus.Player.Play(); } catch (Exception) { }
     }
 
     /// <summary>Pausa SOLO este cue (silencio, posición congelada).</summary>
@@ -380,10 +384,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             EmitError(cueId, "Buffer en RAM no disponible para reproducción.");
             return;
         }
-        if (!EnsureOutput())
-        {
+
+        string bus = p.OutputDevice ?? "";
+        var mixer = EnsureOutput(cueId, bus);
+        if (mixer is null)
             return;   // EmitError ya emitido
-        }
 
         var provider = new CueSampleProvider(
             cueId, buffer,
@@ -395,8 +400,8 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         provider.LevelReport += rms => Post(() => LevelReport?.Invoke(rms));
 
         var input = AdaptToMixerFormat(provider);
-        _active[cueId] = new ActiveCue(provider, input);
-        _mixer!.AddMixerInput(input);
+        _active[cueId] = new ActiveCue(provider, input, bus);
+        mixer.AddMixerInput(input);
         SetState(cueId, MediaCueState.Playing);
     }
 
@@ -418,36 +423,59 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         return source;
     }
 
-    private bool EnsureOutput()
+    /// <summary>Devuelve (creando si hace falta) el mixer del bus dado.
+    /// bus "" = salida principal; otro valor = nombre de dispositivo.</summary>
+    private MixingSampleProvider? EnsureOutput(int cueId, string bus)
     {
-        if (_output is not null)
-            return true;
+        if (_outputs.TryGetValue(bus, out var existing))
+            return existing.Mixer;
         try
         {
-            _mixer = new MixingSampleProvider(
+            var mixer = new MixingSampleProvider(
                 WaveFormat.CreateIeeeFloatWaveFormat(_mixSampleRate, 2))
             {
                 ReadFully = true,   // silencio cuando no hay cues → stream siempre vivo
             };
-            _mixer.MixerInputEnded += OnMixerInputEnded;
+            mixer.MixerInputEnded += OnMixerInputEnded;
 
-            _output = CreateOutput();
-            _output.Init(_mixer);
-            _output.Play();
-            _paused = false;
-            return true;
+            var player = CreateOutput(bus);
+            player.Init(mixer);
+            player.Play();
+            _outputs[bus] = new OutputBus(player, mixer);
+            return mixer;
         }
         catch (Exception exc)
         {
-            _mixer = null;
-            _output = null;
-            EmitError(-1, $"No se pudo abrir el dispositivo de audio: {exc.Message}");
-            return false;
+            EmitError(cueId, $"No se pudo abrir el dispositivo de audio" +
+                (bus.Length > 0 ? $" '{bus}'" : "") + $": {exc.Message}");
+            return null;
         }
     }
 
-    private IWavePlayer CreateOutput()
+    private IWavePlayer CreateOutput(string bus)
     {
+        // Bus con nombre: buscar dispositivo WASAPI o driver ASIO por nombre
+        if (bus.Length > 0)
+        {
+            try
+            {
+                using var enumerator = new MMDeviceEnumerator();
+                foreach (var dev in enumerator.EnumerateAudioEndPoints(DataFlow.Render, DeviceState.Active))
+                {
+                    if (dev.FriendlyName == bus)
+                        return new WasapiOut(dev, AudioClientShareMode.Shared,
+                            useEventSync: true, _latencyMs);
+                    dev.Dispose();
+                }
+            }
+            catch (Exception) { }
+            if (ListAsioDrivers().Contains(bus))
+                return new AsioOut(bus);
+            // Dispositivo desaparecido → caer a la salida por defecto
+            return new WasapiOut(AudioClientShareMode.Shared, _latencyMs);
+        }
+
+        // Bus principal: configuración de settings (driver + device)
         if (_driver.Equals("asio", StringComparison.OrdinalIgnoreCase))
         {
             var names = ListAsioDrivers();
@@ -494,27 +522,26 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         });
     }
 
-    /// <summary>Retira el cue del mixer y del registro (parada manual).</summary>
+    /// <summary>Retira el cue del mixer de su bus y del registro (parada manual).</summary>
     private void StopCtx(int cueId, bool emitState)
     {
         if (!_active.Remove(cueId, out var a))
             return;
         a.Provider.RequestStop();               // por si el mixer lee antes del Remove
-        _mixer?.RemoveMixerInput(a.MixerInput);
+        if (_outputs.TryGetValue(a.Bus, out var bus))
+            bus.Mixer.RemoveMixerInput(a.MixerInput);
         if (emitState)
             SetState(cueId, MediaCueState.Stopped);
     }
 
     private void CloseOutput()
     {
-        var output = _output;
-        _output = null;
-        _mixer = null;
-        if (output is not null)
+        foreach (var bus in _outputs.Values)
         {
-            try { output.Stop(); } catch (Exception) { }
-            try { output.Dispose(); } catch (Exception) { }
+            try { bus.Player.Stop(); } catch (Exception) { }
+            try { bus.Player.Dispose(); } catch (Exception) { }
         }
+        _outputs.Clear();
         _paused = false;
     }
 

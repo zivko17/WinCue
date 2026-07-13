@@ -39,7 +39,8 @@ public class SettingsManager
         ["audio_buffer_size"]  = 512,        // samples
         ["audio_sample_rate"]  = 48000,      // 44100 | 48000 | 96000
         ["master_volume"]      = 100,        // 0–100
-        ["pre_roll_ms"]        = 0,          // ms de silencio antes de reproducir
+        ["pre_roll_ms"]        = 0,          // (legado Python; sin efecto en C#)
+        ["audition_device_name"] = "",       // salida de la audición local ("" = ppal)
 
         // ── Vídeo ────────────────────────────────────────────────────
         ["video_output_screen"]     = 0,     // índice de pantalla (0 = principal)
@@ -66,9 +67,12 @@ public class SettingsManager
 
         // ── Comportamiento de GO ─────────────────────────────────────
         ["go_mode"] = "concurrent",   // "concurrent" | "sequential" | "per_cue"
+        ["go_min_interval_ms"] = 200, // anti doble-tap del GO (0 = desactivado)
+        ["fade_all_seconds"] = 5.0,   // duración del FADE ALL manual
 
         // ── Interfaz ─────────────────────────────────────────────────
-        ["show_latency_column"] = true,
+        // Latencia OFF por defecto (útil para depurar, ruido para operar)
+        ["show_latency_column"] = false,
         ["show_next_cue_label"] = true,
         ["confirm_last_cue"]    = true,
         ["keyboard_go"]         = "Space",

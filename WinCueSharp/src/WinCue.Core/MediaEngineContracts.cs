@@ -12,7 +12,8 @@ namespace WinCue.Core;
 /// IDLE/LOADING/LOADED/PLAYING/STOPPED/ERROR de la versión Python).</summary>
 public enum MediaCueState { Idle, Loading, Loaded, Playing, Stopped, Error }
 
-/// <summary>Parámetros de reproducción de un cue de audio.</summary>
+/// <summary>Parámetros de reproducción de un cue de audio.
+/// OutputDevice: nombre del dispositivo de salida ("" = el principal).</summary>
 public sealed record AudioPlayParams(
     double Volume = 1.0,
     double FadeIn = 0.0,
@@ -20,7 +21,8 @@ public sealed record AudioPlayParams(
     bool Loop = false,
     double TrimStart = 0.0,
     double TrimEnd = 0.0,
-    int PlayCount = 1);
+    int PlayCount = 1,
+    string OutputDevice = "");
 
 /// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
 public sealed record VideoGeometry(

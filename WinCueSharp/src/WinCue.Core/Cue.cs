@@ -39,6 +39,10 @@ public class Cue
     [JsonPropertyName("fade_out")] public double FadeOut { get; set; }
     [JsonPropertyName("loop")]     public bool   Loop    { get; set; }
 
+    /// <summary>Dispositivo de salida de audio de ESTE cue ("" = principal).
+    /// Campo nuevo de la versión C# — la versión Python lo ignora al cargar.</summary>
+    [JsonPropertyName("audio_output")] public string AudioOutput { get; set; } = "";
+
     // ── Cues que apuntan a otro cue (FADE/START/STOP) ──────────────────
     [JsonPropertyName("target_id")]         public int? TargetId       { get; set; }
     [JsonPropertyName("fade_stop_on_done")] public bool FadeStopOnDone { get; set; } = true;

@@ -37,6 +37,8 @@
                             Content="GO ▶" ToolTip="Espacio"/>
                     <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
                             Content="■ STOP ALL" ToolTip="Escape"/>
+                    <Button x:Name="FadeAllButton" Click="OnFadeAllClick" Height="44"
+                            Content="◢ FADE ALL" ToolTip="Fundido elegante de todo (Settings → duración)"/>
                     <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
                             Background="#7e1e1e" Content="⚠ PANIC"/>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
@@ -116,6 +118,17 @@
                 <!-- Mini-monitores PVW / PGM (se rellenan desde código) -->
                 <StackPanel x:Name="MonitorHost" DockPanel.Dock="Top"
                             Margin="0,0,0,10"/>
+                <!-- Notas del cue en standby -->
+                <Border x:Name="NotesPanel" DockPanel.Dock="Top" Background="#2d2a1e"
+                        CornerRadius="4" Padding="8,6" Margin="0,0,0,10"
+                        Visibility="Collapsed">
+                    <StackPanel>
+                        <TextBlock Text="NOTAS DEL SIGUIENTE" FontSize="9"
+                                   Foreground="#a89968"/>
+                        <TextBlock x:Name="NotesText" TextWrapping="Wrap"
+                                   Foreground="#e8dcb8" FontSize="13"/>
+                    </StackPanel>
+                </Border>
                 <TextBlock DockPanel.Dock="Top" Text="EN REPRODUCCIÓN" FontWeight="Bold"
                            Foreground="{StaticResource FgDim}" Margin="0,0,0,6"/>
                 <ItemsControl x:Name="ActiveList">

@@ -79,6 +79,8 @@ public partial class MainWindow : Window, IShowView
                 _controller.OnCueEditCommitted(row,
                     new Dictionary<string, object?> { [key] = value });
         };
+        Inspector.AuditionRequested += () =>
+            _controller.AuditionToggle(CueGrid.SelectedIndex);
 
         // Mini-monitores PVW (siguiente) y PGM (programa, ~1.2 s como en Python)
         MonitorHost.Children.Add(_pvw);
@@ -110,7 +112,20 @@ public partial class MainWindow : Window, IShowView
         NextCueLabel.Text = cue is null
             ? "— fin de la lista —"
             : $"{cue.DisplayNumber} · {cue.Name}";
+
+        // Notas del cue en standby (el operador las lee sin abrir el inspector)
+        if (cue is { Notes.Length: > 0 })
+        {
+            NotesText.Text = cue.Notes;
+            NotesPanel.Visibility = Visibility.Visible;
+        }
+        else
+        {
+            NotesPanel.Visibility = Visibility.Collapsed;
+        }
     }
+
+    private void OnFadeAllClick(object sender, RoutedEventArgs e) => _controller.OnFadeAll();
 
     /// <summary>GO con confirmación opcional al disparar el ÚLTIMO cue.</summary>
     private void DoGo()
@@ -603,6 +618,10 @@ public partial class MainWindow : Window, IShowView
                     _controller.OnDeleteCue(CueGrid.SelectedIndex);
                     e.Handled = true;
                 }
+                break;
+            case Key.F2:
+                Inspector.FocusName();   // renombrado rápido
+                e.Handled = true;
                 break;
         }
     }
