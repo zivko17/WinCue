@@ -48,7 +48,19 @@ public partial class App : Application
 
         var scheduler = new TimerScheduler(dispatch);
         _controller = new MainController(model, window, _audio, _video, scheduler, settings);
-        window.Attach(model, _controller);
+        window.Attach(model, _controller, settings, applyEngineSettings: () =>
+        {
+            // Reconfigurar el dispositivo de audio en caliente tras guardar settings
+            string driver = settings.Get("audio_driver", "wasapi");
+            string devName = settings.Get("audio_device_name", "");
+            string? deviceId = null;
+            if (devName.Length > 0 && driver != "asio")
+                deviceId = AudioEngine.ListDevices()
+                    .FirstOrDefault(d => d.Name == devName)?.Id;
+            _audio.SetDevice(deviceId, driver,
+                asioDriverName: driver == "asio" ? devName : null);
+            _controller.OnMasterVolume(settings.Get("master_volume", 100));
+        });
 
         // Tick de 100 ms para el panel de activos y el countdown
         _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };

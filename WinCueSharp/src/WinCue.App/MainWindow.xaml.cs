@@ -20,8 +20,15 @@ public partial class MainWindow : Window, IShowView
 {
     private CueModel _model = null!;
     private MainController _controller = null!;
+    private SettingsManager _settings = null!;
+    private Action? _applyEngineSettings;   // lo inyecta App (reconfigurar audio)
     private VideoOutputWindow? _videoOutput;
     private readonly DispatcherTimer _statusTimer;
+
+    // Atajos configurables (Interfaz → Atajos de teclado)
+    private Key _keyGo = Key.Space;
+    private Key _keyStop = Key.S;
+    private Key _keyPrev = Key.Up;
 
     private readonly ObservableCollection<CueRowViewModel> _rows = new();
     private readonly ObservableCollection<ActiveRowVM> _activeRows = new();
@@ -42,11 +49,34 @@ public partial class MainWindow : Window, IShowView
     }
 
     /// <summary>Conecta modelo y controlador (llamado por App tras construir todo).</summary>
-    public void Attach(CueModel model, MainController controller)
+    public void Attach(CueModel model, MainController controller,
+                       SettingsManager settings, Action? applyEngineSettings = null)
     {
         _model = model;
         _controller = controller;
+        _settings = settings;
+        _applyEngineSettings = applyEngineSettings;
+        LoadKeyBindings();
         ReloadTable();
+    }
+
+    private void LoadKeyBindings()
+    {
+        _keyGo = ParseKey(_settings.Get("keyboard_go", "Space"), Key.Space);
+        _keyStop = ParseKey(_settings.Get("keyboard_stop", "S"), Key.S);
+        _keyPrev = ParseKey(_settings.Get("keyboard_prev", "Left"), Key.Left);
+    }
+
+    private static Key ParseKey(string name, Key fallback)
+    {
+        // Aceptar nombres Qt heredados del settings.json de Python
+        name = name switch
+        {
+            "Esc" => "Escape",
+            "Return" => "Enter",
+            _ => name,
+        };
+        return Enum.TryParse<Key>(name, ignoreCase: true, out var k) ? k : fallback;
     }
 
     // ==================================================================
@@ -194,6 +224,19 @@ public partial class MainWindow : Window, IShowView
         else _videoOutput.Show();
     }
 
+    private void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SettingsWindow(_settings) { Owner = this };
+        dlg.Saved += () =>
+        {
+            LoadKeyBindings();
+            MasterSlider.Value = _settings.Get("master_volume", 100);
+            _applyEngineSettings?.Invoke();
+            FlashStatus("Configuración guardada y aplicada.");
+        };
+        dlg.ShowDialog();
+    }
+
     // ==================================================================
     // Lista
     // ==================================================================
@@ -273,18 +316,34 @@ public partial class MainWindow : Window, IShowView
     private void OnKeyDownGlobal(object sender, KeyEventArgs e)
     {
         if (_controller is null) return;
-        switch (e.Key)
+
+        // Atajos configurables (Settings → Interfaz)
+        if (Keyboard.Modifiers == ModifierKeys.None)
         {
-            case Key.Space:
+            if (e.Key == _keyGo)
+            {
                 _controller.OnGoPressed();
                 e.Handled = true;
-                break;
+                return;
+            }
+            if (e.Key == _keyStop)
+            {
+                _controller.OnStopSelected(CueGrid.SelectedIndex);
+                e.Handled = true;
+                return;
+            }
+            if (e.Key == _keyPrev)
+            {
+                _controller.OnPrevPressed();
+                e.Handled = true;
+                return;
+            }
+        }
+
+        switch (e.Key)
+        {
             case Key.Escape:
                 _controller.OnStopPressed();
-                e.Handled = true;
-                break;
-            case Key.S when Keyboard.Modifiers == ModifierKeys.None:
-                _controller.OnStopSelected(CueGrid.SelectedIndex);
                 e.Handled = true;
                 break;
             case Key.P when Keyboard.Modifiers == ModifierKeys.None:

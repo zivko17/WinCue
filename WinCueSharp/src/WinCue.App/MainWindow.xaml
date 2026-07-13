@@ -46,6 +46,7 @@
                                   Background="#3c3c3c" Foreground="{StaticResource Fg}"
                                   Content="Modo: EDIT"/>
                     <Button Click="OnVideoOutputClick" Height="44" Content="🖵 Salida vídeo"/>
+                    <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
                 </StackPanel>
 
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right"

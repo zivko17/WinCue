@@ -52,10 +52,17 @@ la migración.
       testigo en status bar, atajos (Espacio/Esc/S/P/flechas/Ctrl+G/Supr),
       drag-drop de archivos, abrir/guardar show. Arranca con
       `dotnet run --project src/WinCue.App` (acepta ruta .json y --smoke).
+- [x] **Settings** (`SettingsWindow`): 5 pestañas (Audio/Vídeo/Red-Control/
+      Interfaz/Rutas) contra el mismo settings.json que Python. Enumeración
+      real de dispositivos WASAPI+ASIO, pantallas y entradas MIDI
+      (NAudio.Midi — sin mido). Test de ping OSC y MIDI Learn portados.
+      Al guardar: dispositivo/driver de audio se reconfiguran en caliente,
+      atajos de teclado se releen (acepta nombres Qt heredados), master se
+      sincroniza; sample rate avisa de reinicio.
 - [ ] **Fase 5b — Inspector en vivo** bajo la tabla (pestañas Basics/Triggers/
       Geometry/Time&amp;Loops/Levels), panel de tarjetas, hotkeys por cue.
 - [ ] **Fase 5c — Salida a monitor real**: blackout + testigo completo,
-      mini-monitor PGM/PVW, diálogo de settings.
+      mini-monitor PGM/PVW, colocación en pantalla configurada.
 - [ ] **Fase 6 — Backends fase-2 del original**: MIDI/Timecode/Wall-clock,
       Duck/Boost, rate con preserve-pitch en audio, OSC.
 
