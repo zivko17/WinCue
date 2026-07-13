@@ -31,6 +31,9 @@ public class MainController
     /// <summary>Se emite cuando cambia el playhead.</summary>
     public event Action<int>? ActiveIndexChanged;
 
+    /// <summary>Registro de eventos del show (GO/STOP/PANIC/carga…) para el log.</summary>
+    public event Action<string>? ShowLog;
+
     // ------------------------------------------------------------------
     // Info de un cue en ejecución
     // ------------------------------------------------------------------
@@ -48,6 +51,7 @@ public class MainController
         public readonly List<IDisposable> Timers = new();
         public bool ManualStop;
         public bool AdvanceChain;
+        public bool SelfPaused;              // pausa individual (no pause-all)
     }
 
     // ------------------------------------------------------------------
@@ -70,6 +74,17 @@ public class MainController
     private readonly Dictionary<int, RunningCue> _running = new();
     private readonly Dictionary<int, HashSet<int>> _rrState = new();   // RANDOM round-robin
     private readonly List<IDisposable> _chainTimers = new();
+
+    // Undo/redo: snapshots JSON del modelo (baratos: el show es texto pequeño)
+    private const int MaxUndo = 100;
+    private readonly List<(string Json, int Playhead)> _undoStack = new();
+    private readonly List<(string Json, int Playhead)> _redoStack = new();
+
+    // Portapapeles interno de cues (JSON de una lista de cues)
+    private string? _clipboard;
+
+    // Anti doble-GO: instante del último GO aceptado
+    private long _lastGoTicks;
 
     public int Playhead => _playhead;
     public bool IsPaused => _paused;
@@ -113,17 +128,27 @@ public class MainController
     // TRANSPORT — API pública conectada a la vista
     // ==================================================================
 
-    /// <summary>GO: dispara el cue del playhead y avanza, sin cortar los activos.</summary>
+    /// <summary>GO: dispara el cue del playhead y avanza, sin cortar los activos.
+    /// Protegido contra el doble-tap accidental (go_min_interval_ms).</summary>
     public void OnGoPressed()
     {
-        if (_model.GetCue(_playhead) is null)
+        int minMs = _settings.Get("go_min_interval_ms", 200);
+        if (minMs > 0 && _lastGoTicks != 0 &&
+            Stopwatch.GetElapsedTime(_lastGoTicks).TotalMilliseconds < minMs)
+            return;   // doble-tap: ignorar
+        _lastGoTicks = Stopwatch.GetTimestamp();
+
+        var cue = _model.GetCue(_playhead);
+        if (cue is null)
             return;
+        Log($"GO → {cue.DisplayNumber} · {cue.Name}");
         GoCue(_playhead);
     }
 
     /// <summary>Stop All: detiene todos los cues. No mueve el playhead.</summary>
     public void OnStopPressed()
     {
+        Log("STOP ALL");
         StopEverything(fade: 0.0);
         _view.FlashStatus("■ STOP ALL — todos los cues detenidos");
     }
@@ -131,8 +156,62 @@ public class MainController
     /// <summary>Panic: fundido de salida global y parada de todo.</summary>
     public void OnPanic()
     {
+        Log("PANIC");
         StopEverything(fade: PanicFade);
         _view.FlashStatus($"⚠ PANIC — fundido de {PanicFade:F0}s y parada");
+    }
+
+    /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
+    public void StopCueById(int cueId)
+    {
+        if (_running.ContainsKey(cueId))
+        {
+            Log($"STOP → cue id {cueId}");
+            EndCue(cueId, markStopped: true);
+        }
+    }
+
+    /// <summary>Pausa/reanuda SOLO el cue de la fila dada (media en ejecución).
+    /// Los timers de duración se congelan y reprograman al reanudar.</summary>
+    public void OnPauseCueToggle(int row)
+    {
+        var cue = _model.GetCue(row);
+        if (cue is null || !cue.IsMedia() ||
+            !_running.TryGetValue(cue.Id, out var run))
+            return;
+
+        if (!run.SelfPaused)
+        {
+            run.SelfPaused = true;
+            if (cue.Type == CueType.Audio) _audio.PauseCue(cue.Id);
+            else _video.PauseCue(cue.Id);
+            // Congelar el timer de duración (si lo hay)
+            foreach (var t in run.Timers) t.Dispose();
+            run.Timers.Clear();
+            _view.FlashStatus($"⏸ {cue.DisplayNumber} en pausa");
+        }
+        else
+        {
+            run.SelfPaused = false;
+            double elapsed;
+            if (cue.Type == CueType.Audio)
+            {
+                _audio.ResumeCue(cue.Id);
+                elapsed = _audio.GetElapsed(cue.Id);
+            }
+            else
+            {
+                _video.ResumeCue(cue.Id);
+                elapsed = _video.GetElapsed(cue.Id);
+            }
+            // Reprogramar el resto de la duración fijada
+            if (run.Duration > 0.0 && !cue.Loop)
+            {
+                double remaining = Math.Max(0.0, run.Duration - elapsed);
+                Schedule(run, (int)(remaining * 1000), () => DurationElapsed(cue.Id));
+            }
+            _view.FlashStatus($"▶ {cue.DisplayNumber} reanudado");
+        }
     }
 
     /// <summary>Volumen master global (0-100) desde el slider del top bar.</summary>
@@ -805,6 +884,8 @@ public class MainController
     // PLAYHEAD / MODELO / VISTA
     // ==================================================================
 
+    private void Log(string message) => ShowLog?.Invoke(message);
+
     private void SetPlayhead(int index)
     {
         int count = _model.Count;
@@ -878,11 +959,173 @@ public class MainController
     }
 
     // ==================================================================
+    // UNDO / REDO — snapshots JSON del modelo
+    // ==================================================================
+
+    private void PushUndo()
+    {
+        _undoStack.Add((_model.ToJson(), _playhead));
+        if (_undoStack.Count > MaxUndo)
+            _undoStack.RemoveAt(0);
+        _redoStack.Clear();
+    }
+
+    public bool CanUndo => _undoStack.Count > 0;
+    public bool CanRedo => _redoStack.Count > 0;
+
+    public void Undo()
+    {
+        if (_undoStack.Count == 0)
+            return;
+        _redoStack.Add((_model.ToJson(), _playhead));
+        var (json, playhead) = _undoStack[^1];
+        _undoStack.RemoveAt(_undoStack.Count - 1);
+        RestoreSnapshot(json, playhead);
+        _view.FlashStatus("↶ Deshacer");
+    }
+
+    public void Redo()
+    {
+        if (_redoStack.Count == 0)
+            return;
+        _undoStack.Add((_model.ToJson(), _playhead));
+        var (json, playhead) = _redoStack[^1];
+        _redoStack.RemoveAt(_redoStack.Count - 1);
+        RestoreSnapshot(json, playhead);
+        _view.FlashStatus("↷ Rehacer");
+    }
+
+    private void RestoreSnapshot(string json, int playhead)
+    {
+        // No detiene la reproducción: los motores van por id, y las instancias
+        // en _running conservan copia de los datos que necesitan.
+        try
+        {
+            _model.ReplaceAll(CueModel.FromJson(json));
+        }
+        catch (FormatException)
+        {
+            return;   // snapshot corrupto: no tocar el modelo
+        }
+        _view.ReloadTable();
+        SetPlayhead(playhead);
+    }
+
+    // ==================================================================
+    // COPIAR / PEGAR / DUPLICAR
+    // ==================================================================
+
+    /// <summary>Copia los cues de las filas dadas (con sus descendientes).</summary>
+    public void CopyCues(IReadOnlyList<int> rows)
+    {
+        string? json = SerializeRows(rows);
+        if (json is null)
+            return;
+        _clipboard = json;
+        _view.FlashStatus("Cues copiados");
+    }
+
+    /// <summary>Pega el portapapeles debajo de la fila dada, con ids nuevos.</summary>
+    public void PasteCues(int row)
+    {
+        if (_clipboard is null)
+            return;
+        InsertSerialized(_clipboard, row);
+    }
+
+    /// <summary>Duplica las filas dadas justo debajo (sin tocar el portapapeles).</summary>
+    public void DuplicateCues(IReadOnlyList<int> rows)
+    {
+        string? json = SerializeRows(rows);
+        if (json is null)
+            return;
+        InsertSerialized(json, rows.Max());
+    }
+
+    private string? SerializeRows(IReadOnlyList<int> rows)
+    {
+        var valid = rows.Where(r => r >= 0 && r < _model.Count)
+                        .Distinct().OrderBy(r => r).ToList();
+        if (valid.Count == 0)
+            return null;
+        // Incluir descendientes de los grupos seleccionados (en orden de lista)
+        var ids = new HashSet<int>();
+        foreach (int r in valid)
+        {
+            var c = _model.Cues[r];
+            ids.Add(c.Id);
+            foreach (var d in _model.Descendants(c.Id))
+                ids.Add(d.Id);
+        }
+        var block = _model.Cues.Where(c => ids.Contains(c.Id)).ToList();
+        return System.Text.Json.JsonSerializer.Serialize(block, CueJson);
+    }
+
+    private void InsertSerialized(string json, int afterRow)
+    {
+        List<Cue> cues;
+        try
+        {
+            cues = System.Text.Json.JsonSerializer.Deserialize<List<Cue>>(json, CueJson)
+                ?? new List<Cue>();
+        }
+        catch (System.Text.Json.JsonException) { return; }
+        if (cues.Count == 0)
+            return;
+
+        PushUndo();
+
+        // Ids nuevos preservando la jerarquía interna del bloque
+        var idMap = new Dictionary<int, int>();
+        int nextId = _model.NextId();
+        foreach (var c in cues)
+            idMap[c.Id] = nextId++;
+        var refCue = afterRow >= 0 ? _model.GetCue(afterRow) : null;
+        foreach (var c in cues)
+        {
+            int oldId = c.Id;
+            c.Id = idMap[oldId];
+            c.ParentId = c.ParentId is int pid && idMap.TryGetValue(pid, out int npid)
+                ? npid                     // padre dentro del bloque pegado
+                : refCue?.ParentId;        // nivel superior: hereda contexto
+            c.State = CueState.Idle;
+            c.LatencyMs = null;
+        }
+
+        int insertAt = afterRow >= 0 ? afterRow + 1 : _model.Count;
+        for (int i = 0; i < cues.Count; i++)
+            _model.InsertCue(insertAt + i, cues[i]);
+        _view.ReloadTable();
+        SetPlayhead(insertAt);
+        _view.FlashStatus($"{cues.Count} cue(s) pegados");
+    }
+
+    private static readonly System.Text.Json.JsonSerializerOptions CueJson = new()
+    {
+        WriteIndented = false,
+        Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
+    };
+
+    /// <summary>Mueve un cue de fila (drag &amp; drop de la tabla).</summary>
+    public void OnMoveCue(int fromRow, int toRow)
+    {
+        if (fromRow == toRow ||
+            fromRow < 0 || fromRow >= _model.Count ||
+            toRow < 0 || toRow >= _model.Count)
+            return;
+        PushUndo();
+        _model.MoveCue(fromRow, toRow);
+        _view.ReloadTable();
+        SetPlayhead(toRow);
+    }
+
+    // ==================================================================
     // GESTIÓN DE LA LISTA (añadir / importar / editar / guardar)
     // ==================================================================
 
     public void AddNewCue(CueType cueType = CueType.Audio)
     {
+        PushUndo();
         var cue = new Cue
         {
             Id = _model.NextId(),
@@ -899,6 +1142,7 @@ public class MainController
     /// <summary>Inserta un cue nuevo del tipo dado justo debajo de la fila row.</summary>
     public void OnInsertCue(CueType cueType, int row)
     {
+        PushUndo();
         int insertAt = row >= 0 ? row + 1 : _model.Count;
         // Heredar el grupo del cue de referencia (mantiene contigüidad)
         var refCue = row >= 0 ? _model.GetCue(row) : null;
@@ -922,6 +1166,7 @@ public class MainController
         var cue = _model.GetCue(row);
         if (cue is null)
             return;
+        PushUndo();
         if (_running.ContainsKey(cue.Id))
             EndCue(cue.Id, markStopped: false);
         _model.RemoveCue(row);
@@ -946,6 +1191,7 @@ public class MainController
         var valid = rows.Where(r => r >= 0 && r < _model.Count).Distinct().OrderBy(r => r).ToList();
         if (valid.Count == 0)
             return;
+        PushUndo();
         var cues = _model.Cues;
         var selCues = valid.Select(r => cues[r]).ToList();
 
@@ -996,6 +1242,7 @@ public class MainController
         var group = _model.GetCue(row);
         if (group is null || group.Type != CueType.Group)
             return;
+        PushUndo();
         foreach (var c in _model.DirectChildren(group.Id))
             c.ParentId = group.ParentId;
         _rrState.Remove(group.Id);
@@ -1017,9 +1264,11 @@ public class MainController
         _view.ApplyGroupVisibility();
     }
 
-    /// <summary>Crea cues a partir de archivos (drag-drop / importación).</summary>
+    /// <summary>Crea cues a partir de archivos (drag-drop / importación).
+    /// La duración real del archivo se lee con ffprobe al importar.</summary>
     public void AddCuesFromFiles(int targetRow, IReadOnlyList<string> paths)
     {
+        PushUndo();
         int insertAt = targetRow >= 0 ? targetRow : _model.Count;
         int created = 0;
         foreach (string path in paths)
@@ -1033,7 +1282,7 @@ public class MainController
                 Id = _model.NextId(),
                 Type = ctype,
                 Name = Path.GetFileNameWithoutExtension(path),
-                Duration = 0.0,
+                Duration = MediaImporter.ProbeDurationSeconds(result.FilePath),
                 Number = _model.NextNumber(),
                 FilePath = result.FilePath,
             };
@@ -1060,6 +1309,7 @@ public class MainController
         if (cue is null)
             return;
 
+        PushUndo();
         bool fileChanged = fields.TryGetValue("file_path", out var fp)
             && !string.Equals(fp?.ToString() ?? "", cue.FilePath, StringComparison.Ordinal);
 
@@ -1121,21 +1371,60 @@ public class MainController
     // Guardar / cargar show en JSON (la vista pone los diálogos)
     // ------------------------------------------------------------------
 
+    /// <summary>Guarda el show. El media que vive junto al .json (o debajo) se
+    /// guarda con RUTA RELATIVA → el show es portátil entre máquinas.</summary>
     public void SaveShow(string path)
     {
         if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             path += ".json";
+        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";
+
+        // Relativizar temporalmente y restaurar tras serializar
+        var originals = new Dictionary<int, string>();
+        foreach (var c in _model.Cues)
+        {
+            if (c.FilePath.Length == 0 || !Path.IsPathRooted(c.FilePath) || dir.Length == 0)
+                continue;
+            string rel = Path.GetRelativePath(dir, c.FilePath);
+            if (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel))
+            {
+                originals[c.Id] = c.FilePath;
+                c.FilePath = rel;
+            }
+        }
         try
         {
             File.WriteAllText(path, _model.ToJson());
+            Log($"Show guardado: {path}");
             _view.FlashStatus($"Show guardado: {Path.GetFileName(path)}");
         }
         catch (IOException exc)
         {
             _view.ShowError("Error al guardar", exc.Message);
         }
+        finally
+        {
+            foreach (var c in _model.Cues)
+                if (originals.TryGetValue(c.Id, out string? orig))
+                    c.FilePath = orig;
+        }
     }
 
+    /// <summary>Guardado silencioso para el autosave (sin diálogos ni status).</summary>
+    public bool Autosave(string path)
+    {
+        if (_model.Count == 0)
+            return false;
+        try
+        {
+            File.WriteAllText(path, _model.ToJson());
+            return true;
+        }
+        catch (IOException) { return false; }
+    }
+
+    /// <summary>Carga un show: resuelve rutas relativas contra la carpeta del
+    /// .json y marca en ERROR los cues cuyo media no existe.</summary>
     public void LoadShow(string path)
     {
         List<Cue> newCues;
@@ -1154,11 +1443,36 @@ public class MainController
             return;
         }
 
+        PushUndo();   // deshacer la carga restaura el show anterior
         StopEverything(fade: 0.0);
+
+        // Rutas relativas → absolutas respecto a la carpeta del show
+        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";
+        foreach (var c in newCues)
+            if (c.FilePath.Length > 0 && !Path.IsPathRooted(c.FilePath) && dir.Length > 0)
+                c.FilePath = Path.GetFullPath(Path.Combine(dir, c.FilePath));
+
         _model.ReplaceAll(newCues);
+
+        // Media faltante → estado ERROR visible en la tabla
+        int missing = 0;
+        for (int i = 0; i < _model.Count; i++)
+        {
+            var c = _model.Cues[i];
+            if ((c.IsMedia() || c.Type == CueType.Script) &&
+                c.FilePath.Length > 0 && !File.Exists(c.FilePath))
+            {
+                _model.SetState(i, CueState.Error);
+                missing++;
+            }
+        }
+
         _view.ReloadTable();
         SetPlayhead(0);
-        _view.FlashStatus($"Show cargado: {Path.GetFileName(path)}");
+        Log($"Show cargado: {path}");
+        _view.FlashStatus(missing > 0
+            ? $"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados"
+            : $"Show cargado: {Path.GetFileName(path)}");
     }
 
     // ------------------------------------------------------------------

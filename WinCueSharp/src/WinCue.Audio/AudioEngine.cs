@@ -285,6 +285,19 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         try { _output.Play(); } catch (Exception) { }
     }
 
+    /// <summary>Pausa SOLO este cue (silencio, posición congelada).</summary>
+    public void PauseCue(int cueId)
+    {
+        if (_active.TryGetValue(cueId, out var a))
+            a.Provider.SetPaused(true);
+    }
+
+    public void ResumeCue(int cueId)
+    {
+        if (_active.TryGetValue(cueId, out var a))
+            a.Provider.SetPaused(false);
+    }
+
     public bool IsPlaying(int cueId) => _active.ContainsKey(cueId);
 
     public bool AnyPlaying => _active.Count > 0;

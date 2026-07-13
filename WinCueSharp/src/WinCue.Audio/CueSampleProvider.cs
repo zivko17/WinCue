@@ -49,6 +49,7 @@ public sealed class CueSampleProvider : ISampleProvider
     private bool _stopAfterFade;
     private volatile bool _fadeActive;  // publicar SIEMPRE en último lugar
     private volatile bool _requestStop; // terminar tras el bloque en curso
+    private volatile bool _paused;      // emitir silencio sin avanzar posición
 
     /// <summary>Multiplicador master global (lo fija el AudioEngine).</summary>
     private volatile float _master = 1.0f;
@@ -167,6 +168,12 @@ public sealed class CueSampleProvider : ISampleProvider
     /// <summary>El hilo RT terminará tras el bloque en curso.</summary>
     public void RequestStop() => _requestStop = true;
 
+    /// <summary>Pausa individual: emite silencio sin avanzar la posición
+    /// (devolver 0 haría que el mixer retirase el input).</summary>
+    public void SetPaused(bool paused) => _paused = paused;
+
+    public bool IsPaused => _paused;
+
     /// <summary>Volumen master global (multiplicador aplicado en el hilo RT).</summary>
     public void SetMaster(float master) => _master = Math.Clamp(master, 0.0f, 1.0f);
 
@@ -186,6 +193,12 @@ public sealed class CueSampleProvider : ISampleProvider
 
         if (_completed)
             return 0;
+
+        if (_paused)
+        {
+            Array.Clear(buffer, offset, count);   // silencio, posición congelada
+            return count;
+        }
 
         int channels = _buf.Channels;
         int framesRequested = count / channels;

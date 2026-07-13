@@ -41,6 +41,13 @@
                             Background="#7e1e1e" Content="⚠ PANIC"/>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
                             Content="⏸ PAUSA"/>
+                    <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
+                        <TextBlock Text="SIGUIENTE" FontSize="9"
+                                   Foreground="{StaticResource FgDim}"/>
+                        <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14"
+                                   FontWeight="Bold" TextTrimming="CharacterEllipsis"
+                                   Foreground="#e8c000"/>
+                    </StackPanel>
                     <Separator Width="12" Background="Transparent"/>
                     <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
                                   Checked="OnShowMode" Unchecked="OnEditMode"
@@ -60,9 +67,8 @@
                     <TextBlock x:Name="MasterLabel" Text="100" Width="30"
                                VerticalAlignment="Center" TextAlignment="Right"/>
                     <Separator Width="16" Background="Transparent"/>
-                    <ProgressBar x:Name="VuBar" Width="90" Height="12" Maximum="1"
-                                 Foreground="#2ecc71" Background="#111"
-                                 VerticalAlignment="Center"/>
+                    <local:VuMeterControl x:Name="VuBar" Width="90" Height="14"
+                                          VerticalAlignment="Center"/>
                 </StackPanel>
 
                 <TextBlock x:Name="CountdownLabel" Text="" FontSize="26" FontWeight="Bold"
@@ -117,16 +123,24 @@
                         <DataTemplate>
                             <Border Background="#333" CornerRadius="4" Padding="8,6"
                                     Margin="0,0,0,6">
-                                <StackPanel>
-                                    <TextBlock Text="{Binding Title}" FontWeight="Bold"
-                                               TextTrimming="CharacterEllipsis"/>
-                                    <TextBlock Text="{Binding TimeText}"
-                                               Foreground="#2ecc71" FontFamily="Consolas"/>
-                                    <ProgressBar Height="4" Maximum="1"
-                                                 Value="{Binding Fraction, Mode=OneWay}"
-                                                 Foreground="#2ecc71" Background="#222"
-                                                 Margin="0,4,0,0"/>
-                                </StackPanel>
+                                <DockPanel>
+                                    <Button DockPanel.Dock="Right" Content="■"
+                                            Width="26" Height="26" Margin="6,0,0,0"
+                                            Background="#5a2a2a" Foreground="#ddd"
+                                            BorderBrush="#703030"
+                                            ToolTip="Detener este cue"
+                                            Tag="{Binding Id}" Click="OnActiveStopClick"/>
+                                    <StackPanel>
+                                        <TextBlock Text="{Binding Title}" FontWeight="Bold"
+                                                   TextTrimming="CharacterEllipsis"/>
+                                        <TextBlock Text="{Binding TimeText}"
+                                                   Foreground="#2ecc71" FontFamily="Consolas"/>
+                                        <ProgressBar Height="4" Maximum="1"
+                                                     Value="{Binding Fraction, Mode=OneWay}"
+                                                     Foreground="#2ecc71" Background="#222"
+                                                     Margin="0,4,0,0"/>
+                                    </StackPanel>
+                                </DockPanel>
                             </Border>
                         </DataTemplate>
                     </ItemsControl.ItemTemplate>
@@ -146,12 +160,14 @@
                   AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" GridLinesVisibility="None"
                   Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
-                  RowBackground="#1e1e1e" AlternatingRowBackground="#232324"
+                  RowHeight="30" FontSize="13"
                   BorderThickness="0" SelectionMode="Extended" SelectionUnit="FullRow"
                   CanUserAddRows="False" CanUserDeleteRows="False"
                   CanUserReorderColumns="False"
                   SelectionChanged="OnGridSelectionChanged"
                   MouseDoubleClick="OnGridDoubleClick"
+                  PreviewMouseLeftButtonDown="OnGridMouseDown"
+                  PreviewMouseMove="OnGridMouseMove"
                   Drop="OnGridDrop" AllowDrop="True">
             <DataGrid.ColumnHeaderStyle>
                 <Style TargetType="DataGridColumnHeader">
@@ -164,6 +180,8 @@
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Setter Property="Visibility" Value="{Binding RowVisibility}"/>
+                    <!-- Progreso del cue embebido en la fila (estilo QLab) -->
+                    <Setter Property="Background" Value="{Binding RowBrush}"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
                             <Setter Property="Background" Value="{StaticResource PlayheadBg}"/>
@@ -190,7 +208,16 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Tipo" Binding="{Binding TypeText}" Width="70"/>
+                <DataGridTemplateColumn Header="Tipo" Width="88">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding TypeLabel}"
+                                       Foreground="{Binding TypeBrush}"
+                                       FontWeight="SemiBold"
+                                       VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
                 <DataGridTemplateColumn Header="Nombre" Width="*">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
@@ -203,7 +230,8 @@
                 <DataGridTextColumn Header="Dur" Binding="{Binding DurationText}" Width="64"/>
                 <DataGridTextColumn Header="Post" Binding="{Binding PostWaitText}" Width="56"/>
                 <DataGridTextColumn Header="Sigue" Binding="{Binding ContinueText}" Width="72"/>
-                <DataGridTextColumn Header="Lat" Binding="{Binding LatencyText}" Width="60"/>
+                <DataGridTextColumn x:Name="LatColumn" Header="Lat"
+                                    Binding="{Binding LatencyText}" Width="60"/>
                 <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"/>
                 <DataGridTextColumn Header="✕" Binding="{Binding ArmedText}" Width="28"/>
             </DataGrid.Columns>

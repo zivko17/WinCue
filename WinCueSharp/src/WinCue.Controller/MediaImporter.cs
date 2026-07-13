@@ -64,8 +64,9 @@ public static class MediaImporter
         return new(true, Path.GetFullPath(filePath), name, ext, mediaType, null);
     }
 
-    /// <summary>Valida filePath y, si es válido, actualiza cue.FilePath y cue.Type.
-    /// La latencia medida se invalida si el archivo cambió.</summary>
+    /// <summary>Valida filePath y, si es válido, actualiza cue.FilePath, cue.Type
+    /// y cue.Duration (leída con ffprobe). La latencia medida se invalida si el
+    /// archivo cambió.</summary>
     public static (bool Ok, string Error) AssignToCue(Cue cue, string filePath)
     {
         var result = ValidateFile(filePath);
@@ -79,8 +80,47 @@ public static class MediaImporter
         else if (result.MediaType == "VIDEO") cue.Type = CueType.Video;
 
         if (!string.Equals(cue.FilePath, oldPath, StringComparison.OrdinalIgnoreCase))
+        {
             cue.LatencyMs = null;
+            double dur = ProbeDurationSeconds(cue.FilePath);
+            if (dur > 0.0)
+                cue.Duration = dur;
+        }
 
         return (true, "");
+    }
+
+    /// <summary>Duración del media en segundos vía ffprobe (0 si no disponible).
+    /// Las imágenes no tienen duración → 0.</summary>
+    public static double ProbeDurationSeconds(string filePath)
+    {
+        if (ImageFormats.Contains(Path.GetExtension(filePath)))
+            return 0.0;
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffprobe")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
+            psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("format=duration");
+            psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("default=nw=1:nk=1");
+            psi.ArgumentList.Add(filePath);
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return 0.0;
+            string output = proc.StandardOutput.ReadToEnd().Trim();
+            if (!proc.WaitForExit(8_000))
+            {
+                try { proc.Kill(); } catch (Exception) { }
+                return 0.0;
+            }
+            return double.TryParse(output, System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double d) && d > 0
+                ? Math.Round(d, 3) : 0.0;
+        }
+        catch (Exception) { return 0.0; }
     }
 }

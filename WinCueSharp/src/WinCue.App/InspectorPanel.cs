@@ -153,9 +153,9 @@ public sealed class InspectorPanel : ContentControl
             ("AutoContinue", "Auto-continue (tras post-wait)"),
             ("AutoFollow", "Auto-follow (al acabar la acción)"));
 
-        Num(panel, "pre_wait", "Pre-wait (s):", c => c.PreWait);
-        Num(panel, "duration", "Duración (s):", c => c.Duration);
-        Num(panel, "post_wait", "Post-wait (s):", c => c.PostWait);
+        TimeF(panel, "pre_wait", "Pre-wait:", c => c.PreWait);
+        TimeF(panel, "duration", "Duración:", c => c.Duration);
+        TimeF(panel, "post_wait", "Post-wait:", c => c.PostWait);
 
         FileRow(panel);
 
@@ -245,8 +245,8 @@ public sealed class InspectorPanel : ContentControl
             c => c.PreservePitch);
 
         Header(panel, "FUNDIDOS");
-        Num(panel, "fade_in", "Fade in (s):", c => c.FadeIn);
-        Num(panel, "fade_out", "Fade out (s):", c => c.FadeOut);
+        TimeF(panel, "fade_in", "Fade in:", c => c.FadeIn);
+        TimeF(panel, "fade_out", "Fade out:", c => c.FadeOut);
 
         Header(panel, "RECORTE (TRIM)");
         _wave.Margin = new Thickness(0, 4, 0, 6);
@@ -265,8 +265,8 @@ public sealed class InspectorPanel : ContentControl
             finally { _loading = false; }
         };
         panel.Children.Add(_wave);
-        Num(panel, "trim_start", "Inicio (s dentro del archivo):", c => c.TrimStart);
-        Num(panel, "trim_end", "Fin (s; 0 = hasta el final):", c => c.TrimEnd);
+        TimeF(panel, "trim_start", "Inicio (dentro del archivo):", c => c.TrimStart);
+        TimeF(panel, "trim_end", "Fin (0 = hasta el final):", c => c.TrimEnd);
 
         return scroll;
     }
@@ -446,6 +446,40 @@ public sealed class InspectorPanel : ContentControl
         row.Children.Add(tb);
         _loaders[key] = c => tb.Text = read(c).ToString("0.###",
             System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Campo de tiempo: muestra m:ss.d si ≥60 s y acepta ambos formatos
+    /// ("90", "1:30", "1:30.5") — equivalente al TimeEdit de la versión Python.</summary>
+    private void TimeF(StackPanel panel, string key, string label, Func<Cue, double> read)
+    {
+        var row = LabeledRow(panel, label);
+        var tb = MakeTextBox(90);
+        WireTextCommit(tb, key, () => ParseTime(tb.Text));
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = FormatTime(read(c));
+    }
+
+    private static string FormatTime(double s) =>
+        s >= 60.0
+            ? $"{(int)(s / 60)}:{s % 60:00.0##}".TrimEnd('0').TrimEnd('.')
+            : s.ToString("0.###", System.Globalization.CultureInfo.InvariantCulture);
+
+    private static object? ParseTime(string text)
+    {
+        text = text.Trim().Replace(',', '.');
+        if (text.Contains(':'))
+        {
+            var parts = text.Split(':');
+            if (parts.Length == 2 &&
+                int.TryParse(parts[0], out int m) &&
+                double.TryParse(parts[1], System.Globalization.NumberStyles.Float,
+                    System.Globalization.CultureInfo.InvariantCulture, out double sec))
+                return m * 60 + sec;
+            return null;
+        }
+        return double.TryParse(text, System.Globalization.NumberStyles.Float,
+            System.Globalization.CultureInfo.InvariantCulture, out double v)
+            ? v : null;
     }
 
     private void Int(StackPanel panel, string key, string label, Func<Cue, int> read)

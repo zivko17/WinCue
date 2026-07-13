@@ -28,6 +28,72 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
 
     public string TypeText => _cue.Type.ToString().ToUpperInvariant();
 
+    /// <summary>Icono + tipo, coloreado (escaneable de reojo).</summary>
+    public string TypeLabel => _cue.Type switch
+    {
+        CueType.Audio => "♪ AUDIO",
+        CueType.Video => "▣ VÍDEO",
+        CueType.Wait => "⏱ WAIT",
+        CueType.Fade => "◢ FADE",
+        CueType.Start => "▶ START",
+        CueType.Stop => "■ STOP",
+        CueType.Script => "⚙ SCRIPT",
+        CueType.Memo => "✎ MEMO",
+        CueType.Group => "▸ GRUPO",
+        _ => TypeText,
+    };
+
+    public Brush TypeBrush => BrushFrom(_cue.Type switch
+    {
+        CueType.Audio => "#4a86b8",
+        CueType.Video => "#9b59b6",
+        CueType.Wait => "#888888",
+        CueType.Fade => "#e8a200",
+        CueType.Start => "#2ecc71",
+        CueType.Stop => "#c0392b",
+        CueType.Script => "#16a085",
+        CueType.Memo => "#777777",
+        CueType.Group => "#e8c000",
+        _ => "#dddddd",
+    });
+
+    // ── Progreso dentro de la fila (estilo QLab) ───────────────────────
+    private double _progress;   // 0 = sin progreso visible
+
+    /// <summary>Fracción reproducida del cue (la fija la vista en cada tick).</summary>
+    public void SetProgress(double fraction)
+    {
+        if (Math.Abs(fraction - _progress) < 0.005)
+            return;
+        _progress = fraction;
+        OnChanged(nameof(RowBrush));
+    }
+
+    /// <summary>Fondo de la fila: barra de progreso embebida (verde translúcido).</summary>
+    public Brush RowBrush
+    {
+        get
+        {
+            if (_progress <= 0.0)
+                return Brushes.Transparent;
+            double f = Math.Clamp(_progress, 0.0, 1.0);
+            var brush = new LinearGradientBrush
+            {
+                StartPoint = new System.Windows.Point(0, 0),
+                EndPoint = new System.Windows.Point(1, 0),
+                GradientStops =
+                {
+                    new GradientStop(Color.FromArgb(70, 0x1e, 0x7e, 0x34), 0.0),
+                    new GradientStop(Color.FromArgb(70, 0x1e, 0x7e, 0x34), f),
+                    new GradientStop(Colors.Transparent, f),
+                    new GradientStop(Colors.Transparent, 1.0),
+                },
+            };
+            brush.Freeze();
+            return brush;
+        }
+    }
+
     public string Name => _cue.Type == CueType.Group
         ? $"{(_cue.Collapsed ? "▸" : "▾")} {_cue.Name}"
         : _cue.Name;

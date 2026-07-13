@@ -3,5 +3,118 @@
              xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
     <!-- Sin StartupUri: la ventana se construye en App.OnStartup (composición) -->
     <Application.Resources>
+
+        <!-- ══════════ Tema oscuro global ══════════ -->
+
+        <SolidColorBrush x:Key="CtlBg" Color="#2a2a2a"/>
+        <SolidColorBrush x:Key="CtlBorder" Color="#444444"/>
+        <SolidColorBrush x:Key="CtlFg" Color="#dddddd"/>
+        <SolidColorBrush x:Key="CtlHighlight" Color="#264f78"/>
+
+        <Style TargetType="TextBox">
+            <Setter Property="Background" Value="{StaticResource CtlBg}"/>
+            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="BorderBrush" Value="{StaticResource CtlBorder}"/>
+            <Setter Property="CaretBrush" Value="#e8a200"/>
+            <Setter Property="Padding" Value="4,2"/>
+        </Style>
+
+        <Style TargetType="CheckBox">
+            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+        </Style>
+
+        <!-- ComboBox oscuro (retemplado: el estilo de sistema es claro) -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="Padding" Value="8,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="bd" Background="Transparent"
+                                Padding="{TemplateBinding Padding}">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="bd" Property="Background"
+                                        Value="{StaticResource CtlHighlight}"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="ComboBox">
+            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="MinHeight" Value="26"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBox">
+                        <Grid>
+                            <ToggleButton Focusable="False" ClickMode="Press"
+                                IsChecked="{Binding IsDropDownOpen, Mode=TwoWay,
+                                    RelativeSource={RelativeSource TemplatedParent}}">
+                                <ToggleButton.Template>
+                                    <ControlTemplate TargetType="ToggleButton">
+                                        <Border Background="{StaticResource CtlBg}"
+                                                BorderBrush="{StaticResource CtlBorder}"
+                                                BorderThickness="1" CornerRadius="2">
+                                            <Path HorizontalAlignment="Right"
+                                                  VerticalAlignment="Center"
+                                                  Margin="0,0,8,0"
+                                                  Data="M 0 0 L 4 4 L 8 0 Z" Fill="#999999"/>
+                                        </Border>
+                                    </ControlTemplate>
+                                </ToggleButton.Template>
+                            </ToggleButton>
+                            <ContentPresenter Margin="8,3,24,3"
+                                VerticalAlignment="Center" IsHitTestVisible="False"
+                                Content="{TemplateBinding SelectionBoxItem}"
+                                ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"/>
+                            <Popup IsOpen="{TemplateBinding IsDropDownOpen}"
+                                   Placement="Bottom" AllowsTransparency="True"
+                                   Focusable="False" PopupAnimation="Slide">
+                                <Border Background="{StaticResource CtlBg}"
+                                        BorderBrush="#555555" BorderThickness="1"
+                                        MinWidth="{TemplateBinding ActualWidth}"
+                                        MaxHeight="340">
+                                    <ScrollViewer VerticalScrollBarVisibility="Auto">
+                                        <StackPanel IsItemsHost="True"
+                                            KeyboardNavigation.DirectionalNavigation="Contained"/>
+                                    </ScrollViewer>
+                                </Border>
+                            </Popup>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- Pestañas oscuras (inspector y settings) -->
+        <Style TargetType="TabItem">
+            <Setter Property="Foreground" Value="#888888"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="TabItem">
+                        <Border x:Name="bd" Background="#111111"
+                                BorderBrush="#333333" BorderThickness="1,1,1,0"
+                                Padding="14,5" Margin="0,0,2,0">
+                            <ContentPresenter ContentSource="Header"/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="bd" Property="Background" Value="#1e1e1e"/>
+                                <Setter Property="Foreground" Value="#e8a200"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter Property="Foreground" Value="#cccccc"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
     </Application.Resources>
 </Application>

@@ -305,6 +305,19 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 try { player.SetProperty("pause", false); } catch (Exception) { }
     }
 
+    /// <summary>Pausa SOLO este vídeo (congela reloj y frame).</summary>
+    public void PauseCue(int cueId)
+    {
+        if (_players.TryGetValue(cueId, out var player))
+            try { player.SetProperty("pause", true); } catch (Exception) { }
+    }
+
+    public void ResumeCue(int cueId)
+    {
+        if (_players.TryGetValue(cueId, out var player))
+            try { player.SetProperty("pause", false); } catch (Exception) { }
+    }
+
     /// <summary>Aplica la geometría a un vídeo EN REPRODUCCIÓN (en vivo).
     /// El modo FULL conserva la escala base del cue (no la pisa a 0).</summary>
     public void ApplyGeometry(int cueId, VideoGeometry geo)

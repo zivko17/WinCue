@@ -62,6 +62,9 @@ public interface IAudioEngine
     void SetMasterVolume(double volume);
     void PauseAll();
     void ResumeAll();
+    /// <summary>Pausa SOLO este cue (congela su posición; emite silencio).</summary>
+    void PauseCue(int cueId);
+    void ResumeCue(int cueId);
     bool IsPlaying(int cueId);
     double GetDuration(int cueId);
     double GetElapsed(int cueId);
@@ -87,6 +90,9 @@ public interface IVideoEngine
     void SetMasterVolume(double volume);
     void PauseAll();
     void ResumeAll();
+    /// <summary>Pausa SOLO este cue (congela su reloj).</summary>
+    void PauseCue(int cueId);
+    void ResumeCue(int cueId);
     bool IsPlaying(int cueId);
     double GetDuration(int cueId);
     double GetElapsed(int cueId);

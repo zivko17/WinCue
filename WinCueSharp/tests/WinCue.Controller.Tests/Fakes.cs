@@ -116,11 +116,15 @@ public sealed class FakeAudioEngine : IAudioEngine
     public void SetMasterVolume(double volume) => Master = volume;
     public void PauseAll() => PausedAll = true;
     public void ResumeAll() => ResumedAll = true;
+    public void PauseCue(int cueId) => PausedCues.Add(cueId);
+    public void ResumeCue(int cueId) => PausedCues.Remove(cueId);
     public bool IsPlaying(int cueId) => Playing.Contains(cueId);
     public double GetDuration(int cueId) => Durations.GetValueOrDefault(cueId);
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
     public void InvalidateCache(int cueId) => Invalidated.Add(cueId);
     public void Cleanup() { }
+
+    public readonly HashSet<int> PausedCues = new();
 
     /// <summary>Simula el fin natural del audio (como el mixer real).</summary>
     public void EndNaturally(int cueId)
@@ -190,12 +194,16 @@ public sealed class FakeVideoEngine : IVideoEngine
     public void SetMasterVolume(double volume) => Master = volume;
     public void PauseAll() => PausedAll = true;
     public void ResumeAll() => ResumedAll = true;
+    public void PauseCue(int cueId) => PausedCues.Add(cueId);
+    public void ResumeCue(int cueId) => PausedCues.Remove(cueId);
     public bool IsPlaying(int cueId) => Playing.Contains(cueId);
     public double GetDuration(int cueId) => Durations.GetValueOrDefault(cueId);
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
     public void ApplyGeometry(int cueId, VideoGeometry geo) => GeometryApplied.Add((cueId, geo));
     public void SetWindowHandleProvider(Func<nint> getWindowHandle) => HandleProvider = getWindowHandle;
     public void Cleanup() { }
+
+    public readonly HashSet<int> PausedCues = new();
 
     public void EndNaturally(int cueId)
     {
@@ -261,6 +269,8 @@ public class ControllerTestBase : IDisposable
         _dir = Path.Combine(Path.GetTempPath(), "wincue_ctl_" + Guid.NewGuid().ToString("N"));
         Directory.CreateDirectory(_dir);
         Settings = new SettingsManager(Path.Combine(_dir, "settings.json"));
+        // Los tests disparan GOs consecutivos: desactivar el anti doble-tap
+        Settings.Set("go_min_interval_ms", 0);
         Controller = new MainController(Model, View, Audio, Video, Clock, Settings,
             random: new Random(42));
     }

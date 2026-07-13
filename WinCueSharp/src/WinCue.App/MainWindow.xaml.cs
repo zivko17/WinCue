@@ -36,6 +36,13 @@ public partial class MainWindow : Window, IShowView
     private Key _keyStop = Key.S;
     private Key _keyPrev = Key.Up;
 
+    // Hotkeys por cue (Triggers → Hotkey)
+    private readonly Dictionary<Key, int> _cueHotkeys = new();
+
+    // Drag & drop de filas (reordenar)
+    private Point _dragStart;
+    private int _dragRow = -1;
+
     private readonly ObservableCollection<CueRowViewModel> _rows = new();
     private readonly ObservableCollection<ActiveRowVM> _activeRows = new();
 
@@ -83,7 +90,42 @@ public partial class MainWindow : Window, IShowView
         _pgmTimer.Tick += (_, _) => UpdateProgramMonitor();
         _pgmTimer.Start();
 
+        ApplyViewSettings();
         ReloadTable();
+    }
+
+    /// <summary>Aplica los settings de vista (columna de latencia, etiqueta
+    /// del siguiente cue). Se llama al arrancar y al guardar settings.</summary>
+    private void ApplyViewSettings()
+    {
+        LatColumn.Visibility = _settings.Get("show_latency_column", true)
+            ? Visibility.Visible : Visibility.Collapsed;
+        NextCueLabel.Visibility = _settings.Get("show_next_cue_label", true)
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    private void UpdateNextCueLabel()
+    {
+        var cue = _model.GetCue(_playheadIndex);
+        NextCueLabel.Text = cue is null
+            ? "— fin de la lista —"
+            : $"{cue.DisplayNumber} · {cue.Name}";
+    }
+
+    /// <summary>GO con confirmación opcional al disparar el ÚLTIMO cue.</summary>
+    private void DoGo()
+    {
+        if (_settings.Get("confirm_last_cue", true) &&
+            _model.Count > 0 && _controller.Playhead == _model.Count - 1)
+        {
+            var cue = _model.GetCue(_controller.Playhead);
+            if (MessageBox.Show(this,
+                    $"Es el ÚLTIMO cue de la lista:\n\n{cue?.DisplayNumber} · {cue?.Name}\n\n¿Disparar?",
+                    "GO — último cue", MessageBoxButton.YesNo, MessageBoxImage.Question)
+                != MessageBoxResult.Yes)
+                return;
+        }
+        _controller.OnGoPressed();
     }
 
     private void UpdateProgramMonitor()
@@ -164,7 +206,10 @@ public partial class MainWindow : Window, IShowView
             _suppressSelection = false;
         }
         if (_controller is not null)
+        {
             UpdatePreviewMonitor();
+            UpdateNextCueLabel();
+        }
     }
 
     public void RefreshRow(int index)
@@ -180,6 +225,7 @@ public partial class MainWindow : Window, IShowView
             _rows.Add(new CueRowViewModel(cue, _model));
         SetPlayhead(_playheadIndex);
         UpdateInspector();   // la lista cambió: reapuntar al cue seleccionado
+        RebuildHotkeys();
     }
 
     public void AppendCueRow(Cue cue) => _rows.Add(new CueRowViewModel(cue, _model));
@@ -190,7 +236,19 @@ public partial class MainWindow : Window, IShowView
             r.RefreshAll();
     }
 
-    public void RebuildHotkeys() { /* fase 5b: hotkeys por cue */ }
+    /// <summary>Reconstruye el mapa tecla → cue (Triggers → Hotkey).</summary>
+    public void RebuildHotkeys()
+    {
+        _cueHotkeys.Clear();
+        foreach (var cue in _model.Cues)
+        {
+            if (cue.Hotkey.Length == 0)
+                continue;
+            var key = ParseKey(cue.Hotkey, Key.None);
+            if (key != Key.None)
+                _cueHotkeys[key] = cue.Id;
+        }
+    }
 
     public void UpdateTransport(bool paused) =>
         PauseButton.Content = paused ? "▶ REANUDAR" : "⏸ PAUSA";
@@ -212,10 +270,17 @@ public partial class MainWindow : Window, IShowView
             else
                 _activeRows.Add(new ActiveRowVM(rows[i]));
         }
+
+        // Progreso embebido en las filas de la tabla (estilo QLab)
+        var byId = new Dictionary<int, double>();
+        foreach (var r in rows)
+            if (r.Fraction is double f)
+                byId[r.Id] = f;
+        foreach (var vm in _rows)
+            vm.SetProgress(byId.GetValueOrDefault(vm.CueId));
     }
 
-    public void UpdateVuMeter(float rms) =>
-        VuBar.Value = Math.Min(1.0, rms * 1.4);   // ligera ganancia visual
+    public void UpdateVuMeter(float rms) => VuBar.SetLevel(rms);
 
     public nint GetVideoOutputHandle()
     {
@@ -249,7 +314,13 @@ public partial class MainWindow : Window, IShowView
     // Transport / toolbar
     // ==================================================================
 
-    private void OnGoClick(object sender, RoutedEventArgs e) => _controller.OnGoPressed();
+    private void OnGoClick(object sender, RoutedEventArgs e) => DoGo();
+
+    private void OnActiveStopClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { Tag: int cueId })
+            _controller.StopCueById(cueId);
+    }
     private void OnStopAllClick(object sender, RoutedEventArgs e) => _controller.OnStopPressed();
     private void OnPanicClick(object sender, RoutedEventArgs e) => _controller.OnPanic();
     private void OnPauseClick(object sender, RoutedEventArgs e) => _controller.OnPauseToggle();
@@ -310,6 +381,7 @@ public partial class MainWindow : Window, IShowView
         dlg.Saved += () =>
         {
             LoadKeyBindings();
+            ApplyViewSettings();
             MasterSlider.Value = _settings.Get("master_volume", 100);
             _applyEngineSettings?.Invoke();
             if (_videoOutput is { IsVisible: true })
@@ -389,8 +461,49 @@ public partial class MainWindow : Window, IShowView
 
     private void OnGridDrop(object sender, DragEventArgs e)
     {
+        // Reordenación interna de filas
+        if (e.Data.GetDataPresent("WinCueRow"))
+        {
+            int from = (int)e.Data.GetData("WinCueRow")!;
+            int to = RowIndexAt(e.GetPosition(CueGrid));
+            if (to >= 0 && from != to)
+                _controller.OnMoveCue(from, to);
+            return;
+        }
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
             _controller.AddCuesFromFiles(CueGrid.SelectedIndex, files);
+    }
+
+    // ── Drag & drop de filas para reordenar ────────────────────────────
+
+    private void OnGridMouseDown(object sender, MouseButtonEventArgs e)
+    {
+        _dragStart = e.GetPosition(CueGrid);
+        _dragRow = RowIndexAt(_dragStart);
+    }
+
+    private void OnGridMouseMove(object sender, MouseEventArgs e)
+    {
+        if (e.LeftButton != MouseButtonState.Pressed || _dragRow < 0)
+            return;
+        if (ModeToggle.IsChecked == true)
+            return;   // en modo SHOW no se reordena
+        var pos = e.GetPosition(CueGrid);
+        if (Math.Abs(pos.X - _dragStart.X) < 6 && Math.Abs(pos.Y - _dragStart.Y) < 6)
+            return;   // umbral: no confundir clic con arrastre
+        int from = _dragRow;
+        _dragRow = -1;
+        DragDrop.DoDragDrop(CueGrid, new DataObject("WinCueRow", from),
+            DragDropEffects.Move);
+    }
+
+    /// <summary>Índice de fila bajo un punto del DataGrid (-1 si ninguna).</summary>
+    private int RowIndexAt(Point point)
+    {
+        var hit = CueGrid.InputHitTest(point) as DependencyObject;
+        while (hit is not null and not DataGridRow)
+            hit = System.Windows.Media.VisualTreeHelper.GetParent(hit);
+        return hit is DataGridRow row ? row.GetIndex() : -1;
     }
 
     // ==================================================================
@@ -415,7 +528,7 @@ public partial class MainWindow : Window, IShowView
         {
             if (e.Key == _keyGo)
             {
-                _controller.OnGoPressed();
+                DoGo();
                 e.Handled = true;
                 return;
             }
@@ -430,6 +543,33 @@ public partial class MainWindow : Window, IShowView
                 _controller.OnPrevPressed();
                 e.Handled = true;
                 return;
+            }
+            // Hotkey por cue (dispara sin mover el playhead)
+            if (_cueHotkeys.TryGetValue(e.Key, out int hotCueId))
+            {
+                _controller.TriggerCueId(hotCueId);
+                e.Handled = true;
+                return;
+            }
+        }
+
+        // Edición (Ctrl+…)
+        if (Keyboard.Modifiers == ModifierKeys.Control)
+        {
+            var selRows = CueGrid.SelectedItems.Cast<CueRowViewModel>()
+                .Select(vm => _model.IndexOfId(vm.CueId)).Where(i => i >= 0).ToList();
+            switch (e.Key)
+            {
+                case Key.Z: _controller.Undo(); e.Handled = true; return;
+                case Key.Y: _controller.Redo(); e.Handled = true; return;
+                case Key.C: _controller.CopyCues(selRows); e.Handled = true; return;
+                case Key.V: _controller.PasteCues(CueGrid.SelectedIndex); e.Handled = true; return;
+                case Key.D:
+                    if (selRows.Count > 0) _controller.DuplicateCues(selRows);
+                    e.Handled = true; return;
+                case Key.P:
+                    _controller.OnPauseCueToggle(CueGrid.SelectedIndex);
+                    e.Handled = true; return;
             }
         }
 
@@ -485,6 +625,8 @@ public partial class MainWindow : Window, IShowView
         private ActiveCueInfo _info;
 
         public ActiveRowVM(ActiveCueInfo info) => _info = info;
+
+        public int Id => _info.Id;
 
         public string Title => $"{_info.Number} · {_info.Name}";
 
