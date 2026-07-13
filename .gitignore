@@ -13,3 +13,8 @@ WinCue/libmpv-2.dll
 __pycache__/
 *.pyc
 WinCue/debug_video*.log
+
+# Repositorios git independientes anidados (tienen su propia historia)
+ffmpeg-gui/
+FMC_py/
+node_modules/

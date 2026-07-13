@@ -1,0 +1,46 @@
+Copyright (C) 2025 Andrés Zivkovic González
+
+                    GNU GENERAL PUBLIC LICENSE
+                       Version 3, 29 June 2007
+
+ Copyright (C) 2007 Free Software Foundation, Inc. <https://fsf.org/>
+ Everyone is permitted to copy and distribute verbatim copies
+ of this license document, but changing it is not allowed.
+
+                            Preamble
+
+  The GNU General Public License is a free, copyleft license for
+software and other kinds of works.
+
+  For the precise terms and conditions for copying, distribution and
+modification, follow the terms and conditions of the GNU General
+Public License Version 3 available at:
+
+  https://www.gnu.org/licenses/gpl-3.0.html
+
+  The full text of the GNU General Public License Version 3 is
+incorporated herein by reference.
+
+--------------------------------------------------------------------------------
+
+ADDITIONAL NOTICE — FFmpeg
+
+This program includes FFmpeg (https://ffmpeg.org), a multimedia framework
+developed by its respective authors, distributed under the GNU General
+Public License version 2 or later.
+
+FFmpeg is NOT owned by Andrés Zivkovic González.
+Source code for the version of FFmpeg included in this distribution is
+available at: https://ffmpeg.org/download.html
+
+--------------------------------------------------------------------------------
+
+DISCLAIMER OF WARRANTY
+
+THIS SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND,
+EXPRESS OR IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF
+MERCHANTABILITY, FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT.
+IN NO EVENT SHALL THE AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY
+CLAIM, DAMAGES OR OTHER LIABILITY, WHETHER IN AN ACTION OF CONTRACT,
+TORT OR OTHERWISE, ARISING FROM, OUT OF OR IN CONNECTION WITH THE
+SOFTWARE OR THE USE OR OTHER DEALINGS IN THE SOFTWARE.
