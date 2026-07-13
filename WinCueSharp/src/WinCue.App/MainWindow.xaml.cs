@@ -26,9 +26,9 @@ public partial class MainWindow : Window, IShowView
     private VideoOutputWindow? _videoOutput;
     private readonly DispatcherTimer _statusTimer;
 
-    // Mini-monitores PVW/PGM (fase 5c)
-    private readonly MonitorControl _pvw = new("PVW", Color.FromRgb(0x27, 0x86, 0x5a));
-    private readonly MonitorControl _pgm = new("PGM", Color.FromRgb(0xc0, 0x39, 0x2b));
+    // Mini-monitores PVW/PGM en vivo (mpv embebido y silenciado)
+    private readonly LiveMonitorControl _pvw = new("PVW", Color.FromRgb(0x27, 0x86, 0x5a));
+    private readonly LiveMonitorControl _pgm = new("PGM", Color.FromRgb(0xc0, 0x39, 0x2b));
     private DispatcherTimer? _pgmTimer;
 
     // Atajos configurables (Interfaz → Atajos de teclado)
@@ -82,13 +82,14 @@ public partial class MainWindow : Window, IShowView
         Inspector.AuditionRequested += () =>
             _controller.AuditionToggle(CueGrid.SelectedIndex);
 
-        // Mini-monitores PVW (siguiente) y PGM (programa, ~1.2 s como en Python)
+        // Mini-monitores PVW (siguiente, en bucle) y PGM (programa EN VIVO,
+        // re-sincronizado con el reloj del motor cada 500 ms)
         MonitorHost.Children.Add(_pvw);
         _pvw.Margin = new Thickness(0, 0, 0, 6);
         MonitorHost.Children.Add(_pgm);
         _pvw.Clear("—");
         _pgm.Clear("NEGRO");
-        _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(1200) };
+        _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _pgmTimer.Tick += (_, _) => UpdateProgramMonitor();
         _pgmTimer.Start();
 
@@ -148,25 +149,28 @@ public partial class MainWindow : Window, IShowView
         var info = _controller.GetProgramVideo();
         if (info is null)
         {
-            if (_pgm.LastPath.Length > 0)
+            if (_pgm.CurrentPath.Length > 0)
                 _pgm.Clear("NEGRO");
             return;
         }
-        _pgm.ShowFrame(info.Value.FilePath, info.Value.Elapsed);
+        // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí
+        _pgm.ShowVideo(info.Value.FilePath, info.Value.Elapsed, loop: false);
     }
 
-    /// <summary>PVW: primer frame del cue en standby (si es media con archivo).</summary>
+    /// <summary>PVW: el cue en standby reproduciéndose en bucle (mudo).</summary>
     private void UpdatePreviewMonitor()
     {
         var cue = _model.GetCue(_playheadIndex);
-        if (cue is null || !cue.IsMedia() || cue.FilePath.Length == 0)
+        if (cue is null || cue.FilePath.Length == 0 || cue.Type != CueType.Video)
         {
-            if (_pvw.LastPath.Length > 0)
+            if (cue is { Type: CueType.Audio, FilePath.Length: > 0 })
+                _pvw.Clear("♪ AUDIO (onda en el inspector)");
+            else if (_pvw.CurrentPath.Length > 0 || cue is null)
                 _pvw.Clear("—");
             return;
         }
-        if (cue.FilePath != _pvw.LastPath)
-            _pvw.ShowFrame(cue.FilePath, cue.TrimStart, force: true);
+        if (cue.FilePath != _pvw.CurrentPath)
+            _pvw.ShowVideo(cue.FilePath, cue.TrimStart, loop: true);
     }
 
     private void UpdateInspector()
@@ -632,6 +636,8 @@ public partial class MainWindow : Window, IShowView
 
     protected override void OnClosed(EventArgs e)
     {
+        _pvw.Shutdown();
+        _pgm.Shutdown();
         _videoOutput?.CloseForShutdown();
         base.OnClosed(e);
     }
