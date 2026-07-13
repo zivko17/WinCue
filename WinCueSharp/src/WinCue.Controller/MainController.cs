@@ -903,6 +903,20 @@ public class MainController
         SetPlayhead(Math.Min(insertAt, _model.Count - 1));
     }
 
+    /// <summary>Elimina el cue de la fila dada (deteniéndolo antes si sonaba).</summary>
+    public void OnDeleteCue(int row)
+    {
+        var cue = _model.GetCue(row);
+        if (cue is null)
+            return;
+        if (_running.ContainsKey(cue.Id))
+            EndCue(cue.Id, markStopped: false);
+        _model.RemoveCue(row);
+        _view.ReloadTable();
+        int count = _model.Count;
+        SetPlayhead(count > 0 ? Math.Min(row, count - 1) : 0);
+    }
+
     private static string Capitalize(CueType t)
     {
         string s = t.ToString().ToUpperInvariant();

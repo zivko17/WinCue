@@ -68,6 +68,21 @@ public class ListManagementTests : ControllerTestBase
     }
 
     [Fact]
+    public void DeleteCue_StopsItIfRunning_AndRemoves()
+    {
+        var a = AddCue(CueType.Audio, "a");
+        AddCue(CueType.Memo, "b");
+        Controller.TriggerCueId(a.Id);
+
+        Controller.OnDeleteCue(0);
+
+        Assert.Equal(1, Model.Count);
+        Assert.Equal("b", Model.Cues[0].Name);
+        Assert.False(Audio.IsPlaying(a.Id));
+        Assert.Empty(Controller.RunningCueIds);
+    }
+
+    [Fact]
     public void ToggleCollapse_FlipsFlagAndAppliesVisibility()
     {
         var g = AddCue(CueType.Group);

@@ -45,9 +45,17 @@ la migración.
       importar/editar en vivo) y guardar/cargar. Desacoplado con interfaces
       (IShowView, IScheduler, IAudioEngine/IVideoEngine): 58 tests
       deterministas con motores falsos y reloj virtual.
-- [ ] **Fase 5 — UI WPF**: tabla de cues, inspector en vivo, top bar,
-      panel de tarjetas, salida a monitor externo con blackout + testigo,
-      mini-monitor PGM/PVW, atajos, drag-drop.
+- [x] **Fase 5a — UI WPF mínima funcional** (`WinCue.App`): tabla de cues
+      (playhead, estados, sangría de grupos, colapso con doble clic), top bar
+      con transport (GO/STOP ALL/PANIC/PAUSA) + master + VU + countdown,
+      modo EDIT/SHOW, panel de cues activos, ventana de salida de vídeo,
+      testigo en status bar, atajos (Espacio/Esc/S/P/flechas/Ctrl+G/Supr),
+      drag-drop de archivos, abrir/guardar show. Arranca con
+      `dotnet run --project src/WinCue.App` (acepta ruta .json y --smoke).
+- [ ] **Fase 5b — Inspector en vivo** bajo la tabla (pestañas Basics/Triggers/
+      Geometry/Time&amp;Loops/Levels), panel de tarjetas, hotkeys por cue.
+- [ ] **Fase 5c — Salida a monitor real**: blackout + testigo completo,
+      mini-monitor PGM/PVW, diálogo de settings.
 - [ ] **Fase 6 — Backends fase-2 del original**: MIDI/Timecode/Wall-clock,
       Duck/Boost, rate con preserve-pitch en audio, OSC.
 

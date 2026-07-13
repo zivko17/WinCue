@@ -1,0 +1,18 @@
+﻿<Project Sdk="Microsoft.NET.Sdk">
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
+    <ProjectReference Include="..\WinCue.Audio\WinCue.Audio.csproj" />
+    <ProjectReference Include="..\WinCue.Video\WinCue.Video.csproj" />
+    <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
+  </ItemGroup>
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <UseWPF>true</UseWPF>
+  </PropertyGroup>
+
+</Project>

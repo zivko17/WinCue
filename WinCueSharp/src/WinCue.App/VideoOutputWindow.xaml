@@ -1,0 +1,12 @@
+<Window x:Class="WinCue.App.VideoOutputWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WinCue — Salida de vídeo"
+        Width="960" Height="540"
+        Background="Black"
+        WindowStyle="SingleBorderWindow"
+        ShowInTaskbar="True">
+    <!-- mpv renderiza directamente sobre el HWND de esta ventana (wid).
+         El fondo negro es el blackout natural cuando no hay vídeo. -->
+    <Grid Background="Black" />
+</Window>

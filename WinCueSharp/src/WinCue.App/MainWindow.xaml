@@ -1,0 +1,200 @@
+<Window x:Class="WinCue.App.MainWindow"
+        xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+        xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+        Title="WinCue" Width="1280" Height="800"
+        Background="#1e1e1e" WindowState="Maximized"
+        AllowDrop="True">
+
+    <Window.Resources>
+        <!-- Paleta oscura básica -->
+        <SolidColorBrush x:Key="Bg" Color="#1e1e1e"/>
+        <SolidColorBrush x:Key="Panel" Color="#252526"/>
+        <SolidColorBrush x:Key="Fg" Color="#dddddd"/>
+        <SolidColorBrush x:Key="FgDim" Color="#888888"/>
+        <SolidColorBrush x:Key="Accent" Color="#2ecc71"/>
+        <SolidColorBrush x:Key="PlayheadBg" Color="#264f78"/>
+
+        <Style TargetType="Button">
+            <Setter Property="Background" Value="#3c3c3c"/>
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="BorderBrush" Value="#555"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Margin" Value="3,0"/>
+        </Style>
+        <Style TargetType="TextBlock">
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+        </Style>
+    </Window.Resources>
+
+    <DockPanel>
+        <!-- ═══════════ TOP BAR: transport + master ═══════════ -->
+        <Border DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
+            <DockPanel>
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
+                    <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
+                            Background="#1e7e34" FontSize="20" FontWeight="Bold"
+                            Content="GO ▶" ToolTip="Espacio"/>
+                    <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
+                            Content="■ STOP ALL" ToolTip="Escape"/>
+                    <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
+                            Background="#7e1e1e" Content="⚠ PANIC"/>
+                    <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
+                            Content="⏸ PAUSA"/>
+                    <Separator Width="12" Background="Transparent"/>
+                    <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
+                                  Checked="OnShowMode" Unchecked="OnEditMode"
+                                  Background="#3c3c3c" Foreground="{StaticResource Fg}"
+                                  Content="Modo: EDIT"/>
+                    <Button Click="OnVideoOutputClick" Height="44" Content="🖵 Salida vídeo"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right"
+                            VerticalAlignment="Center">
+                    <TextBlock Text="Master" VerticalAlignment="Center" Margin="0,0,6,0"
+                               Foreground="{StaticResource FgDim}"/>
+                    <Slider x:Name="MasterSlider" Width="140" Minimum="0" Maximum="100"
+                            Value="100" VerticalAlignment="Center"
+                            ValueChanged="OnMasterChanged"/>
+                    <TextBlock x:Name="MasterLabel" Text="100" Width="30"
+                               VerticalAlignment="Center" TextAlignment="Right"/>
+                    <Separator Width="16" Background="Transparent"/>
+                    <ProgressBar x:Name="VuBar" Width="90" Height="12" Maximum="1"
+                                 Foreground="#2ecc71" Background="#111"
+                                 VerticalAlignment="Center"/>
+                </StackPanel>
+
+                <TextBlock x:Name="CountdownLabel" Text="" FontSize="26" FontWeight="Bold"
+                           Foreground="{StaticResource Accent}"
+                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══════════ TOOLBAR: lista ═══════════ -->
+        <Border DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
+            <StackPanel Orientation="Horizontal">
+                <Button Click="OnOpenShow" Content="📂 Abrir"/>
+                <Button Click="OnSaveShow" Content="💾 Guardar"/>
+                <Separator Width="14" Background="Transparent"/>
+                <TextBlock Text="Añadir:" VerticalAlignment="Center" Margin="0,0,4,0"
+                           Foreground="{StaticResource FgDim}"/>
+                <Button Click="OnAddCue" Tag="AUDIO" Content="♪ Audio"/>
+                <Button Click="OnAddCue" Tag="VIDEO" Content="▣ Vídeo"/>
+                <Button Click="OnAddCue" Tag="WAIT" Content="⏱ Wait"/>
+                <Button Click="OnAddCue" Tag="FADE" Content="◢ Fade"/>
+                <Button Click="OnAddCue" Tag="START" Content="▶ Start"/>
+                <Button Click="OnAddCue" Tag="STOP" Content="■ Stop"/>
+                <Button Click="OnAddCue" Tag="SCRIPT" Content="⚙ Script"/>
+                <Button Click="OnAddCue" Tag="MEMO" Content="✎ Memo"/>
+                <Button Click="OnAddCue" Tag="GROUP" Content="▸ Grupo"/>
+                <Separator Width="14" Background="Transparent"/>
+                <Button Click="OnImportFiles" Content="＋ Importar archivos…"/>
+                <Button x:Name="DeleteButton" Click="OnDeleteCue" Content="🗑 Eliminar"/>
+            </StackPanel>
+        </Border>
+
+        <!-- ═══════════ STATUS BAR ═══════════ -->
+        <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
+            <DockPanel>
+                <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right" Text="SALIDA: NEGRO"
+                           Foreground="{StaticResource FgDim}"/>
+                <TextBlock x:Name="StatusLabel" Text="Listo."/>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══════════ PANEL IZQ: cues activos ═══════════ -->
+        <Border DockPanel.Dock="Left" Width="260" Background="{StaticResource Panel}"
+                Padding="8">
+            <DockPanel>
+                <TextBlock DockPanel.Dock="Top" Text="EN REPRODUCCIÓN" FontWeight="Bold"
+                           Foreground="{StaticResource FgDim}" Margin="0,0,0,6"/>
+                <ItemsControl x:Name="ActiveList">
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate>
+                            <Border Background="#333" CornerRadius="4" Padding="8,6"
+                                    Margin="0,0,0,6">
+                                <StackPanel>
+                                    <TextBlock Text="{Binding Title}" FontWeight="Bold"
+                                               TextTrimming="CharacterEllipsis"/>
+                                    <TextBlock Text="{Binding TimeText}"
+                                               Foreground="#2ecc71" FontFamily="Consolas"/>
+                                    <ProgressBar Height="4" Maximum="1"
+                                                 Value="{Binding Fraction, Mode=OneWay}"
+                                                 Foreground="#2ecc71" Background="#222"
+                                                 Margin="0,4,0,0"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </DockPanel>
+        </Border>
+
+        <!-- ═══════════ TABLA DE CUES ═══════════ -->
+        <DataGrid x:Name="CueGrid"
+                  AutoGenerateColumns="False" IsReadOnly="True"
+                  HeadersVisibility="Column" GridLinesVisibility="None"
+                  Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
+                  RowBackground="#1e1e1e" AlternatingRowBackground="#232324"
+                  BorderThickness="0" SelectionMode="Extended" SelectionUnit="FullRow"
+                  CanUserAddRows="False" CanUserDeleteRows="False"
+                  CanUserReorderColumns="False"
+                  SelectionChanged="OnGridSelectionChanged"
+                  MouseDoubleClick="OnGridDoubleClick"
+                  Drop="OnGridDrop" AllowDrop="True">
+            <DataGrid.ColumnHeaderStyle>
+                <Style TargetType="DataGridColumnHeader">
+                    <Setter Property="Background" Value="#2d2d30"/>
+                    <Setter Property="Foreground" Value="#bbb"/>
+                    <Setter Property="Padding" Value="6,4"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                </Style>
+            </DataGrid.ColumnHeaderStyle>
+            <DataGrid.RowStyle>
+                <Style TargetType="DataGridRow">
+                    <Setter Property="Visibility" Value="{Binding RowVisibility}"/>
+                    <Style.Triggers>
+                        <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
+                            <Setter Property="Background" Value="{StaticResource PlayheadBg}"/>
+                        </DataTrigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.RowStyle>
+            <DataGrid.Columns>
+                <DataGridTemplateColumn Header="" Width="26">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Ellipse Width="10" Height="10" Fill="{Binding StateBrush}"
+                                     VerticalAlignment="Center" HorizontalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTemplateColumn Header="Nº" Width="52">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Background="{Binding LabelBrush}" CornerRadius="3"
+                                    Padding="4,1">
+                                <TextBlock Text="{Binding Number}" Foreground="#ddd"/>
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Tipo" Binding="{Binding TypeText}" Width="70"/>
+                <DataGridTemplateColumn Header="Nombre" Width="*">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
+                                       Foreground="#ddd" VerticalAlignment="Center"/>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Pre" Binding="{Binding PreWaitText}" Width="56"/>
+                <DataGridTextColumn Header="Dur" Binding="{Binding DurationText}" Width="64"/>
+                <DataGridTextColumn Header="Post" Binding="{Binding PostWaitText}" Width="56"/>
+                <DataGridTextColumn Header="Sigue" Binding="{Binding ContinueText}" Width="72"/>
+                <DataGridTextColumn Header="Lat" Binding="{Binding LatencyText}" Width="60"/>
+                <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"/>
+                <DataGridTextColumn Header="✕" Binding="{Binding ArmedText}" Width="28"/>
+            </DataGrid.Columns>
+        </DataGrid>
+    </DockPanel>
+</Window>
