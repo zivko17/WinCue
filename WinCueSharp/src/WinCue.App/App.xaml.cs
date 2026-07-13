@@ -85,10 +85,12 @@ public partial class App : Application
 
         window.Show();
 
-        // Recuperación de autoguardado (cierre inesperado en la sesión anterior)
+        // Recuperación de autoguardado (cierre inesperado en la sesión anterior).
+        // En modo --smoke NO se pregunta: un diálogo modal colgaría la verificación.
+        bool smokeMode = e.Args.Contains("--smoke");
         _autosavePath = Path.Combine(AppContext.BaseDirectory, "autosave.json");
         bool recovered = false;
-        if (File.Exists(_autosavePath) && new FileInfo(_autosavePath).Length > 10)
+        if (!smokeMode && File.Exists(_autosavePath) && new FileInfo(_autosavePath).Length > 10)
         {
             if (MessageBox.Show(window,
                     "Se encontró un autoguardado de una sesión que no se cerró " +
@@ -113,7 +115,7 @@ public partial class App : Application
         _autosaveTimer.Start();
 
         // Arranque de humo: cerrar solo (verificación sin operador)
-        if (e.Args.Contains("--smoke"))
+        if (smokeMode)
         {
             var quit = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             quit.Tick += (_, _) => Shutdown(0);
