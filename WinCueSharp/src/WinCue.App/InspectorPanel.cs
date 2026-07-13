@@ -1,0 +1,592 @@
+// =============================================================================
+// InspectorPanel.cs — Inspector de cue con edición EN VIVO (port de
+// inspector_panel.py, fase 5b)
+// =============================================================================
+// Pestañas: Basics · Triggers · Time & Loops · Display & Geometry · Levels.
+// Cada control commitea SU campo al perder el foco / cambiar, a través del
+// callback CommitField (→ MainController.OnCueEditCommitted), que aplica los
+// cambios al modelo y EN VIVO al motor si el cue está sonando.
+//
+// GOTCHA HEREDADO RESUELTO: en Python cada edición repoblaba el inspector
+// (re-decodificando media) y se atascaba; aquí el inspector solo se repuebla
+// al CAMBIAR el cue seleccionado (_loading evita commits durante la carga).
+// =============================================================================
+
+using System.Windows;
+using System.Windows.Controls;
+using System.Windows.Input;
+using System.Windows.Media;
+using WinCue.Core;
+
+namespace WinCue.App;
+
+public sealed class InspectorPanel : ContentControl
+{
+    /// <summary>Commit de un campo: (cueId, clave snake_case, valor).</summary>
+    public Action<int, string, object?>? CommitField;
+
+    private readonly TabControl _tabs = new()
+    {
+        Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26)),
+        BorderBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
+    };
+
+    private Cue? _cue;
+    private Func<IReadOnlyList<Cue>>? _allCues;   // para el combo de target
+    private bool _loading;                        // suprime commits al poblar
+
+    // Registro clave → escribir valor al control (para poblar al seleccionar)
+    private readonly Dictionary<string, Action<Cue>> _loaders = new();
+    // Filas con visibilidad condicionada por tipo de cue
+    private readonly List<(FrameworkElement El, Func<Cue, bool> VisibleIf)> _conditional = new();
+
+    private readonly TextBlock _header = new()
+    {
+        FontWeight = FontWeights.Bold,
+        Margin = new Thickness(8, 6, 8, 2),
+        Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)),
+    };
+
+    public InspectorPanel()
+    {
+        var root = new DockPanel();
+        DockPanel.SetDock(_header, Dock.Top);
+        root.Children.Add(_header);
+        root.Children.Add(_tabs);
+        Content = root;
+
+        _tabs.Items.Add(Tab("Basics", BuildBasics()));
+        _tabs.Items.Add(Tab("Triggers", BuildTriggers()));
+        _tabs.Items.Add(Tab("Time & Loops", BuildTimeLoops()));
+        _tabs.Items.Add(Tab("Geometry", BuildGeometry()));
+        _tabs.Items.Add(Tab("Levels", BuildLevels()));
+
+        IsEnabled = false;   // sin cue seleccionado
+    }
+
+    /// <summary>Muestra (y edita) el cue dado. null → inspector deshabilitado.</summary>
+    public void SetCue(Cue? cue, Func<IReadOnlyList<Cue>> allCues)
+    {
+        _cue = cue;
+        _allCues = allCues;
+        IsEnabled = cue is not null;
+        if (cue is null)
+        {
+            _header.Text = "— sin cue seleccionado —";
+            return;
+        }
+
+        _loading = true;
+        try
+        {
+            _header.Text = $"Cue {cue.DisplayNumber} · {cue.Type.ToString().ToUpperInvariant()} · {cue.Name}";
+            foreach (var loader in _loaders.Values)
+                loader(cue);
+            foreach (var (el, visibleIf) in _conditional)
+                el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
+        }
+        finally
+        {
+            _loading = false;
+        }
+    }
+
+    private void Commit(string key, object? value)
+    {
+        if (_loading || _cue is null)
+            return;
+        CommitField?.Invoke(_cue.Id, key, value);
+        // Actualizar cabecera si cambió nombre/número (sin repoblar el resto)
+        _header.Text = $"Cue {_cue.DisplayNumber} · {_cue.Type.ToString().ToUpperInvariant()} · {_cue.Name}";
+    }
+
+    // ==================================================================
+    // Pestañas
+    // ==================================================================
+
+    private UIElement BuildBasics()
+    {
+        var (scroll, panel) = Page();
+
+        Txt(panel, "number", "Número:", c => c.Number);
+        Txt(panel, "name", "Nombre:", c => c.Name);
+        ColorSwatches(panel);
+        var armedRow = ChkRow(panel);
+        Chk(armedRow, "armed", "Armado", c => c.Armed);
+        Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
+        Chk(armedRow, "auto_load", "Auto-load", c => c.AutoLoad);
+
+        Cmb(panel, "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
+            ("None", "Nada (GO manual)"),
+            ("AutoContinue", "Auto-continue (tras post-wait)"),
+            ("AutoFollow", "Auto-follow (al acabar la acción)"));
+
+        Num(panel, "pre_wait", "Pre-wait (s):", c => c.PreWait);
+        Num(panel, "duration", "Duración (s):", c => c.Duration);
+        Num(panel, "post_wait", "Post-wait (s):", c => c.PostWait);
+
+        FileRow(panel);
+
+        // Solo cues que apuntan a otro cue
+        var targetRow = Conditional(panel, c => c.TargetsOther());
+        TargetCombo(targetRow);
+        var fadeStopRow = Conditional(panel, c => c.Type == CueType.Fade);
+        Chk(fadeStopRow, "fade_stop_on_done", "Detener el objetivo al llegar a 0",
+            c => c.FadeStopOnDone);
+
+        // Solo grupos
+        var groupRow = Conditional(panel, c => c.Type == CueType.Group);
+        CmbInline(groupRow, "group_mode", "Modo de grupo:", c => c.GroupMode.ToString(),
+            ("Enter", "ENTER — el playhead entra"),
+            ("Timeline", "TIMELINE — todos a la vez"),
+            ("GoNext", "GO NEXT — primer hijo"),
+            ("Random", "RANDOM — aleatorio round-robin"));
+
+        var stopOthersRow = ChkRow(panel);
+        Chk(stopOthersRow, "stop_others", "Detener los demás al empezar (modo GO per-cue)",
+            c => c.StopOthers);
+
+        TxtMultiline(panel, "notes", "Notas:", c => c.Notes);
+        return scroll;
+    }
+
+    private UIElement BuildTriggers()
+    {
+        var (scroll, panel) = Page();
+
+        Txt(panel, "hotkey", "Hotkey (tecla):", c => c.Hotkey);
+        Cmb(panel, "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
+            ("None", "Ignorar"),
+            ("Panic", "Panic (fade y parar)"),
+            ("Stop", "Parar"),
+            ("HardStop", "Parada dura"),
+            ("HardRestart", "Reiniciar"));
+        var relRow = ChkRow(panel);
+        Chk(relRow, "second_trigger_on_release", "Segundo disparo al SOLTAR la tecla",
+            c => c.SecondTriggerOnRelease);
+
+        Header(panel, "FUNDIR Y PARAR OTROS");
+        var foRow = ChkRow(panel);
+        Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
+        Num(panel, "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
+        Cmb(panel, "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
+            ("Peers", "PEERS — mismo nivel/grupo"),
+            ("List", "LIST — toda la lista"),
+            ("All", "ALL — todo"));
+
+        Header(panel, "MIDI · WALL-CLOCK · TIMECODE · DUCK  (backend en fase 6)");
+        var midiRow = ChkRow(panel);
+        Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
+        Cmb(panel, "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
+            ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
+            ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
+        Int(panel, "midi_channel", "Canal:", c => c.MidiChannel);
+        Int(panel, "midi_note", "Nota / CC:", c => c.MidiNote);
+        Int(panel, "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
+
+        var wcRow = ChkRow(panel);
+        Chk(wcRow, "wallclock_enabled", "Disparo por hora del día", c => c.WallclockEnabled);
+        Txt(panel, "wallclock_time", "Hora (HH:MM:SS):", c => c.WallclockTime);
+
+        var tcRow = ChkRow(panel);
+        Chk(tcRow, "timecode_enabled", "Disparo por timecode", c => c.TimecodeEnabled);
+        Txt(panel, "timecode_value", "Timecode (HH:MM:SS:FF):", c => c.TimecodeValue);
+
+        var duckRow = ChkRow(panel);
+        Chk(duckRow, "duck_enabled", "Duck/boost del resto al sonar", c => c.DuckEnabled);
+        Num(panel, "duck_level", "Nivel (dB, − = duck):", c => c.DuckLevel);
+        Num(panel, "duck_time", "Tiempo del fundido (s):", c => c.DuckTime);
+
+        return scroll;
+    }
+
+    private UIElement BuildTimeLoops()
+    {
+        var (scroll, panel) = Page();
+
+        var loopRow = ChkRow(panel);
+        Chk(loopRow, "loop", "Loop infinito (hasta STOP)", c => c.Loop);
+        Int(panel, "play_count", "Repeticiones (play count):", c => c.PlayCount);
+        Num(panel, "rate", "Velocidad (1.0 = normal):", c => c.Rate);
+        var pitchRow = ChkRow(panel);
+        Chk(pitchRow, "preserve_pitch", "Mantener tono al cambiar velocidad",
+            c => c.PreservePitch);
+
+        Header(panel, "FUNDIDOS");
+        Num(panel, "fade_in", "Fade in (s):", c => c.FadeIn);
+        Num(panel, "fade_out", "Fade out (s):", c => c.FadeOut);
+
+        Header(panel, "RECORTE (TRIM)");
+        Num(panel, "trim_start", "Inicio (s dentro del archivo):", c => c.TrimStart);
+        Num(panel, "trim_end", "Fin (s; 0 = hasta el final):", c => c.TrimEnd);
+        Note(panel, "La barra de forma de onda para el trim llega en una fase posterior.");
+
+        return scroll;
+    }
+
+    private UIElement BuildGeometry()
+    {
+        var (scroll, panel) = Page();
+
+        Cmb(panel, "geo_mode", "Modo:", c => c.GeoMode.ToString(),
+            ("Full", "FULL — superficie completa"),
+            ("Custom", "CUSTOM — posición manual"));
+        var aspectRow = ChkRow(panel);
+        Chk(aspectRow, "preserve_aspect", "Mantener relación de aspecto (FULL)",
+            c => c.PreserveAspect);
+        Num(panel, "scale", "Escala (%):", c => c.Scale);
+
+        Header(panel, "CUSTOM");
+        Num(panel, "translate_x", "Desplazar X (px):", c => c.TranslateX);
+        Num(panel, "translate_y", "Desplazar Y (px):", c => c.TranslateY);
+        Num(panel, "scale_x", "Escala X (×):", c => c.ScaleX);
+        Num(panel, "scale_y", "Escala Y (× — necesita compositor):", c => c.ScaleY);
+        Num(panel, "rotate_z", "Rotación Z (°, se cuantiza a 90):", c => c.RotateZ);
+
+        Header(panel, "COMPOSITOR (fase 3b)");
+        Txt(panel, "layer", "Layer (top/bottom/1..999):", c => c.Layer);
+        Num(panel, "opacity", "Opacidad (%):", c => c.Opacity);
+        Num(panel, "rotate_x", "Rotación X (°):", c => c.RotateX);
+        Num(panel, "rotate_y", "Rotación Y (°):", c => c.RotateY);
+
+        return scroll;
+    }
+
+    private UIElement BuildLevels()
+    {
+        var (scroll, panel) = Page();
+
+        var row = LabeledRow(panel, "Volumen:");
+        var slider = new Slider
+        {
+            Minimum = 0, Maximum = 100, Width = 260,
+            VerticalAlignment = VerticalAlignment.Center,
+            IsSnapToTickEnabled = false,
+        };
+        var label = new TextBlock
+        {
+            Width = 110, Margin = new Thickness(10, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+            FontFamily = new FontFamily("Consolas"),
+        };
+        slider.ValueChanged += (_, e) =>
+        {
+            double v = e.NewValue / 100.0;
+            label.Text = VolumeLabel(v);
+            Commit("volume", v);   // en vivo: el controlador lo aplica al motor
+        };
+        row.Children.Add(slider);
+        row.Children.Add(label);
+        _loaders["volume"] = c =>
+        {
+            slider.Value = c.Volume * 100.0;
+            label.Text = VolumeLabel(c.Volume);
+        };
+        Note(panel, "El volumen se aplica EN VIVO si el cue está sonando. " +
+                    "El VU master está en la barra superior.");
+        return scroll;
+    }
+
+    private static string VolumeLabel(double v) =>
+        v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB ({v * 100:0}%)";
+
+    // ==================================================================
+    // Framework de formularios (helpers)
+    // ==================================================================
+
+    private static TabItem Tab(string title, UIElement content) =>
+        new() { Header = title, Content = content };
+
+    private static (ScrollViewer Scroll, StackPanel Panel) Page()
+    {
+        var panel = new StackPanel { Margin = new Thickness(10, 6, 10, 10) };
+        return (new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            Content = panel,
+        }, panel);
+    }
+
+    private static void Header(StackPanel panel, string text) =>
+        panel.Children.Add(new TextBlock
+        {
+            Text = text,
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Margin = new Thickness(0, 10, 0, 2),
+        });
+
+    private static void Note(StackPanel panel, string text) =>
+        panel.Children.Add(new TextBlock
+        {
+            Text = text,
+            FontStyle = FontStyles.Italic,
+            Foreground = Brushes.Gray,
+            TextWrapping = TextWrapping.Wrap,
+            Margin = new Thickness(0, 4, 0, 2),
+        });
+
+    private static StackPanel LabeledRow(StackPanel panel, string label)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+        row.Children.Add(new TextBlock
+        {
+            Text = label, Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        panel.Children.Add(row);
+        return row;
+    }
+
+    private static StackPanel ChkRow(StackPanel panel)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
+        panel.Children.Add(row);
+        return row;
+    }
+
+    /// <summary>Fila con visibilidad condicionada al tipo de cue.</summary>
+    private StackPanel Conditional(StackPanel panel, Func<Cue, bool> visibleIf)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+        panel.Children.Add(row);
+        _conditional.Add((row, visibleIf));
+        return row;
+    }
+
+    private TextBox Txt(StackPanel panel, string key, string label, Func<Cue, string> read)
+    {
+        var row = LabeledRow(panel, label);
+        var tb = MakeTextBox(180);
+        WireTextCommit(tb, key, () => tb.Text);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c);
+        return tb;
+    }
+
+    private void TxtMultiline(StackPanel panel, string key, string label, Func<Cue, string> read)
+    {
+        panel.Children.Add(new TextBlock
+        {
+            Text = label,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Margin = new Thickness(0, 6, 0, 2),
+        });
+        var tb = MakeTextBox(0);
+        tb.AcceptsReturn = true;
+        tb.TextWrapping = TextWrapping.Wrap;
+        tb.MinHeight = 44;
+        tb.HorizontalAlignment = HorizontalAlignment.Stretch;
+        tb.LostFocus += (_, _) => Commit(key, tb.Text);
+        panel.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c);
+    }
+
+    private void Num(StackPanel panel, string key, string label, Func<Cue, double> read)
+    {
+        var row = LabeledRow(panel, label);
+        var tb = MakeTextBox(90);
+        WireTextCommit(tb, key, () =>
+            double.TryParse(tb.Text.Replace(',', '.'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double v)
+                ? v : (object?)null);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c).ToString("0.###",
+            System.Globalization.CultureInfo.InvariantCulture);
+    }
+
+    private void Int(StackPanel panel, string key, string label, Func<Cue, int> read)
+    {
+        var row = LabeledRow(panel, label);
+        var tb = MakeTextBox(70);
+        WireTextCommit(tb, key, () =>
+            int.TryParse(tb.Text, out int v) ? v : (object?)null);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c).ToString();
+    }
+
+    private void Cmb(StackPanel panel, string key, string label, Func<Cue, string> read,
+                     params (string Value, string Label)[] items)
+    {
+        var row = LabeledRow(panel, label);
+        CmbInto(row, key, read, items);
+    }
+
+    private void CmbInline(StackPanel row, string key, string label, Func<Cue, string> read,
+                           params (string Value, string Label)[] items)
+    {
+        row.Children.Add(new TextBlock
+        {
+            Text = label, Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        CmbInto(row, key, read, items);
+    }
+
+    private void CmbInto(StackPanel row, string key, Func<Cue, string> read,
+                         (string Value, string Label)[] items)
+    {
+        var combo = new ComboBox { MinWidth = 230 };
+        foreach (var (value, text) in items)
+            combo.Items.Add(new ComboBoxItem { Content = text, Tag = value });
+        combo.SelectionChanged += (_, _) =>
+        {
+            if ((combo.SelectedItem as ComboBoxItem)?.Tag is string v)
+                Commit(key, v);
+        };
+        row.Children.Add(combo);
+        _loaders[key] = c =>
+        {
+            string current = read(c);
+            foreach (ComboBoxItem item in combo.Items)
+                if ((string)item.Tag == current)
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+        };
+    }
+
+    private void Chk(StackPanel row, string key, string label, Func<Cue, bool> read)
+    {
+        var cb = new CheckBox
+        {
+            Content = label,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Margin = new Thickness(0, 0, 16, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        cb.Checked += (_, _) => Commit(key, true);
+        cb.Unchecked += (_, _) => Commit(key, false);
+        row.Children.Add(cb);
+        _loaders[key] = c => cb.IsChecked = read(c);
+    }
+
+    private void ColorSwatches(StackPanel panel)
+    {
+        var row = LabeledRow(panel, "Color:");
+        foreach (var (name, hex) in CueConstants.CueColors)
+        {
+            var btn = new Button
+            {
+                Width = 26, Height = 20, Margin = new Thickness(2, 0, 2, 0),
+                Background = hex.Length > 0
+                    ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
+                    : Brushes.Transparent,
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+                Content = hex.Length == 0 ? "∅" : "",
+                Foreground = Brushes.Gray,
+                Tag = name,
+            };
+            btn.Click += (_, _) => Commit("color", name);
+            row.Children.Add(btn);
+        }
+        _loaders["color"] = _ => { };   // sin estado visual de selección (5b)
+    }
+
+    private void FileRow(StackPanel panel)
+    {
+        var row = Conditional(panel,
+            c => c.IsMedia() || c.Type == CueType.Script);
+        row.Children.Add(new TextBlock
+        {
+            Text = "Archivo:", Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        var tb = MakeTextBox(300);
+        var browse = new Button { Content = "…", Margin = new Thickness(4, 0, 0, 0) };
+        WireTextCommit(tb, "file_path", () => tb.Text);
+        browse.Click += (_, _) =>
+        {
+            var dlg = new Microsoft.Win32.OpenFileDialog();
+            if (dlg.ShowDialog() == true)
+            {
+                tb.Text = dlg.FileName;
+                Commit("file_path", dlg.FileName);
+            }
+        };
+        row.Children.Add(tb);
+        row.Children.Add(browse);
+        _loaders["file_path"] = c => tb.Text = c.FilePath;
+    }
+
+    private void TargetCombo(StackPanel row)
+    {
+        row.Children.Add(new TextBlock
+        {
+            Text = "Cue objetivo:", Width = 210,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+        });
+        var combo = new ComboBox { MinWidth = 260 };
+        combo.SelectionChanged += (_, _) =>
+        {
+            if ((combo.SelectedItem as ComboBoxItem)?.Tag is int id)
+                Commit("target_id", id == -1 ? null : id);
+        };
+        row.Children.Add(combo);
+        _loaders["target_id"] = c =>
+        {
+            combo.Items.Clear();
+            combo.Items.Add(new ComboBoxItem { Content = "(sin objetivo)", Tag = -1 });
+            if (_allCues is not null)
+                foreach (var other in _allCues())
+                    if (other.Id != c.Id)
+                        combo.Items.Add(new ComboBoxItem
+                        {
+                            Content = $"{other.DisplayNumber} · {other.Name}",
+                            Tag = other.Id,
+                        });
+            int wanted = c.TargetId ?? -1;
+            foreach (ComboBoxItem item in combo.Items)
+                if ((int)item.Tag == wanted)
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+            combo.SelectedIndex = 0;
+        };
+    }
+
+    private static TextBox MakeTextBox(double width)
+    {
+        var tb = new TextBox
+        {
+            Background = new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2a)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
+            Padding = new Thickness(4, 2, 4, 2),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        if (width > 0) tb.Width = width;
+        return tb;
+    }
+
+    /// <summary>Commit al perder foco o pulsar Enter (si el valor parsea).</summary>
+    private void WireTextCommit(TextBox tb, string key, Func<object?> parse)
+    {
+        void DoCommit()
+        {
+            object? v = parse();
+            if (v is not null)
+                Commit(key, v);
+        }
+        tb.LostFocus += (_, _) => DoCommit();
+        tb.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                DoCommit();
+                e.Handled = true;
+            }
+        };
+    }
+}

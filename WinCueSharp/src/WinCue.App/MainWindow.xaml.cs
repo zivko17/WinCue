@@ -57,7 +57,23 @@ public partial class MainWindow : Window, IShowView
         _settings = settings;
         _applyEngineSettings = applyEngineSettings;
         LoadKeyBindings();
+
+        // Inspector → controlador (edición en vivo campo a campo)
+        Inspector.CommitField = (cueId, key, value) =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                _controller.OnCueEditCommitted(row,
+                    new Dictionary<string, object?> { [key] = value });
+        };
+
         ReloadTable();
+    }
+
+    private void UpdateInspector()
+    {
+        int row = CueGrid.SelectedIndex;
+        Inspector.SetCue(row >= 0 ? _model.GetCue(row) : null, () => _model.Cues);
     }
 
     private void LoadKeyBindings()
@@ -119,6 +135,7 @@ public partial class MainWindow : Window, IShowView
         foreach (var cue in _model.Cues)
             _rows.Add(new CueRowViewModel(cue, _model));
         SetPlayhead(_playheadIndex);
+        UpdateInspector();   // la lista cambió: reapuntar al cue seleccionado
     }
 
     public void AppendCueRow(Cue cue) => _rows.Add(new CueRowViewModel(cue, _model));
@@ -310,7 +327,9 @@ public partial class MainWindow : Window, IShowView
 
     private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
-        if (_suppressSelection || _controller is null) return;
+        if (_controller is null) return;
+        UpdateInspector();   // el inspector SOLO se repuebla al cambiar selección
+        if (_suppressSelection) return;
         if (CueGrid.SelectedIndex >= 0)
             _controller.OnSetPlayhead(CueGrid.SelectedIndex);
     }
@@ -337,6 +356,15 @@ public partial class MainWindow : Window, IShowView
     private void OnKeyDownGlobal(object sender, KeyEventArgs e)
     {
         if (_controller is null) return;
+
+        // NO interceptar mientras se escribe en el inspector u otro campo:
+        // Espacio en un TextBox dispararía un GO.
+        if (Keyboard.FocusedElement is TextBox or ComboBox or ComboBoxItem)
+        {
+            if (e.Key == Key.Escape)
+                CueGrid.Focus();   // Esc devuelve el foco a la tabla
+            return;
+        }
 
         // Atajos configurables (Settings → Interfaz)
         if (Keyboard.Modifiers == ModifierKeys.None)
