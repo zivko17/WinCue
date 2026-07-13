@@ -63,11 +63,17 @@ public sealed class InspectorPanel : ContentControl
 
     public InspectorPanel()
     {
+        // Marco AZUL = canvas de salida: mpv recorta exactamente en ese borde,
+        // así que lo que quede fuera del marco es lo que se pierde en la salida.
+        _editPreview.BorderBrush = new SolidColorBrush(Color.FromRgb(0x2a, 0x6f, 0xb0));
+        _editPreview.BorderThickness = new Thickness(2);
+        _editPreview.Height = 176;   // vídeo ≈ 16:9 dentro del panel de 280 px
+
         _previewHost.Children.Add(_editPreview);
         _previewHost.Children.Add(new TextBlock
         {
-            Text = "Arrastra el trim para ver el fotograma de corte.\n" +
-                   "Los cambios de geometría se reflejan aquí.",
+            Text = "El marco azul es el CANVAS de salida: lo que quede fuera " +
+                   "se recorta. Arrastra el trim para ver el fotograma de corte.",
             FontSize = 10,
             Foreground = Brushes.Gray,
             TextWrapping = TextWrapping.Wrap,
@@ -324,20 +330,38 @@ public sealed class InspectorPanel : ContentControl
     {
         var (scroll, panel) = Page();
 
-        var loopRow = ChkRow(panel);
+        // ── Opciones en DOS columnas (menos apiñado) ────────────────────
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var colL = new StackPanel();
+        var colR = new StackPanel();
+        Grid.SetColumn(colL, 0);
+        Grid.SetColumn(colR, 2);
+        grid.Children.Add(colL);
+        grid.Children.Add(colR);
+        panel.Children.Add(grid);
+
+        Header(colL, "REPRODUCCIÓN");
+        var loopRow = ChkRow(colL);
         Chk(loopRow, "loop", "Loop infinito (hasta STOP)", c => c.Loop);
-        Int(panel, "play_count", "Repeticiones (play count):", c => c.PlayCount);
-        Num(panel, "rate", "Velocidad (1.0 = normal):", c => c.Rate);
-        var pitchRow = ChkRow(panel);
+        Int(colL, "play_count", "Repeticiones (play count):", c => c.PlayCount);
+        Num(colL, "rate", "Velocidad (1.0 = normal):", c => c.Rate);
+        var pitchRow = ChkRow(colL);
         Chk(pitchRow, "preserve_pitch", "Mantener tono al cambiar velocidad",
             c => c.PreservePitch);
 
-        Header(panel, "FUNDIDOS");
-        TimeF(panel, "fade_in", "Fade in:", c => c.FadeIn);
-        TimeF(panel, "fade_out", "Fade out:", c => c.FadeOut);
+        Header(colR, "FUNDIDOS Y RECORTE");
+        TimeF(colR, "fade_in", "Fade in:", c => c.FadeIn);
+        TimeF(colR, "fade_out", "Fade out:", c => c.FadeOut);
+        TimeF(colR, "trim_start", "Trim: inicio:", c => c.TrimStart);
+        TimeF(colR, "trim_end", "Trim: fin (0 = final):", c => c.TrimEnd);
 
-        Header(panel, "RECORTE (TRIM)");
+        // ── Barra de trim abajo, a todo lo ancho ────────────────────────
+        Header(panel, "BARRA DE TRIM — arrastra los manejadores");
         _wave.Margin = new Thickness(0, 4, 0, 6);
+        _wave.Height = 110;
         _wave.MarkersChanged += (start, end) =>
         {
             if (_cue is null) return;
@@ -353,8 +377,6 @@ public sealed class InspectorPanel : ContentControl
             finally { _loading = false; }
         };
         panel.Children.Add(_wave);
-        TimeF(panel, "trim_start", "Inicio (dentro del archivo):", c => c.TrimStart);
-        TimeF(panel, "trim_end", "Fin (0 = hasta el final):", c => c.TrimEnd);
 
         return scroll;
     }
