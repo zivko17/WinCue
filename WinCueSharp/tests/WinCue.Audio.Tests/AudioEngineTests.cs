@@ -6,6 +6,7 @@
 // =============================================================================
 
 using NAudio.Wave;
+using WinCue.Core;
 using WinCue.Audio;
 
 namespace WinCue.Audio.Tests;
@@ -63,7 +64,7 @@ public class AudioEngineTests : IDisposable
         if (!HasAudioDevice) return;
 
         using var engine = new AudioEngine();
-        var states = new List<EngineCueState>();
+        var states = new List<MediaCueState>();
         var stateLock = new object();
         double latency = -1;
         engine.StateChanged += (id, s) => { lock (stateLock) states.Add(s); };
@@ -72,22 +73,22 @@ public class AudioEngineTests : IDisposable
         string path = MakeQuietWav(0.3);
         engine.Play(1, path);
 
-        Assert.True(WaitFor(() => engine.GetState(1) == EngineCueState.Playing, 5_000),
+        Assert.True(WaitFor(() => engine.GetState(1) == MediaCueState.Playing, 5_000),
             $"no llegó a PLAYING (estado: {engine.GetState(1)})");
         Assert.True(engine.IsPlaying(1));
         Assert.True(engine.AnyPlaying);
         Assert.Equal(0.3, engine.GetDuration(1), 2);
 
-        Assert.True(WaitFor(() => engine.GetState(1) == EngineCueState.Stopped, 5_000),
+        Assert.True(WaitFor(() => engine.GetState(1) == MediaCueState.Stopped, 5_000),
             $"no llegó a STOPPED (estado: {engine.GetState(1)})");
         Assert.False(engine.IsPlaying(1));
         Assert.True(latency >= 0.0, "no se reportó latencia");
 
         lock (stateLock)
         {
-            Assert.Contains(EngineCueState.Loading, states);
-            Assert.Contains(EngineCueState.Playing, states);
-            Assert.Contains(EngineCueState.Stopped, states);
+            Assert.Contains(MediaCueState.Loading, states);
+            Assert.Contains(MediaCueState.Playing, states);
+            Assert.Contains(MediaCueState.Stopped, states);
         }
     }
 
@@ -122,7 +123,7 @@ public class AudioEngineTests : IDisposable
 
         engine.Stop(1);
         Assert.False(engine.IsPlaying(1));
-        Assert.Equal(EngineCueState.Stopped, engine.GetState(1));
+        Assert.Equal(MediaCueState.Stopped, engine.GetState(1));
     }
 
     [Fact]
@@ -170,7 +171,7 @@ public class AudioEngineTests : IDisposable
 
         engine.Play(1, Path.Combine(_dir, "no_existe.wav"));
         Assert.True(WaitFor(() => error is not null, 5_000), "no se emitió error");
-        Assert.Equal(EngineCueState.Error, engine.GetState(1));
+        Assert.Equal(MediaCueState.Error, engine.GetState(1));
     }
 
     [Fact]

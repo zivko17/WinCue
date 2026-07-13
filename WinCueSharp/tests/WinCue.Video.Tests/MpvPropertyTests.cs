@@ -2,6 +2,7 @@
 // MpvPropertyTests.cs — Volumen, master, rate, trim y geometría (readback mpv)
 // =============================================================================
 
+using WinCue.Core;
 using WinCue.Video;
 
 namespace WinCue.Video.Tests;
@@ -92,7 +93,7 @@ public class MpvPropertyTests : IClassFixture<MediaFixture>
         Assert.True(engine.FadeVolume(1, 0.0, 0.2, stopAfter: true));
         Assert.True(WaitFor(() => !engine.IsPlaying(1), 3_000),
             "el cue no se detuvo tras el fade");
-        Assert.Equal(VideoCueState.Stopped, engine.GetState(1));
+        Assert.Equal(MediaCueState.Stopped, engine.GetState(1));
     }
 
     [Fact]

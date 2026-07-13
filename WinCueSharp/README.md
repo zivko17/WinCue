@@ -37,9 +37,14 @@ la migración.
       no pisa la escala del cue a 0.
 - [ ] **Fase 3b — Compositor D3D11** (mpv render API → textura): opacidad,
       layers, rotación 3D, varias surfaces, preview PGM en vivo real.
-- [ ] **Fase 4 — Controlador**: playhead + cues concurrentes, transport,
-      cadenas pre/post-wait + auto-continue/follow, grupos (4 modos),
-      triggers, retrigger, fade others, modo GO, master, EDIT/SHOW.
+- [x] **Fase 4 — Controlador**: playhead + cues concurrentes, transport
+      (GO/STOP ALL/PANIC/pausa), cadenas pre/post-wait + auto-continue/follow,
+      grupos (ENTER/TIMELINE/GO_NEXT/RANDOM round-robin), retrigger,
+      fade-others por ámbito, modos de GO (concurrent/sequential/per_cue),
+      FADE/START/STOP/SCRIPT, master, gestión de lista (agrupar/insertar/
+      importar/editar en vivo) y guardar/cargar. Desacoplado con interfaces
+      (IShowView, IScheduler, IAudioEngine/IVideoEngine): 58 tests
+      deterministas con motores falsos y reloj virtual.
 - [ ] **Fase 5 — UI WPF**: tabla de cues, inspector en vivo, top bar,
       panel de tarjetas, salida a monitor externo con blackout + testigo,
       mini-monitor PGM/PVW, atajos, drag-drop.

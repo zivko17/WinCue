@@ -24,34 +24,11 @@
 //   con mensaje informativo y el resto del programa sigue operativo.
 // =============================================================================
 
+using WinCue.Core;
+
 namespace WinCue.Video;
 
-public enum VideoCueState { Idle, Loading, Loaded, Playing, Stopped, Error }
-
-/// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
-public sealed record VideoGeometry(
-    string Mode = "FULL",            // FULL | CUSTOM
-    bool PreserveAspect = true,
-    double TranslateX = 0.0,         // px desde el centro (CUSTOM)
-    double TranslateY = 0.0,
-    double ScaleX = 1.0,             // multiplicador (CUSTOM)
-    double RotateZ = 0.0,            // grados; se cuantiza a múltiplos de 90
-    double SurfW = 1920.0,           // dimensiones del canvas de salida
-    double SurfH = 1080.0);
-
-/// <summary>Parámetros de reproducción de un cue de vídeo.</summary>
-public sealed record VideoPlayParams(
-    double Volume = 1.0,
-    bool Loop = false,
-    double Scale = 100.0,            // % (100 = ajuste a la salida)
-    double TrimStart = 0.0,
-    double TrimEnd = 0.0,
-    double Rate = 1.0,
-    int PlayCount = 1,
-    bool PreservePitch = true,
-    VideoGeometry? Geometry = null);
-
-public sealed class VideoEngine : IDisposable
+public sealed class VideoEngine : IVideoEngine, IDisposable
 {
     private const string MpvNotFoundMsg =
         "libmpv no encontrado. Coloca libmpv-2.dll junto al ejecutable o define " +
@@ -77,7 +54,7 @@ public sealed class VideoEngine : IDisposable
     // Eventos (entregados vía dispatcher — en WPF, el hilo de UI)
     // ------------------------------------------------------------------
 
-    public event Action<int, VideoCueState>? StateChanged;
+    public event Action<int, MediaCueState>? StateChanged;
     public event Action<int, double>? LatencyReport;      // (cueId, ms)
     public event Action<int, string>? ErrorOccurred;
     public event Action<int>? FrameReady;                 // primer frame visible
@@ -91,7 +68,7 @@ public sealed class VideoEngine : IDisposable
     private readonly string? _forcedVo;                   // tests: "null"
     private readonly bool _nullAudio;                     // tests: ao=null
 
-    private readonly Dictionary<int, VideoCueState> _states = new();
+    private readonly Dictionary<int, MediaCueState> _states = new();
     private readonly Dictionary<int, string> _files = new();          // verificados
     private readonly Dictionary<int, MpvPlayer> _players = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
@@ -144,10 +121,10 @@ public sealed class VideoEngine : IDisposable
         if (string.IsNullOrEmpty(filePath)) { EmitError(cueId, "Ruta de archivo vacía."); return; }
 
         var state = GetState(cueId);
-        if (state is VideoCueState.Loading or VideoCueState.Loaded or VideoCueState.Playing)
+        if (state is MediaCueState.Loading or MediaCueState.Loaded or MediaCueState.Playing)
             return;
 
-        SetState(cueId, VideoCueState.Loading);
+        SetState(cueId, MediaCueState.Loading);
         _playWhenReady[cueId] = false;
         LaunchVerifier(cueId, filePath);
     }
@@ -155,8 +132,8 @@ public sealed class VideoEngine : IDisposable
     /// <summary>Pre-verifica el siguiente cue mientras el actual reproduce.</summary>
     public void PreloadNext(int cueId, string filePath) => Load(cueId, filePath);
 
-    public VideoCueState GetState(int cueId) =>
-        _states.TryGetValue(cueId, out var s) ? s : VideoCueState.Idle;
+    public MediaCueState GetState(int cueId) =>
+        _states.TryGetValue(cueId, out var s) ? s : MediaCueState.Idle;
 
     /// <summary>Reproduce el cue. Autosuficiente: verifica el archivo si hace falta.
     /// Árbol de estados idéntico al Python:
@@ -184,20 +161,20 @@ public sealed class VideoEngine : IDisposable
 
         switch (GetState(cueId))
         {
-            case VideoCueState.Playing:
+            case MediaCueState.Playing:
                 return;
 
-            case VideoCueState.Loading:
+            case MediaCueState.Loading:
                 _playWhenReady[cueId] = true;
                 return;
 
-            case VideoCueState.Loaded when _files.ContainsKey(cueId):
+            case MediaCueState.Loaded when _files.ContainsKey(cueId):
                 StartPlayback(cueId);
                 return;
         }
 
         // IDLE / STOPPED / ERROR / LOADED-sin-caché → re-verificar
-        SetState(cueId, VideoCueState.Loading);
+        SetState(cueId, MediaCueState.Loading);
         _playWhenReady[cueId] = true;
         LaunchVerifier(cueId, filePath);
     }
@@ -209,22 +186,22 @@ public sealed class VideoEngine : IDisposable
     public void Stop(int cueId)
     {
         CancelFade(cueId);
-        if (_players.ContainsKey(cueId) || GetState(cueId) != VideoCueState.Stopped)
-            SetState(cueId, VideoCueState.Stopped);
+        if (_players.ContainsKey(cueId) || GetState(cueId) != MediaCueState.Stopped)
+            SetState(cueId, MediaCueState.Stopped);
         TerminatePlayer(cueId);
     }
 
     public void StopAll()
     {
         foreach (int cueId in _players.Keys.ToList())
-            if (GetState(cueId) == VideoCueState.Playing)
+            if (GetState(cueId) == MediaCueState.Playing)
                 Stop(cueId);
     }
 
     public bool IsPlaying(int cueId) =>
-        GetState(cueId) == VideoCueState.Playing && _players.ContainsKey(cueId);
+        GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId);
 
-    public bool AnyPlaying => _states.Values.Any(s => s == VideoCueState.Playing);
+    public bool AnyPlaying => _states.Values.Any(s => s == MediaCueState.Playing);
 
     /// <summary>Duración total del vídeo en s (0 si mpv aún no la conoce).</summary>
     public double GetDuration(int cueId) =>
@@ -324,7 +301,7 @@ public sealed class VideoEngine : IDisposable
     public void ResumeAll()
     {
         foreach (var (cueId, player) in _players)
-            if (GetState(cueId) == VideoCueState.Playing)
+            if (GetState(cueId) == MediaCueState.Playing)
                 try { player.SetProperty("pause", false); } catch (Exception) { }
     }
 
@@ -401,7 +378,7 @@ public sealed class VideoEngine : IDisposable
     private void OnFileVerified(int cueId, string filePath)
     {
         _files[cueId] = filePath;
-        SetState(cueId, VideoCueState.Loaded);
+        SetState(cueId, MediaCueState.Loaded);
 
         bool willPlay = _playWhenReady.Remove(cueId, out bool w) && w;
         if (willPlay)
@@ -447,7 +424,7 @@ public sealed class VideoEngine : IDisposable
         {
             if (otherId == cueId) continue;
             CancelFade(otherId);
-            SetState(otherId, VideoCueState.Stopped);
+            SetState(otherId, MediaCueState.Stopped);
             TerminatePlayer(otherId);
         }
         TerminatePlayer(cueId);   // player anterior de este cue, si existía
@@ -521,9 +498,9 @@ public sealed class VideoEngine : IDisposable
         player.EndFile += () => Post(() =>
         {
             // Fin natural de archivo (no parada manual: esa retira el player antes)
-            if (GetState(cueId) == VideoCueState.Playing && _players.ContainsKey(cueId))
+            if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
             {
-                SetState(cueId, VideoCueState.Stopped);   // publicar ANTES del Dispose
+                SetState(cueId, MediaCueState.Stopped);   // publicar ANTES del Dispose
                 _players.Remove(cueId, out var ended);
                 ended?.Dispose();
             }
@@ -559,7 +536,7 @@ public sealed class VideoEngine : IDisposable
             return;
         }
 
-        SetState(cueId, VideoCueState.Playing);
+        SetState(cueId, MediaCueState.Playing);
     }
 
     /// <summary>Fija en mpv la parte factible de Display &amp; Geometry
@@ -608,7 +585,7 @@ public sealed class VideoEngine : IDisposable
         else action();
     }
 
-    private void SetState(int cueId, VideoCueState state)
+    private void SetState(int cueId, MediaCueState state)
     {
         _states[cueId] = state;
         StateChanged?.Invoke(cueId, state);
@@ -616,8 +593,8 @@ public sealed class VideoEngine : IDisposable
 
     private void EmitError(int cueId, string message)
     {
-        _states[cueId] = VideoCueState.Error;
-        StateChanged?.Invoke(cueId, VideoCueState.Error);
+        _states[cueId] = MediaCueState.Error;
+        StateChanged?.Invoke(cueId, MediaCueState.Error);
         ErrorOccurred?.Invoke(cueId, message);
     }
 }

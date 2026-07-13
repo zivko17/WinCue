@@ -10,6 +10,7 @@
 // =============================================================================
 
 using System.Diagnostics;
+using WinCue.Core;
 using WinCue.Video;
 
 namespace WinCue.Video.Tests;
@@ -121,7 +122,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
     {
         if (!Ready) return;
         using var engine = MakeEngine();
-        var states = new List<VideoCueState>();
+        var states = new List<MediaCueState>();
         var stateLock = new object();
         double latency = -1;
         bool frameReady = false;
@@ -131,7 +132,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
 
         engine.Play(1, _media.Mp4OneSecond);
 
-        Assert.True(WaitFor(() => engine.GetState(1) == VideoCueState.Playing, 10_000),
+        Assert.True(WaitFor(() => engine.GetState(1) == MediaCueState.Playing, 10_000),
             $"no llegó a PLAYING (estado: {engine.GetState(1)})");
         Assert.True(engine.IsPlaying(1));
         Assert.True(engine.AnyPlaying);
@@ -143,16 +144,16 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
             "time-pos no avanza");
 
         // Fin natural → STOPPED
-        Assert.True(WaitFor(() => engine.GetState(1) == VideoCueState.Stopped, 15_000),
+        Assert.True(WaitFor(() => engine.GetState(1) == MediaCueState.Stopped, 15_000),
             $"no llegó a STOPPED (estado: {engine.GetState(1)})");
         Assert.False(engine.IsPlaying(1));
         Assert.True(latency >= 0.0, "no se reportó latencia");
         Assert.True(frameReady, "no se emitió FrameReady");
         lock (stateLock)
         {
-            Assert.Contains(VideoCueState.Loading, states);
-            Assert.Contains(VideoCueState.Loaded, states);
-            Assert.Contains(VideoCueState.Playing, states);
+            Assert.Contains(MediaCueState.Loading, states);
+            Assert.Contains(MediaCueState.Loaded, states);
+            Assert.Contains(MediaCueState.Playing, states);
         }
     }
 
@@ -165,7 +166,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
         Assert.True(WaitFor(() => engine.IsPlaying(1), 10_000));
 
         engine.Stop(1);
-        Assert.Equal(VideoCueState.Stopped, engine.GetState(1));
+        Assert.Equal(MediaCueState.Stopped, engine.GetState(1));
         Assert.False(engine.IsPlaying(1));
         Assert.Equal(0.0, engine.GetDuration(1));   // player terminado
     }
@@ -183,7 +184,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
         Thread.Sleep(600);
         Assert.True(engine.IsPlaying(1), "la imagen no se mantuvo en pantalla");
         engine.Stop(1);
-        Assert.Equal(VideoCueState.Stopped, engine.GetState(1));
+        Assert.Equal(MediaCueState.Stopped, engine.GetState(1));
     }
 
     [Fact]
@@ -249,7 +250,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
         engine.ErrorOccurred += (id, msg) => error = msg;
         engine.Play(1, Path.Combine(_media.Dir, "no_existe.mp4"));
         Assert.True(WaitFor(() => error is not null, 5_000));
-        Assert.Equal(VideoCueState.Error, engine.GetState(1));
+        Assert.Equal(MediaCueState.Error, engine.GetState(1));
     }
 
     [Fact]

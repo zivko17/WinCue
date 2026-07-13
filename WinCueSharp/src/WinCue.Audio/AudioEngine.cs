@@ -26,32 +26,20 @@
 using NAudio.CoreAudioApi;
 using NAudio.Wave;
 using NAudio.Wave.SampleProviders;
+using WinCue.Core;
 
 namespace WinCue.Audio;
-
-/// <summary>Estado interno del engine para un cue (espejo de los strings Python).</summary>
-public enum EngineCueState { Idle, Loading, Loaded, Playing, Stopped, Error }
 
 /// <summary>Dispositivo de salida disponible.</summary>
 public sealed record AudioDeviceInfo(int Index, string Id, string Name, bool IsDefault);
 
-/// <summary>Parámetros de una reproducción (espejo del dict params de Python).</summary>
-public sealed record PlayParams(
-    double Volume = 1.0,
-    double FadeIn = 0.0,
-    double FadeOut = 0.0,
-    bool Loop = false,
-    double TrimStart = 0.0,
-    double TrimEnd = 0.0,
-    int PlayCount = 1);
-
-public sealed class AudioEngine : IDisposable
+public sealed class AudioEngine : IAudioEngine, IDisposable
 {
     // ------------------------------------------------------------------
     // Eventos (espejo de las señales Qt de Python)
     // ------------------------------------------------------------------
 
-    public event Action<int, EngineCueState>? StateChanged;   // (cueId, newState)
+    public event Action<int, MediaCueState>? StateChanged;   // (cueId, newState)
     public event Action<int, double>? LatencyReport;          // (cueId, ms)
     public event Action<int, string>? ErrorOccurred;          // (cueId, message)
     /// <summary>Nivel RMS instantáneo (0.0–1.0) de un stream cualquiera; el VU
@@ -75,8 +63,8 @@ public sealed class AudioEngine : IDisposable
     private bool _paused;
 
     private readonly Dictionary<int, AudioBuffer> _buffers = new();
-    private readonly Dictionary<int, EngineCueState> _states = new();
-    private readonly Dictionary<int, PlayParams> _pendingPlay = new();
+    private readonly Dictionary<int, MediaCueState> _states = new();
+    private readonly Dictionary<int, AudioPlayParams> _pendingPlay = new();
     private readonly Dictionary<int, ActiveCue> _active = new();
     private readonly HashSet<int> _loading = new();
 
@@ -177,17 +165,24 @@ public sealed class AudioEngine : IDisposable
         }
         if (_buffers.ContainsKey(cueId))
         {
-            SetState(cueId, EngineCueState.Loaded);
+            SetState(cueId, MediaCueState.Loaded);
             return;
         }
         if (_loading.Contains(cueId))
             return;
-        SetState(cueId, EngineCueState.Loading);
+        SetState(cueId, MediaCueState.Loading);
         LaunchLoader(cueId, filePath);
     }
 
     /// <summary>Pre-carga un cue en RAM sin reproducir (latencia cero en el GO).</summary>
     public void Preload(int cueId, string filePath) => Load(cueId, filePath);
+
+    /// <summary>Descarta el buffer en RAM de un cue (su archivo cambió).</summary>
+    public void InvalidateCache(int cueId)
+    {
+        _buffers.Remove(cueId);
+        _states.Remove(cueId);
+    }
 
     // ------------------------------------------------------------------
     // API pública — reproducción
@@ -196,7 +191,7 @@ public sealed class AudioEngine : IDisposable
     /// <summary>Reproduce el cue. Si ya está sonando, lo reinicia desde el
     /// principio. Si el buffer está en RAM arranca de inmediato; si no, carga
     /// primero y arranca al terminar (parámetros en _pendingPlay).</summary>
-    public void Play(int cueId, string filePath, PlayParams? p = null)
+    public void Play(int cueId, string filePath, AudioPlayParams? p = null)
     {
         if (string.IsNullOrEmpty(filePath))
         {
@@ -204,7 +199,7 @@ public sealed class AudioEngine : IDisposable
             return;
         }
 
-        p ??= new PlayParams();
+        p ??= new AudioPlayParams();
         var clamped = p with
         {
             Volume = Math.Clamp(p.Volume, 0.0, 1.0),
@@ -228,7 +223,7 @@ public sealed class AudioEngine : IDisposable
             _pendingPlay[cueId] = clamped;
             if (!_loading.Contains(cueId))
             {
-                SetState(cueId, EngineCueState.Loading);
+                SetState(cueId, MediaCueState.Loading);
                 LaunchLoader(cueId, filePath);
             }
         }
@@ -306,8 +301,8 @@ public sealed class AudioEngine : IDisposable
     public double GetElapsed(int cueId) =>
         _active.TryGetValue(cueId, out var a) ? a.Provider.ElapsedSeconds : 0.0;
 
-    public EngineCueState GetState(int cueId) =>
-        _states.TryGetValue(cueId, out var s) ? s : EngineCueState.Idle;
+    public MediaCueState GetState(int cueId) =>
+        _states.TryGetValue(cueId, out var s) ? s : MediaCueState.Idle;
 
     /// <summary>Cierra todos los streams (al salir de la aplicación).</summary>
     public void Cleanup()
@@ -349,7 +344,7 @@ public sealed class AudioEngine : IDisposable
     {
         _buffers[cueId] = buffer;
         _loading.Remove(cueId);
-        SetState(cueId, EngineCueState.Loaded);
+        SetState(cueId, MediaCueState.Loaded);
         if (_pendingPlay.Remove(cueId, out var p))
             StartPlayback(cueId, p);
     }
@@ -365,7 +360,7 @@ public sealed class AudioEngine : IDisposable
     // Reproducción — mixer compartido con un CueSampleProvider por cue
     // ------------------------------------------------------------------
 
-    private void StartPlayback(int cueId, PlayParams p)
+    private void StartPlayback(int cueId, AudioPlayParams p)
     {
         if (!_buffers.TryGetValue(cueId, out var buffer))
         {
@@ -389,7 +384,7 @@ public sealed class AudioEngine : IDisposable
         var input = AdaptToMixerFormat(provider);
         _active[cueId] = new ActiveCue(provider, input);
         _mixer!.AddMixerInput(input);
-        SetState(cueId, EngineCueState.Playing);
+        SetState(cueId, MediaCueState.Playing);
     }
 
     /// <summary>Adapta canales y samplerate del cue al formato del mixer
@@ -479,7 +474,7 @@ public sealed class AudioEngine : IDisposable
                 if (ReferenceEquals(a.MixerInput, e.SampleProvider))
                 {
                     _active.Remove(cueId);
-                    SetState(cueId, EngineCueState.Stopped);
+                    SetState(cueId, MediaCueState.Stopped);
                     break;
                 }
             }
@@ -494,7 +489,7 @@ public sealed class AudioEngine : IDisposable
         a.Provider.RequestStop();               // por si el mixer lee antes del Remove
         _mixer?.RemoveMixerInput(a.MixerInput);
         if (emitState)
-            SetState(cueId, EngineCueState.Stopped);
+            SetState(cueId, MediaCueState.Stopped);
     }
 
     private void CloseOutput()
@@ -520,7 +515,7 @@ public sealed class AudioEngine : IDisposable
         else action();
     }
 
-    private void SetState(int cueId, EngineCueState state)
+    private void SetState(int cueId, MediaCueState state)
     {
         _states[cueId] = state;
         StateChanged?.Invoke(cueId, state);
@@ -528,8 +523,8 @@ public sealed class AudioEngine : IDisposable
 
     private void EmitError(int cueId, string message)
     {
-        _states[cueId] = EngineCueState.Error;
-        StateChanged?.Invoke(cueId, EngineCueState.Error);
+        _states[cueId] = MediaCueState.Error;
+        StateChanged?.Invoke(cueId, MediaCueState.Error);
         ErrorOccurred?.Invoke(cueId, message);
     }
 
