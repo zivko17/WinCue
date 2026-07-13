@@ -19,8 +19,13 @@ la migración.
 - [x] **Fase 1 — Núcleo**: `Cue`, `CueModel` (jerarquía de grupos incluida),
       `SettingsManager`. JSON 100 % compatible con los shows guardados por la
       versión Python (verificado con round-trip cruzado en ambas direcciones).
-- [ ] **Fase 2 — Motor de audio** (NAudio): mezcla multi-stream, fades
-      sample-accurate, loop/play_count/trim/pause/master, VU.
+- [x] **Fase 2 — Motor de audio** (NAudio): mezcla multi-stream in-process
+      (WASAPI/ASIO persistente + MixingSampleProvider), fades sample-accurate,
+      loop/play_count/trim/pause/master, VU y latencia. Decoder universal
+      (NAudio/MediaFoundation nativo + FFmpeg por pipe para ogg/opus/ac3/dts).
+      Mejoras deliberadas sobre Python: loop sin hueco de silencio en el wrap,
+      fade-out con play_count>1 solo en la última pasada (bug original), y GO
+      sin coste de apertura de stream (el dispositivo queda abierto).
 - [ ] **Fase 3 — Motor de vídeo** (libmpv → D3D11): un compositor real con
       layers/opacidad/geometría; imágenes; screenshot PGM.
 - [ ] **Fase 4 — Controlador**: playhead + cues concurrentes, transport,
