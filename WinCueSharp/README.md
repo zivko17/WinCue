@@ -26,8 +26,17 @@ la migración.
       Mejoras deliberadas sobre Python: loop sin hueco de silencio en el wrap,
       fade-out con play_count>1 solo en la última pasada (bug original), y GO
       sin coste de apertura de stream (el dispositivo queda abierto).
-- [ ] **Fase 3 — Motor de vídeo** (libmpv → D3D11): un compositor real con
-      layers/opacidad/geometría; imágenes; screenshot PGM.
+- [x] **Fase 3a — Motor de vídeo** (libmpv vía P/Invoke propio): máquina de
+      estados por cue, salida única (un vídeo por destino), volumen/fades/
+      loop/play_count/rate/trim/escala/geometría en vivo/imágenes/master.
+      Superficie de render abstraída (Func&lt;HWND&gt;) para enchufar el compositor
+      después. Fin de archivo con keep-open detectado vía eof-reached.
+      Arreglos sobre Python: el huérfano de salida única pasa a STOPPED (su
+      any_playing mentía), el estado se publica antes del Dispose (~100 ms de
+      ventana IsPlaying/estado inconsistentes) y el modo FULL de geometría ya
+      no pisa la escala del cue a 0.
+- [ ] **Fase 3b — Compositor D3D11** (mpv render API → textura): opacidad,
+      layers, rotación 3D, varias surfaces, preview PGM en vivo real.
 - [ ] **Fase 4 — Controlador**: playhead + cues concurrentes, transport,
       cadenas pre/post-wait + auto-continue/follow, grupos (4 modos),
       triggers, retrigger, fade others, modo GO, master, EDIT/SHOW.
