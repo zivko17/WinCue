@@ -61,8 +61,10 @@ la migración.
       sincroniza; sample rate avisa de reinicio.
 - [ ] **Fase 5b — Inspector en vivo** bajo la tabla (pestañas Basics/Triggers/
       Geometry/Time&amp;Loops/Levels), panel de tarjetas, hotkeys por cue.
-- [ ] **Fase 5c — Salida a monitor real**: blackout + testigo completo,
-      mini-monitor PGM/PVW, colocación en pantalla configurada.
+- [x] **Fase 5c — Monitores**: salida colocada en la pantalla configurada con
+      blackout fullscreen por defecto; mini-monitores PVW (frame del cue en
+      standby) y PGM (frame del vídeo en salida cada 1.2 s vía ffmpeg, con
+      guardas anti-reentrada y anti-frames-viejos del original Python).
 - [ ] **Fase 6 — Backends fase-2 del original**: MIDI/Timecode/Wall-clock,
       Duck/Boost, rate con preserve-pitch en audio, OSC.
 
