@@ -1,54 +1,49 @@
 // =============================================================================
-// TimelinePanel.cs — Editor de línea de tiempo estilo Watchout para grupos
-// TIMELINE
+// TimelinePanel.cs — Línea de tiempo del SHOW completo, estilo Watchout
 // =============================================================================
-// Un grupo en modo TIMELINE dispara todos sus hijos a la vez y cada hijo
-// respeta su pre_wait como offset: este panel lo hace VISIBLE y EDITABLE.
-// Los hijos directos del grupo son bloques sobre 3–5 capas horizontales:
-//   · eje X = tiempo (pre_wait → posición; duración efectiva → anchura)
-//   · eje Y = capa (campo timeline_layer, solo organización visual)
-//   · arrastrar horizontal = cambiar pre_wait (snap 0,1 s)
-//   · arrastrar vertical   = cambiar de capa
-//   · Ctrl+rueda = zoom · rueda = desplazamiento · clic = seleccionar en tabla
-// El número de capas visibles es dinámico: mínimo 3, crece hasta 5 según se
-// usen. Un cursor rojo recorre el timeline mientras el grupo suena.
+// Panel SIEMPRE visible (plegable) entre la tabla y el inspector. Proyecta la
+// lista de cues en tiempo, correlativa con el orden de la tabla:
+//   · cada cue empieza donde termina el anterior, o donde manden sus
+//     auto-continue/auto-follow (pre_wait y post_wait incluidos)
+//   · en los encadenados manuales se dibuja un marcador GO: a partir de ahí
+//     el tiempo es una PROYECCIÓN (el operador dispara cuando quiere)
+//   · los grupos TIMELINE son tiempo real: hijos en paralelo a su offset,
+//     con capa manual (timeline_layer) editable arrastrando en vertical
+//   · el resto de bloques se apilan solos en 3–5 capas cuando se solapan
+// Interacción: arrastre horizontal = pre_wait (snap 0,1 s; el resto del show
+// se desplaza en vivo); arrastrar más allá del vecino = reordenar la lista;
+// clic = seleccionar en la tabla (y la selección de la tabla se refleja aquí);
+// Ctrl+rueda = zoom; rueda = desplazamiento. Cursor rojo y progreso en verde
+// mientras suena, alimentados por los ActiveCueInfo reales del controlador.
 // =============================================================================
 
-using System.Diagnostics;
 using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
-using System.Windows.Threading;
+using WinCue.Controller;
 using WinCue.Core;
 
 namespace WinCue.App;
 
-/// <summary>Cabecera (título, zoom, GO/STOP del grupo) + lienzo del timeline.</summary>
+/// <summary>Cabecera (plegado, zoom) + lienzo de la línea de tiempo.</summary>
 public sealed class TimelinePanel : Border
 {
-    private readonly TextBlock _title = new()
-    {
-        FontWeight = FontWeights.Bold,
-        Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)),
-        VerticalAlignment = VerticalAlignment.Center,
-        Margin = new Thickness(4, 0, 12, 0),
-    };
     private readonly TimelineCanvas _canvas = new();
+    private readonly Button _collapseBtn;
 
-    /// <summary>Commit de un campo de un cue (mismo contrato que el inspector).</summary>
     public Action<int, string, object?>? CommitField
     {
         get => _canvas.CommitField;
         set => _canvas.CommitField = value;
     }
 
-    /// <summary>Ids de cues en ejecución (para el cursor y el resaltado).</summary>
-    public Func<IReadOnlyCollection<int>>? RunningIds
+    /// <summary>Reordenación pedida desde el timeline (fromRow, toRow).</summary>
+    public Action<int, int>? MoveCueRequested
     {
-        get => _canvas.RunningIds;
-        set => _canvas.RunningIds = value;
+        get => _canvas.MoveCueRequested;
+        set => _canvas.MoveCueRequested = value;
     }
 
     /// <summary>Clic en un bloque: seleccionar ese cue en la tabla.</summary>
@@ -58,13 +53,8 @@ public sealed class TimelinePanel : Border
         remove => _canvas.CueSelected -= value;
     }
 
-    /// <summary>▶ de la cabecera: disparar el grupo.</summary>
-    public event Action<int>? GoGroupRequested;
-
-    /// <summary>■ de la cabecera: detener los cues del grupo.</summary>
-    public event Action<int>? StopGroupRequested;
-
-    private Cue? _group;
+    /// <summary>El usuario plegó/desplegó el panel (para persistir en settings).</summary>
+    public event Action<bool>? CollapsedChanged;
 
     public TimelinePanel()
     {
@@ -72,13 +62,23 @@ public sealed class TimelinePanel : Border
         BorderBrush = new SolidColorBrush(Color.FromRgb(0x3a, 0x3a, 0x3e));
         BorderThickness = new Thickness(0, 1, 0, 0);
 
-        var header = new DockPanel { Margin = new Thickness(6, 4, 6, 2) };
+        var header = new DockPanel { Margin = new Thickness(6, 3, 6, 2) };
+
+        _collapseBtn = HeaderButton("▾", "#3c3c3c", ToggleCollapse);
+        _collapseBtn.ToolTip = "Plegar/desplegar la línea de tiempo";
+        header.Children.Add(_collapseBtn);
+
+        var title = new TextBlock
+        {
+            Text = "⏱ TIMELINE DEL SHOW",
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 12, 0),
+        };
+        header.Children.Add(title);
 
         var right = new StackPanel { Orientation = Orientation.Horizontal };
-        right.Children.Add(HeaderButton("▶ GO grupo", "#1e7e34",
-            () => { if (_group is not null) GoGroupRequested?.Invoke(_group.Id); }));
-        right.Children.Add(HeaderButton("■", "#5a2a2a",
-            () => { if (_group is not null) StopGroupRequested?.Invoke(_group.Id); }));
         right.Children.Add(HeaderButton("−", "#3c3c3c", () => _canvas.ZoomStep(1 / 1.4)));
         right.Children.Add(HeaderButton("＋", "#3c3c3c", () => _canvas.ZoomStep(1.4)));
         right.Children.Add(HeaderButton("Ajustar", "#3c3c3c", () => _canvas.ZoomToFit()));
@@ -87,14 +87,15 @@ public sealed class TimelinePanel : Border
 
         var hint = new TextBlock
         {
-            Text = "arrastrar: tiempo · vertical: capa · Ctrl+rueda: zoom",
+            Text = "arrastrar: tiempo · vertical: capa (grupo TIMELINE) · " +
+                   "Ctrl+rueda: zoom · ▸GO = disparo manual (tiempo estimado)",
             Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)),
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,
+            HorizontalAlignment = HorizontalAlignment.Right,
+            Margin = new Thickness(0, 0, 10, 0),
         };
-        DockPanel.SetDock(hint, Dock.Right);
         header.Children.Add(hint);
-        header.Children.Add(_title);
 
         var root = new DockPanel();
         DockPanel.SetDock(header, Dock.Top);
@@ -108,7 +109,7 @@ public sealed class TimelinePanel : Border
         var b = new Button
         {
             Content = text,
-            Padding = new Thickness(8, 1, 8, 1),
+            Padding = new Thickness(8, 0, 8, 1),
             Margin = new Thickness(3, 0, 0, 0),
             Background = new SolidColorBrush(
                 (Color)ColorConverter.ConvertFromString(bg)),
@@ -120,31 +121,41 @@ public sealed class TimelinePanel : Border
         return b;
     }
 
-    /// <summary>Apunta el panel a un grupo TIMELINE (null = sin grupo).</summary>
-    public void SetGroup(Cue? group, CueModel? model)
+    public bool IsCollapsed => _canvas.Visibility == Visibility.Collapsed;
+
+    public void SetCollapsed(bool collapsed)
     {
-        _group = group;
-        _canvas.SetGroup(group, model);
-        if (group is not null)
-        {
-            _title.Text = $"⏱ TIMELINE · {group.DisplayNumber} · {group.Name}";
-            _canvas.ZoomToFitIfNew();
-        }
+        _canvas.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+        _collapseBtn.Content = collapsed ? "▸" : "▾";
     }
 
-    /// <summary>Repintar tras un cambio en el modelo (edición, undo, carga…).</summary>
-    public void RefreshFromModel() => _canvas.InvalidateVisual();
+    private void ToggleCollapse()
+    {
+        SetCollapsed(!IsCollapsed);
+        CollapsedChanged?.Invoke(IsCollapsed);
+    }
+
+    public void SetModel(CueModel model) => _canvas.SetModel(model);
+
+    /// <summary>Selección de la tabla → resaltar (y hacer visible) el bloque.</summary>
+    public void SetSelected(int cueId) => _canvas.SetSelected(cueId);
+
+    /// <summary>Cues activos del tick del controlador (cursor + progreso).</summary>
+    public void SetActive(IReadOnlyList<ActiveCueInfo> rows) => _canvas.SetActive(rows);
+
+    /// <summary>Recalcular la proyección tras cualquier cambio del modelo.</summary>
+    public void RefreshFromModel() => _canvas.RefreshFromModel();
 }
 
-/// <summary>Lienzo del timeline: regla, capas, bloques y cursor de reproducción.</summary>
+/// <summary>Lienzo: proyección temporal de la lista, bloques, GO y cursor.</summary>
 public sealed class TimelineCanvas : FrameworkElement
 {
     private const double RulerH = 20;
-    private const double LayerH = 34;
+    private const double LayerH = 32;
     private const int MaxLayers = 5;
     private const int MinLayers = 3;
     private const double SnapSeconds = 0.1;
-    private const double MinTailSeconds = 10;   // aire tras el último bloque
+    private const double InstantFootprint = 0.3;   // huella temporal nominal de un cue instantáneo
 
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x18, 0x18, 0x1a)));
     private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x21)));
@@ -152,13 +163,24 @@ public sealed class TimelineCanvas : FrameworkElement
     private static readonly Brush RulerBg = Frozen(new SolidColorBrush(Color.FromRgb(0x26, 0x26, 0x29)));
     private static readonly Brush TickBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)));
     private static readonly Pen TickPen = FrozenPen(Color.FromRgb(0x55, 0x55, 0x58), 1);
-    private static readonly Pen TickMinorPen = FrozenPen(Color.FromRgb(0x33, 0x33, 0x36), 1);
+    private static readonly Pen TickMinorPen = FrozenPen(Color.FromRgb(0x30, 0x30, 0x33), 1);
     private static readonly Pen PlayheadPen = FrozenPen(Color.FromRgb(0xc0, 0x39, 0x2b), 2);
-    private static readonly Pen RunningPen = FrozenPen(Color.FromRgb(0x2e, 0xcc, 0x71), 2);
     private static readonly Pen SelectedPen = FrozenPen(Color.FromRgb(0xff, 0xff, 0xff), 1.5);
     private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xee, 0xee, 0xee)));
     private static readonly Brush FadeBrush = Frozen(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)));
     private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)));
+    private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Color.FromArgb(110, 0x2e, 0xcc, 0x71)));
+    private static readonly Brush SpanBrush = Frozen(new SolidColorBrush(Color.FromArgb(16, 0xff, 0xff, 0xff)));
+    private static readonly Brush GoBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
+    private static readonly Pen GoPen = MakeGoPen();
+
+    private static Pen MakeGoPen()
+    {
+        var p = new Pen(new SolidColorBrush(Color.FromArgb(150, 0x2e, 0xcc, 0x71)), 1)
+        { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
+        p.Freeze();
+        return p;
+    }
 
     /// <summary>Colores de bloque por tipo (espejo de la columna Tipo de la tabla).</summary>
     private static readonly Dictionary<CueType, string> TypeColors = new()
@@ -175,19 +197,36 @@ public sealed class TimelineCanvas : FrameworkElement
     };
 
     public Action<int, string, object?>? CommitField;
-    public Func<IReadOnlyCollection<int>>? RunningIds;
+    public Action<int, int>? MoveCueRequested;
     public event Action<int>? CueSelected;
 
-    private Cue? _group;
     private CueModel? _model;
-    private int _lastGroupId = -1;
+    private int _selectedId = -1;
 
     private double _pxPerSec = 20;
     private double _scrollX;
-    private int _selectedId = -1;
+    private bool _fitDone;
+
+    // Proyección calculada de la lista
+    private sealed class Block
+    {
+        public required Cue Cue;
+        public double Start;
+        public double Dur;            // 0 = instantáneo
+        public int Layer;
+        public bool Dimmed;           // desarmado / rama que no se disparará
+        public bool ManualLayer;      // hijo directo de un grupo TIMELINE
+    }
+
+    private readonly List<Block> _blocks = new();
+    private readonly List<(Cue Group, double Start, double End)> _spans = new();
+    private readonly List<double> _goMarks = new();
+
+    // Cues activos (cursor + progreso), del tick real del controlador
+    private readonly Dictionary<int, double> _activeElapsed = new();
 
     // Arrastre de un bloque
-    private int _dragId = -1;
+    private Block? _dragBlock;
     private bool _dragMoved;
     private Point _dragStart;
     private double _dragOrigPreWait;
@@ -195,58 +234,59 @@ public sealed class TimelineCanvas : FrameworkElement
     private double _dragPreWait;
     private int _dragLayer;
 
-    // Cursor de reproducción: instante en que el grupo empezó a sonar
-    private long? _playT0Ticks;
-    private readonly DispatcherTimer _playTimer;
-
     public TimelineCanvas()
     {
         ClipToBounds = true;
         MinHeight = RulerH + MinLayers * LayerH;
-        _playTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(66) };
-        _playTimer.Tick += (_, _) => TickPlayhead();
     }
 
-    public void SetGroup(Cue? group, CueModel? model)
+    public void SetModel(CueModel model)
     {
-        _group = group;
         _model = model;
-        if (group is null)
-        {
-            _playTimer.Stop();
-            _playT0Ticks = null;
-        }
-        else
-        {
-            _playTimer.Start();
-        }
+        _fitDone = false;
+        RefreshFromModel();
+    }
+
+    public void SetSelected(int cueId)
+    {
+        if (_selectedId == cueId)
+            return;
+        _selectedId = cueId;
+        EnsureVisible(cueId);
+        InvalidateVisual();
+    }
+
+    public void SetActive(IReadOnlyList<ActiveCueInfo> rows)
+    {
+        bool wasEmpty = _activeElapsed.Count == 0;
+        _activeElapsed.Clear();
+        foreach (var r in rows)
+            _activeElapsed[r.Id] = r.Elapsed;
+        if (!(wasEmpty && rows.Count == 0))
+            InvalidateVisual();
+    }
+
+    public void RefreshFromModel()
+    {
+        RebuildLayout();
         UpdateHeight();
         InvalidateVisual();
     }
 
-    /// <summary>Ajusta el zoom SOLO si el grupo mostrado es otro (no pisar el
-    /// zoom del usuario al refrescar la selección dentro del mismo grupo).</summary>
-    public void ZoomToFitIfNew()
-    {
-        if (_group is null || _group.Id == _lastGroupId)
-            return;
-        _lastGroupId = _group.Id;
-        ZoomToFit();
-    }
-
     // ------------------------------------------------------------------
-    // Modelo → bloques
+    // Proyección: lista de cues → bloques con tiempo y capa
     // ------------------------------------------------------------------
 
-    private List<Cue> Children() =>
-        _group is null || _model is null ? new() : _model.DirectChildren(_group.Id);
+    private double DisplayPreWait(Cue c) =>
+        _dragBlock is not null && c.Id == _dragBlock.Cue.Id ? _dragPreWait : c.PreWait;
 
-    /// <summary>Duración efectiva de la ACCIÓN del cue en segundos
-    /// (0 = instantáneo: START/STOP/MEMO/SCRIPT).</summary>
-    private double EffectiveDuration(Cue cue, int depth = 0)
+    private int DisplayLayer(Cue c) => Math.Clamp(
+        _dragBlock is not null && c.Id == _dragBlock.Cue.Id ? _dragLayer : c.TimelineLayer,
+        0, MaxLayers - 1);
+
+    /// <summary>Duración de la acción del cue (0 = instantáneo).</summary>
+    private static double EffectiveDuration(Cue cue)
     {
-        if (depth > 8)
-            return 0;
         switch (cue.Type)
         {
             case CueType.Audio:
@@ -258,40 +298,151 @@ public sealed class TimelineCanvas : FrameworkElement
             case CueType.Wait:
             case CueType.Fade:
                 return Math.Max(0, cue.Duration);
-            case CueType.Group:
-                // Un grupo anidado dura hasta que acaba su último hijo
-                double max = 0;
-                if (_model is not null)
-                    foreach (var child in _model.DirectChildren(cue.Id))
-                        max = Math.Max(max, child.PreWait + EffectiveDuration(child, depth + 1));
-                return max;
             default:
                 return 0;
+        }
+    }
+
+    private void RebuildLayout()
+    {
+        _blocks.Clear();
+        _spans.Clear();
+        _goMarks.Clear();
+        if (_model is null)
+            return;
+        var roots = _model.Cues.Where(c => c.ParentId is null).ToList();
+        LayoutSequence(roots, 0.0, dimmed: false);
+        AssignLayers();
+    }
+
+    /// <summary>Coloca una secuencia (nivel raíz o hijos de un grupo ENTER)
+    /// encadenando triggers según continue_mode. Devuelve el fin de la última
+    /// acción de la secuencia.</summary>
+    private double LayoutSequence(List<Cue> cues, double t0, bool dimmed)
+    {
+        double trigger = t0;
+        double lastEnd = t0;
+        for (int i = 0; i < cues.Count; i++)
+        {
+            var cue = cues[i];
+            double actionStart = trigger + DisplayPreWait(cue);
+            double end = LayoutCue(cue, actionStart, dimmed);
+            lastEnd = Math.Max(lastEnd, end);
+            if (i == cues.Count - 1)
+                break;
+            switch (cue.ContinueMode)
+            {
+                case ContinueMode.AutoContinue:
+                    trigger = actionStart + cue.PostWait;
+                    break;
+                case ContinueMode.AutoFollow:
+                    trigger = end;
+                    break;
+                default:   // GO manual: proyección "dispara cuando termina"
+                    trigger = Math.Max(trigger, end);
+                    if (!dimmed)
+                        _goMarks.Add(trigger);
+                    break;
+            }
+        }
+        return lastEnd;
+    }
+
+    /// <summary>Coloca un cue (y sus hijos si es grupo) con la acción empezando
+    /// en <paramref name="start"/>. Devuelve cuándo termina su acción.</summary>
+    private double LayoutCue(Cue cue, double start, bool dimmed, int? forcedLayer = null)
+    {
+        if (cue.Type == CueType.Group)
+        {
+            var children = _model!.DirectChildren(cue.Id);
+            bool dim = dimmed || !cue.Armed;
+            double end = start;
+            switch (cue.GroupMode)
+            {
+                case GroupMode.Timeline:
+                    // Tiempo REAL: todos a la vez, cada uno a su offset y capa manual
+                    foreach (var ch in children)
+                        end = Math.Max(end, LayoutCue(
+                            ch, start + DisplayPreWait(ch), dim, DisplayLayer(ch)));
+                    break;
+                case GroupMode.Enter:
+                    end = LayoutSequence(children, start, dim);
+                    break;
+                default:   // GO_NEXT: solo el primero · RANDOM: cualquiera
+                    for (int i = 0; i < children.Count; i++)
+                    {
+                        bool branchDim = dim ||
+                            (cue.GroupMode == GroupMode.GoNext && i > 0);
+                        double e = LayoutCue(children[i],
+                            start + DisplayPreWait(children[i]), branchDim);
+                        if (cue.GroupMode == GroupMode.Random || i == 0)
+                            end = Math.Max(end, e);
+                    }
+                    break;
+            }
+            if (children.Count > 0)
+                _spans.Add((cue, start, Math.Max(end, start + 0.2)));
+            return cue.Armed ? end : start;
+        }
+
+        _blocks.Add(new Block
+        {
+            Cue = cue,
+            Start = start,
+            Dur = EffectiveDuration(cue),
+            Layer = forcedLayer ?? -1,
+            Dimmed = dimmed || !cue.Armed,
+            ManualLayer = forcedLayer is not null,
+        });
+        return cue.Armed ? start + EffectiveDuration(cue) : start;
+    }
+
+    /// <summary>Capas: la manual (grupos TIMELINE) se respeta; el resto se
+    /// apila greedy en la primera capa libre para ese intervalo.</summary>
+    private void AssignLayers()
+    {
+        var ends = new double[MaxLayers];
+        for (int i = 0; i < MaxLayers; i++)
+            ends[i] = double.NegativeInfinity;
+
+        foreach (var b in _blocks.OrderBy(b => b.Start))
+        {
+            double foot = b.Start + Math.Max(b.Dur, InstantFootprint);
+            if (b.ManualLayer)
+            {
+                b.Layer = Math.Clamp(b.Layer, 0, MaxLayers - 1);
+                ends[b.Layer] = Math.Max(ends[b.Layer], foot);
+                continue;
+            }
+            int chosen = MaxLayers - 1;
+            for (int l = 0; l < MaxLayers; l++)
+            {
+                if (ends[l] <= b.Start + 1e-6)
+                {
+                    chosen = l;
+                    break;
+                }
+            }
+            b.Layer = chosen;
+            ends[chosen] = Math.Max(ends[chosen], foot);
         }
     }
 
     private int VisibleLayers()
     {
         int maxUsed = 0;
-        foreach (var c in Children())
-            maxUsed = Math.Max(maxUsed, Math.Clamp(c.TimelineLayer, 0, MaxLayers - 1));
-        if (_dragId >= 0)
-            maxUsed = Math.Max(maxUsed, _dragLayer);
+        foreach (var b in _blocks)
+            maxUsed = Math.Max(maxUsed, b.Layer);
         return Math.Clamp(maxUsed + 2, MinLayers, MaxLayers);
     }
 
     private double TotalSeconds()
     {
         double max = 0;
-        foreach (var c in Children())
-            max = Math.Max(max, DisplayPreWait(c) + EffectiveDuration(c));
+        foreach (var b in _blocks)
+            max = Math.Max(max, b.Start + Math.Max(b.Dur, InstantFootprint));
         return max;
     }
-
-    // Durante el arrastre, el bloque activo usa los valores provisionales
-    private double DisplayPreWait(Cue c) => c.Id == _dragId ? _dragPreWait : c.PreWait;
-    private int DisplayLayer(Cue c) =>
-        Math.Clamp(c.Id == _dragId ? _dragLayer : c.TimelineLayer, 0, MaxLayers - 1);
 
     private void UpdateHeight()
     {
@@ -312,18 +463,29 @@ public sealed class TimelineCanvas : FrameworkElement
     private void ZoomAt(double factor, double anchorX)
     {
         double sec = XToSec(anchorX);
-        _pxPerSec = Math.Clamp(_pxPerSec * factor, 2, 400);
+        _pxPerSec = Math.Clamp(_pxPerSec * factor, 1, 400);
         _scrollX = Math.Max(0, sec * _pxPerSec - anchorX);
         InvalidateVisual();
     }
 
     public void ZoomToFit()
     {
-        double total = Math.Max(5, TotalSeconds() + 2);
-        double w = Math.Max(200, ActualWidth > 0 ? ActualWidth : 800);
-        _pxPerSec = Math.Clamp((w - 20) / total, 2, 400);
+        double total = Math.Max(10, TotalSeconds() + 2);
+        double w = Math.Max(200, ActualWidth > 0 ? ActualWidth : 900);
+        _pxPerSec = Math.Clamp((w - 20) / total, 1, 400);
         _scrollX = 0;
         InvalidateVisual();
+    }
+
+    private void EnsureVisible(int cueId)
+    {
+        var b = _blocks.FirstOrDefault(b => b.Cue.Id == cueId);
+        if (b is null || ActualWidth <= 0)
+            return;
+        double x0 = SecToX(b.Start);
+        double x1 = SecToX(b.Start + Math.Max(b.Dur, InstantFootprint));
+        if (x1 < 0 || x0 > ActualWidth)
+            _scrollX = Math.Max(0, b.Start * _pxPerSec - ActualWidth * 0.3);
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
@@ -332,8 +494,7 @@ public sealed class TimelineCanvas : FrameworkElement
             ZoomAt(e.Delta > 0 ? 1.25 : 1 / 1.25, e.GetPosition(this).X);
         else
         {
-            double maxScroll = Math.Max(0,
-                (TotalSeconds() + MinTailSeconds) * _pxPerSec - ActualWidth);
+            double maxScroll = Math.Max(0, (TotalSeconds() + 10) * _pxPerSec - ActualWidth);
             _scrollX = Math.Clamp(_scrollX - e.Delta * 0.6, 0, maxScroll);
             InvalidateVisual();
         }
@@ -348,23 +509,29 @@ public sealed class TimelineCanvas : FrameworkElement
     {
         double w = ActualWidth, h = ActualHeight;
         dc.DrawRectangle(BgBrush, null, new Rect(0, 0, w, h));
-        if (_group is null || _model is null)
+        if (_model is null)
             return;
 
-        int layers = VisibleLayers();
-        var children = Children();
+        if (!_fitDone && w > 0 && _blocks.Count > 0)
+        {
+            _fitDone = true;
+            double total = Math.Max(10, TotalSeconds() + 2);
+            _pxPerSec = Math.Clamp((w - 20) / total, 1, 400);
+            _scrollX = 0;
+        }
 
-        // Fondo de capas alternado + número de capa
+        int layers = VisibleLayers();
+
+        // Fondo de capas alternado + número
         for (int l = 0; l < layers; l++)
         {
             double y = RulerH + l * LayerH;
             dc.DrawRectangle(l % 2 == 0 ? LayerABrush : LayerBBrush, null,
                 new Rect(0, y, w, LayerH));
-            var num = Label($"{l + 1}", MsgBrush, 9);
-            dc.DrawText(num, new Point(4, y + 2));
+            dc.DrawText(Label($"{l + 1}", MsgBrush, 9), new Point(4, y + 2));
         }
 
-        // Regla de tiempo con paso adaptativo
+        // Regla de tiempo
         dc.DrawRectangle(RulerBg, null, new Rect(0, 0, w, RulerH));
         double step = RulerStep();
         double firstTick = Math.Floor(XToSec(0) / step) * step;
@@ -373,50 +540,74 @@ public sealed class TimelineCanvas : FrameworkElement
             double x = SecToX(t);
             dc.DrawLine(TickPen, new Point(x, RulerH - 6), new Point(x, RulerH));
             dc.DrawLine(TickMinorPen, new Point(x, RulerH), new Point(x, h));
-            var label = Label(FmtTime(t), TickBrush, 10);
-            dc.DrawText(label, new Point(x + 3, 2));
+            dc.DrawText(Label(FmtTime(t), TickBrush, 10), new Point(x + 3, 2));
         }
 
-        if (children.Count == 0)
+        if (_blocks.Count == 0)
         {
-            var msg = Label("Grupo TIMELINE vacío — añade cues dentro del grupo",
-                MsgBrush, 12);
+            var msg = Label("Show vacío — añade o importa cues", MsgBrush, 12);
             dc.DrawText(msg, new Point((w - msg.Width) / 2, (h + RulerH - msg.Height) / 2));
             return;
         }
 
-        var running = RunningIds?.Invoke() ?? Array.Empty<int>();
-
-        // Bloques (el arrastrado se pinta el último, por encima)
-        foreach (var cue in children.Where(c => c.Id != _dragId))
-            DrawBlock(dc, cue, running);
-        var dragging = children.FirstOrDefault(c => c.Id == _dragId);
-        if (dragging is not null)
-            DrawBlock(dc, dragging, running);
-
-        // Cursor de reproducción
-        if (_playT0Ticks is long t0)
+        // Contenedores de grupo (tinte + nombre)
+        foreach (var (group, start, end) in _spans)
         {
-            double sec = Stopwatch.GetElapsedTime(t0).TotalSeconds;
-            double x = SecToX(sec);
+            double x0 = SecToX(start), x1 = SecToX(end);
+            if (x1 < 0 || x0 > w)
+                continue;
+            dc.DrawRectangle(SpanBrush, null,
+                new Rect(x0, RulerH, Math.Max(2, x1 - x0), h - RulerH));
+            string mode = group.GroupMode.ToString().ToUpperInvariant();
+            var lbl = Label($"▸ {group.Name} · {mode}", MsgBrush, 9);
+            dc.DrawText(lbl, new Point(x0 + 3, RulerH + 1));
+        }
+
+        // Marcadores GO (a partir de aquí el tiempo es estimado)
+        foreach (double t in _goMarks)
+        {
+            double x = SecToX(t);
+            if (x < -20 || x > w)
+                continue;
+            dc.DrawLine(GoPen, new Point(x, RulerH), new Point(x, h));
+            dc.DrawText(Label("▸GO", GoBrush, 9), new Point(x + 2, h - 13));
+        }
+
+        // Bloques (el arrastrado, encima)
+        foreach (var b in _blocks.Where(b => b != _dragBlock))
+            DrawBlock(dc, b);
+        if (_dragBlock is not null)
+            DrawBlock(dc, _dragBlock);
+
+        // Cursor: posición real más avanzada de los cues sonando
+        double? cursor = null;
+        foreach (var b in _blocks)
+            if (_activeElapsed.TryGetValue(b.Cue.Id, out double elapsed))
+            {
+                double pos = b.Start + Math.Clamp(elapsed, 0, Math.Max(b.Dur, elapsed));
+                cursor = Math.Max(cursor ?? 0, pos);
+            }
+        if (cursor is double cs)
+        {
+            double x = SecToX(cs);
             if (x >= 0 && x <= w)
             {
                 dc.DrawLine(PlayheadPen, new Point(x, 0), new Point(x, h));
-                var lbl = Label(FmtTime(sec), Frozen(
-                    new SolidColorBrush(Color.FromRgb(0xff, 0x8a, 0x7a))), 10);
-                dc.DrawText(lbl, new Point(x + 4, RulerH + 1));
+                dc.DrawText(Label(FmtTime(cs), Frozen(
+                    new SolidColorBrush(Color.FromRgb(0xff, 0x8a, 0x7a))), 10),
+                    new Point(x + 4, RulerH + 1));
             }
         }
     }
 
-    private void DrawBlock(DrawingContext dc, Cue cue, IReadOnlyCollection<int> running)
+    private void DrawBlock(DrawingContext dc, Block b)
     {
-        double dur = EffectiveDuration(cue);
-        double x = SecToX(DisplayPreWait(cue));
-        double y = RulerH + DisplayLayer(cue) * LayerH + 3;
+        var cue = b.Cue;
+        double x = SecToX(b.Start);
+        double y = RulerH + b.Layer * LayerH + 3;
         double bh = LayerH - 6;
-        bool instant = dur <= 0;
-        double bw = instant ? 12 : Math.Max(4, dur * _pxPerSec);
+        bool instant = b.Dur <= 0;
+        double bw = instant ? 12 : Math.Max(4, b.Dur * _pxPerSec);
 
         if (x + bw < 0 || x > ActualWidth)
             return;
@@ -426,20 +617,28 @@ public sealed class TimelineCanvas : FrameworkElement
             ? ch
             : TypeColors.GetValueOrDefault(cue.Type, "#555555");
         var baseColor = (Color)ColorConverter.ConvertFromString(hex);
-        var fill = new LinearGradientBrush(
-            baseColor, Darken(baseColor, 0.65), 90);
+        var fill = new LinearGradientBrush(baseColor, Darken(baseColor, 0.65), 90);
         fill.Freeze();
 
-        Pen? border = running.Contains(cue.Id) ? RunningPen
-            : cue.Id == _selectedId ? SelectedPen
-            : null;
+        bool running = _activeElapsed.ContainsKey(cue.Id);
+        Pen? border = cue.Id == _selectedId ? SelectedPen : null;
         var rect = new Rect(x, y, bw, bh);
         dc.DrawRoundedRectangle(fill, border, rect, 3, 3);
 
-        if (!cue.Armed)
+        if (b.Dimmed)
             dc.DrawRoundedRectangle(FadeBrush, null, rect, 3, 3);
 
-        // Fades de media como triángulos oscurecidos (estilo Watchout)
+        // Progreso real dentro del bloque mientras suena
+        if (running && !instant &&
+            _activeElapsed.TryGetValue(cue.Id, out double elapsed))
+        {
+            double pw = Math.Clamp(elapsed / Math.Max(0.001, b.Dur), 0, 1) * bw;
+            if (pw > 1)
+                dc.DrawRoundedRectangle(ProgressBrush, null,
+                    new Rect(x, y, pw, bh), 3, 3);
+        }
+
+        // Fades de media como triángulos (estilo Watchout)
         if (!instant && cue.IsMedia())
         {
             double fi = Math.Min(cue.FadeIn * _pxPerSec, bw);
@@ -452,7 +651,6 @@ public sealed class TimelineCanvas : FrameworkElement
                     new Point(x + bw, y), new Point(x + bw - fo, y), new Point(x + bw, y + bh)));
         }
 
-        // Etiqueta: número · nombre (+ ∞ si loop)
         if (bw > 30)
         {
             string text = $"{cue.DisplayNumber} · {cue.Name}";
@@ -502,48 +700,44 @@ public sealed class TimelineCanvas : FrameworkElement
         (byte)(c.R * f), (byte)(c.G * f), (byte)(c.B * f));
 
     // ------------------------------------------------------------------
-    // Interacción: seleccionar y arrastrar bloques
+    // Interacción: seleccionar, arrastrar (tiempo/capa) y reordenar
     // ------------------------------------------------------------------
 
-    private Cue? HitBlock(Point p)
+    private Block? HitBlock(Point p)
     {
         if (p.Y < RulerH)
             return null;
         int layer = (int)((p.Y - RulerH) / LayerH);
         double sec = XToSec(p.X);
-        // Recorrer al revés: el último pintado queda encima
-        var children = Children();
-        for (int i = children.Count - 1; i >= 0; i--)
+        for (int i = _blocks.Count - 1; i >= 0; i--)
         {
-            var c = children[i];
-            if (DisplayLayer(c) != layer)
+            var b = _blocks[i];
+            if (b.Layer != layer)
                 continue;
-            double dur = EffectiveDuration(c);
-            double start = DisplayPreWait(c);
-            double wSec = Math.Max(dur, 12 / _pxPerSec);   // mínimo clicable
-            if (sec >= start && sec <= start + wSec)
-                return c;
+            double wSec = Math.Max(b.Dur, 12 / _pxPerSec);
+            if (sec >= b.Start && sec <= b.Start + wSec)
+                return b;
         }
         return null;
     }
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
-        if (e.ChangedButton != MouseButton.Left || _group is null)
+        if (e.ChangedButton != MouseButton.Left || _model is null)
             return;
         var p = e.GetPosition(this);
-        var cue = HitBlock(p);
-        if (cue is null)
+        var block = HitBlock(p);
+        if (block is null)
             return;
 
-        _selectedId = cue.Id;
-        CueSelected?.Invoke(cue.Id);
+        _selectedId = block.Cue.Id;
+        CueSelected?.Invoke(block.Cue.Id);
 
-        _dragId = cue.Id;
+        _dragBlock = block;
         _dragMoved = false;
         _dragStart = p;
-        _dragOrigPreWait = cue.PreWait;
-        _dragOrigLayer = Math.Clamp(cue.TimelineLayer, 0, MaxLayers - 1);
+        _dragOrigPreWait = block.Cue.PreWait;
+        _dragOrigLayer = Math.Clamp(block.Cue.TimelineLayer, 0, MaxLayers - 1);
         _dragPreWait = _dragOrigPreWait;
         _dragLayer = _dragOrigLayer;
         CaptureMouse();
@@ -553,80 +747,109 @@ public sealed class TimelineCanvas : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var p = e.GetPosition(this);
-        if (_dragId < 0)
+        if (_dragBlock is null)
         {
             Cursor = HitBlock(p) is not null ? Cursors.SizeAll : Cursors.Arrow;
             return;
         }
         if (!_dragMoved &&
             Math.Abs(p.X - _dragStart.X) < 4 && Math.Abs(p.Y - _dragStart.Y) < 4)
-            return;   // umbral: distinguir clic de arrastre
+            return;
         _dragMoved = true;
 
         double dSec = (p.X - _dragStart.X) / _pxPerSec;
         _dragPreWait = Math.Max(0,
             Math.Round((_dragOrigPreWait + dSec) / SnapSeconds) * SnapSeconds);
+        if (_dragBlock.ManualLayer)
+            _dragLayer = Math.Clamp((int)((p.Y - RulerH) / LayerH), 0, MaxLayers - 1);
 
-        int layer = (int)((p.Y - RulerH) / LayerH);
-        _dragLayer = Math.Clamp(layer, 0, MaxLayers - 1);
-
+        // Recalcular la proyección en vivo: el resto del show se desplaza
+        var keep = _dragBlock;
+        RebuildLayout();
+        _dragBlock = _blocks.FirstOrDefault(b => b.Cue.Id == keep.Cue.Id);
         UpdateHeight();
         InvalidateVisual();
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
-        if (_dragId < 0)
+        if (_dragBlock is null)
             return;
-        int id = _dragId;
+        var cue = _dragBlock.Cue;
+        bool manual = _dragBlock.ManualLayer;
         bool moved = _dragMoved;
         double preWait = _dragPreWait;
         int layer = _dragLayer;
-        _dragId = -1;
+        _dragBlock = null;
         ReleaseMouseCapture();
+
+        // Proyección LIMPIA (sin el arrastre): base para detectar cruces
+        RebuildLayout();
 
         if (moved)
         {
-            if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
-                CommitField?.Invoke(id, "pre_wait", preWait);
-            if (layer != _dragOrigLayer)
-                CommitField?.Invoke(id, "timeline_layer", layer);
-        }
-        UpdateHeight();
-        InvalidateVisual();
-    }
-
-    // ------------------------------------------------------------------
-    // Cursor de reproducción
-    // ------------------------------------------------------------------
-
-    private void TickPlayhead()
-    {
-        if (_group is null || _model is null || RunningIds is null)
-            return;
-        bool any = false;
-        foreach (int id in RunningIds())
-        {
-            if (id == _group.Id ||
-                (_model.GetById(id) is Cue c && _model.IsDescendant(c, _group.Id)))
+            // ¿El arrastre cruzó a un hermano? → reordenar la lista
+            if (!TryReorder(cue, preWait - _dragOrigPreWait))
             {
-                any = true;
-                break;
+                if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
+                    CommitField?.Invoke(cue.Id, "pre_wait", preWait);
+                if (manual && layer != _dragOrigLayer)
+                    CommitField?.Invoke(cue.Id, "timeline_layer", layer);
             }
         }
-        if (any && _playT0Ticks is null)
-            _playT0Ticks = Stopwatch.GetTimestamp();
-        else if (!any && _playT0Ticks is not null)
-            _playT0Ticks = null;
-
-        if (any || _playT0Ticks is not null)
-            InvalidateVisual();
-        else if (any != _lastAnyRunning)
-            InvalidateVisual();
-        _lastAnyRunning = any;
+        RefreshFromModel();
     }
 
-    private bool _lastAnyRunning;
+    /// <summary>Si el bloque se soltó más allá del hermano anterior/siguiente
+    /// (mismo padre, sin cruzar grupos), reordena la lista y devuelve true.
+    /// Es el "viceversa" de la correlación lista↔timeline. Compara contra la
+    /// proyección SIN el arrastre: en una cadena secuencial los vecinos de
+    /// después se desplazan junto al bloque y nunca se cruzarían.</summary>
+    private bool TryReorder(Cue cue, double delta)
+    {
+        if (_model is null || cue.Type == CueType.Group)
+            return false;
+        if (Math.Abs(delta) < 0.05)
+            return false;
+
+        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
+        int pos = siblings.FindIndex(c => c.Id == cue.Id);
+        if (pos < 0)
+            return false;
+
+        // Posiciones proyectadas originales (RebuildLayout limpio previo)
+        double BlockStart(Cue c) =>
+            _blocks.FirstOrDefault(b => b.Cue.Id == c.Id)?.Start ?? double.NaN;
+
+        double myStart = BlockStart(cue);
+        if (double.IsNaN(myStart))
+            return false;
+        double droppedStart = Math.Max(0, myStart + delta);
+
+        if (delta < 0 && pos > 0)
+        {
+            var prev = siblings[pos - 1];
+            double prevStart = BlockStart(prev);
+            if (prev.Type != CueType.Group && !double.IsNaN(prevStart)
+                && droppedStart < prevStart)
+            {
+                MoveCueRequested?.Invoke(_model.IndexOfId(cue.Id), _model.IndexOfId(prev.Id));
+                return true;
+            }
+        }
+        else if (delta > 0 && pos < siblings.Count - 1)
+        {
+            var next = siblings[pos + 1];
+            double nextStart = BlockStart(next);
+            if (next.Type != CueType.Group && !double.IsNaN(nextStart)
+                && droppedStart > nextStart)
+            {
+                MoveCueRequested?.Invoke(_model.IndexOfId(cue.Id), _model.IndexOfId(next.Id));
+                return true;
+            }
+        }
+        return false;
+    }
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
 

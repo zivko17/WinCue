@@ -88,7 +88,8 @@ public partial class MainWindow : Window, IShowView
         Inspector.AuditionRequested += () =>
             _controller.AuditionToggle(CueGrid.SelectedIndex);
 
-        // Timeline estilo Watchout (visible al seleccionar un grupo TIMELINE)
+        // Timeline del show, estilo Watchout (siempre presente, plegable)
+        Timeline.SetModel(_model);
         Timeline.CommitField = (cueId, key, value) =>
         {
             int row = _model.IndexOfId(cueId);
@@ -96,21 +97,16 @@ public partial class MainWindow : Window, IShowView
                 _controller.OnCueEditCommitted(row,
                     new Dictionary<string, object?> { [key] = value });
         };
-        Timeline.RunningIds = () => _controller.RunningCueIds;
+        Timeline.MoveCueRequested = (from, to) => _controller.OnMoveCue(from, to);
         Timeline.CueSelected += cueId =>
         {
             int row = _model.IndexOfId(cueId);
             if (row >= 0 && CueGrid.SelectedIndex != row)
                 CueGrid.SelectedIndex = row;
         };
-        Timeline.GoGroupRequested += groupId => _controller.TriggerCueId(groupId);
-        Timeline.StopGroupRequested += groupId =>
-        {
-            foreach (int id in _controller.RunningCueIds.ToList())
-                if (id == groupId ||
-                    (_model.GetById(id) is Cue c && _model.IsDescendant(c, groupId)))
-                    _controller.StopCueById(id);
-        };
+        Timeline.SetCollapsed(_settings.Get("timeline_collapsed", false));
+        Timeline.CollapsedChanged += collapsed =>
+            _settings.Set("timeline_collapsed", collapsed);
 
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
@@ -220,24 +216,12 @@ public partial class MainWindow : Window, IShowView
         Inspector.SetCue(row >= 0 ? _model.GetCue(row) : null, () => _model.Cues);
     }
 
-    /// <summary>Muestra el timeline si la selección es un grupo TIMELINE o
-    /// está dentro de uno (el ancestro más cercano en ese modo).</summary>
+    /// <summary>Correlación tabla → timeline: resaltar el cue seleccionado.</summary>
     private void UpdateTimelinePanel()
     {
         if (_model is null) return;
-        Cue? group = null;
         var cue = CueGrid.SelectedIndex >= 0 ? _model.GetCue(CueGrid.SelectedIndex) : null;
-        while (cue is not null)
-        {
-            if (cue.Type == CueType.Group && cue.GroupMode == GroupMode.Timeline)
-            {
-                group = cue;
-                break;
-            }
-            cue = cue.ParentId is int pid ? _model.GetById(pid) : null;
-        }
-        Timeline.SetGroup(group, group is null ? null : _model);
-        Timeline.Visibility = group is null ? Visibility.Collapsed : Visibility.Visible;
+        Timeline.SetSelected(cue?.Id ?? -1);
     }
 
     private void LoadKeyBindings()
@@ -296,11 +280,8 @@ public partial class MainWindow : Window, IShowView
     {
         if (index >= 0 && index < _rows.Count)
             _rows[index].RefreshAll();
-        // La edición pudo cambiar pre_wait/capa/modo de grupo → timeline al día
-        if (index == CueGrid.SelectedIndex)
-            UpdateTimelinePanel();
-        else
-            Timeline.RefreshFromModel();
+        // La edición pudo cambiar tiempos/capas/modos → reproyectar el timeline
+        Timeline.RefreshFromModel();
     }
 
     public void ReloadTable()
@@ -310,6 +291,7 @@ public partial class MainWindow : Window, IShowView
             _rows.Add(new CueRowViewModel(cue, _model));
         SetPlayhead(_playheadIndex);
         UpdateInspector();   // la lista cambió: reapuntar al cue seleccionado
+        Timeline.RefreshFromModel();
         UpdateTimelinePanel();
         RebuildHotkeys();
     }
@@ -365,6 +347,9 @@ public partial class MainWindow : Window, IShowView
                 byId[r.Id] = f;
         foreach (var vm in _rows)
             vm.SetProgress(byId.GetValueOrDefault(vm.CueId));
+
+        // Cursor y progreso del timeline (posición real de los motores)
+        Timeline.SetActive(rows);
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>

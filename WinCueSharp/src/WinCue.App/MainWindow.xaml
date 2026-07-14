@@ -256,9 +256,9 @@
             </DataGrid.Columns>
         </DataGrid>
 
-            <!-- Línea de tiempo estilo Watchout: visible con un grupo TIMELINE -->
-            <local:TimelinePanel x:Name="Timeline" Grid.Row="1"
-                                 Visibility="Collapsed"/>
+            <!-- Línea de tiempo del show, estilo Watchout (siempre visible,
+                 plegable desde su cabecera) -->
+            <local:TimelinePanel x:Name="Timeline" Grid.Row="1"/>
 
             <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
                           Background="#333333" ResizeBehavior="PreviousAndNext"/>
