@@ -40,6 +40,18 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void CueEdit_AplicaPreWaitYTimelineLayer()
+    {
+        // El timeline commitea estos dos campos al soltar un bloque arrastrado
+        AddCue(CueType.Audio, "bloque");
+        Controller.OnCueEditCommitted(0, new Dictionary<string, object?>
+        { ["pre_wait"] = 4.2, ["timeline_layer"] = 3 });
+
+        Assert.Equal(4.2, Model.Cues[0].PreWait);
+        Assert.Equal(3, Model.Cues[0].TimelineLayer);
+    }
+
+    [Fact]
     public void Undo_AfterLoadShow_RestoresPreviousShow()
     {
         AddCue(CueType.Memo, "antiguo");

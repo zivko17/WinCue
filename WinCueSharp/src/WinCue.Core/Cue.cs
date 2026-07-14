@@ -55,6 +55,10 @@ public class Cue
     [JsonPropertyName("group_mode")] public GroupMode GroupMode { get; set; } = GroupMode.Enter;
     [JsonPropertyName("collapsed")]  public bool      Collapsed { get; set; }
 
+    /// <summary>Capa (fila 0–4) del cue en el editor de línea de tiempo de su
+    /// grupo TIMELINE. Campo nuevo de la versión C# — Python lo ignora al cargar.</summary>
+    [JsonPropertyName("timeline_layer")] public int TimelineLayer { get; set; }
+
     // ── Inspector: Básicos extra ───────────────────────────────────────
     [JsonPropertyName("flagged")]   public bool Flagged  { get; set; }
     [JsonPropertyName("auto_load")] public bool AutoLoad { get; set; }
@@ -137,5 +141,6 @@ public class Cue
         FadeIn   = Math.Max(0.0, FadeIn);
         FadeOut  = Math.Max(0.0, FadeOut);
         Volume   = Math.Clamp(Volume, 0.0, 1.0);
+        TimelineLayer = Math.Clamp(TimelineLayer, 0, 4);
     }
 }

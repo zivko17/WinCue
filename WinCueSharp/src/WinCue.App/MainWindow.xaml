@@ -166,10 +166,11 @@
             </DockPanel>
         </Border>
 
-        <!-- ═══════════ CENTRO: tabla + inspector (splitter vertical) ═══════════ -->
+        <!-- ═══════════ CENTRO: tabla + timeline + inspector ═══════════ -->
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="120"/>
+                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="330" MinHeight="140"/>
             </Grid.RowDefinitions>
@@ -255,10 +256,14 @@
             </DataGrid.Columns>
         </DataGrid>
 
-            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
+            <!-- Línea de tiempo estilo Watchout: visible con un grupo TIMELINE -->
+            <local:TimelinePanel x:Name="Timeline" Grid.Row="1"
+                                 Visibility="Collapsed"/>
+
+            <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
                           Background="#333333" ResizeBehavior="PreviousAndNext"/>
 
-            <local:InspectorPanel x:Name="Inspector" Grid.Row="2"
+            <local:InspectorPanel x:Name="Inspector" Grid.Row="3"
                                   Background="#252526"/>
         </Grid>
     </DockPanel>
