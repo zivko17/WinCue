@@ -736,6 +736,8 @@ public partial class MainWindow : Window, IShowView
                 () => CommitRowField(row, "armed", !cue.Armed), edit));
             menu.Items.Add(Mi(cue.Flagged ? "⚐ Quitar flag" : "⚑ Poner flag", "",
                 () => CommitRowField(row, "flagged", !cue.Flagged), edit));
+            menu.Items.Add(Mi("№ Renumerar todos (1..n)", "",
+                () => _controller.RenumberCues(), edit));
             menu.Items.Add(new Separator());
         }
         else
@@ -910,6 +912,10 @@ public partial class MainWindow : Window, IShowView
                 e.Handled = true;
                 return;
             }
+
+            // "Ir a cue": teclear el número y Enter (estilo QLab)
+            if (HandleGotoBuffer(e))
+                return;
         }
 
         // Edición (Ctrl+…)
@@ -970,6 +976,69 @@ public partial class MainWindow : Window, IShowView
         }
     }
 
+    // ── "Ir a cue" por número: teclear dígitos + Enter ─────────────────
+
+    private string _gotoBuffer = "";
+    private long _gotoBufferTicks;
+
+    private bool HandleGotoBuffer(KeyEventArgs e)
+    {
+        // El buffer caduca a los 4 s sin teclear
+        if (_gotoBuffer.Length > 0 && System.Diagnostics.Stopwatch
+                .GetElapsedTime(_gotoBufferTicks).TotalSeconds > 4)
+            _gotoBuffer = "";
+
+        char? ch = e.Key switch
+        {
+            >= Key.D0 and <= Key.D9 => (char)('0' + (e.Key - Key.D0)),
+            >= Key.NumPad0 and <= Key.NumPad9 => (char)('0' + (e.Key - Key.NumPad0)),
+            Key.OemPeriod or Key.Decimal => '.',
+            _ => null,
+        };
+        if (ch is char c)
+        {
+            _gotoBuffer += c;
+            _gotoBufferTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+            FlashStatus($"Ir a cue: {_gotoBuffer}▌  (Enter salta · Retroceso borra)");
+            e.Handled = true;
+            return true;
+        }
+        if (_gotoBuffer.Length == 0)
+            return false;
+
+        switch (e.Key)
+        {
+            case Key.Back:
+                _gotoBuffer = _gotoBuffer[..^1];
+                FlashStatus(_gotoBuffer.Length > 0
+                    ? $"Ir a cue: {_gotoBuffer}▌" : "");
+                e.Handled = true;
+                return true;
+            case Key.Enter:
+                string target = _gotoBuffer;
+                _gotoBuffer = "";
+                int row = -1;
+                for (int i = 0; i < _model.Count; i++)
+                    if (_model.Cues[i].DisplayNumber == target)
+                    {
+                        row = i;
+                        break;
+                    }
+                if (row >= 0)
+                {
+                    _controller.OnSetPlayhead(row);
+                    FlashStatus($"Playhead → cue {target}");
+                }
+                else
+                {
+                    FlashStatus($"No hay ningún cue con número «{target}»");
+                }
+                e.Handled = true;
+                return true;
+        }
+        return false;
+    }
+
     // ==================================================================
     // Cierre
     // ==================================================================
@@ -996,9 +1065,16 @@ public partial class MainWindow : Window, IShowView
 
         public string Title => $"{_info.Number} · {_info.Name}";
 
-        public string TimeText => _info.Remaining is double r
-            ? $"-{TimeSpan.FromSeconds(r):m\\:ss\\.f}"
-            : $"{TimeSpan.FromSeconds(_info.Elapsed):m\\:ss\\.f}";
+        public string TimeText => _info.PreWaitRemaining is double p
+            ? $"⏳ espera −{p:0.0}s"
+            : _info.Remaining is double r
+                ? $"-{TimeSpan.FromSeconds(r):m\\:ss\\.f}"
+                : $"{TimeSpan.FromSeconds(_info.Elapsed):m\\:ss\\.f}";
+
+        /// <summary>Ámbar durante el pre_wait, verde reproduciendo.</summary>
+        public Brush TimeBrush => _info.PreWaitRemaining is not null
+            ? new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00))
+            : new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71));
 
         public double Fraction => _info.Fraction ?? 0.0;
 

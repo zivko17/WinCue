@@ -12,7 +12,9 @@ using WinCue.Core;
 
 namespace WinCue.Controller;
 
-/// <summary>Fila del panel de cues activos (countdown, barra de progreso).</summary>
+/// <summary>Fila del panel de cues activos (countdown, barra de progreso).
+/// PreWaitRemaining != null → el cue aún está en su espera previa (pre_wait):
+/// la vista lo muestra en ámbar para que el operador sepa que "viene".</summary>
 public sealed record ActiveCueInfo(
     int Id,
     string Number,
@@ -21,7 +23,8 @@ public sealed record ActiveCueInfo(
     string Color,
     double Elapsed,
     double? Remaining,
-    double? Fraction);
+    double? Fraction,
+    double? PreWaitRemaining = null);
 
 public interface IShowView
 {

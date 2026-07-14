@@ -52,6 +52,7 @@ public class MainController
         public bool ManualStop;
         public bool AdvanceChain;
         public bool SelfPaused;              // pausa individual (no pause-all)
+        public bool ActionStarted;           // false = aún en pre_wait
     }
 
     // ------------------------------------------------------------------
@@ -480,6 +481,7 @@ public class MainController
             return;
         if (!_running.TryGetValue(cue.Id, out var run))
             return;
+        run.ActionStarted = true;
         run.TStartTicks = Stopwatch.GetTimestamp();
 
         if (!cue.Armed)
@@ -936,9 +938,16 @@ public class MainController
                 remaining = Math.Max(0.0, run.Duration - elapsed);
                 fraction = Math.Min(1.0, elapsed / run.Duration);
             }
+
+            // Fase de pre_wait: aún no hay acción; mostrar cuánto falta
+            double? preWaitRemaining = null;
+            if (!run.ActionStarted && _model.GetById(run.CueId) is Cue rc
+                && rc.PreWait > 0.0)
+                preWaitRemaining = Math.Max(0.0, rc.PreWait - elapsed);
+
             rows.Add(new ActiveCueInfo(
                 run.CueId, run.Number, run.Name, run.Kind, run.Color,
-                elapsed, remaining, fraction));
+                elapsed, remaining, fraction, preWaitRemaining));
             if (remaining is double r && (primaryRemaining is null || r < primaryRemaining))
                 primaryRemaining = r;
         }
@@ -1284,6 +1293,18 @@ public class MainController
         _view.ReloadTable();
         int count = _model.Count;
         SetPlayhead(count > 0 ? Math.Min(row, count - 1) : 0);
+    }
+
+    /// <summary>Renumera todos los cues 1..n en orden de lista (con undo).</summary>
+    public void RenumberCues()
+    {
+        if (_model.Count == 0)
+            return;
+        PushUndo();
+        for (int i = 0; i < _model.Count; i++)
+            _model.Cues[i].Number = (i + 1).ToString();
+        _view.ReloadTable();
+        _view.FlashStatus($"Renumerados {_model.Count} cues (1..{_model.Count})");
     }
 
     private static string Capitalize(CueType t)

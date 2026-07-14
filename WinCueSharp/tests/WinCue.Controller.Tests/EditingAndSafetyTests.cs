@@ -142,6 +142,36 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void Renumber_AssignsSequentialNumbersWithUndo()
+    {
+        AddCue(CueType.Memo, "a", setup: c => c.Number = "7");
+        AddCue(CueType.Memo, "b", setup: c => c.Number = "2.5");
+        AddCue(CueType.Memo, "c", setup: c => c.Number = "");
+
+        Controller.RenumberCues();
+        Assert.Equal(new[] { "1", "2", "3" }, Model.Cues.Select(c => c.Number));
+
+        Controller.Undo();
+        Assert.Equal("7", Model.Cues[0].Number);
+    }
+
+    [Fact]
+    public void Tick_DuringPreWait_ReportsPreWaitRemaining()
+    {
+        AddCue(CueType.Wait, "espera", duration: 5.0, setup: c => c.PreWait = 2.0);
+
+        Controller.OnGoPressed();
+        Controller.Tick();
+        Assert.Single(View.LastActiveCues);
+        Assert.NotNull(View.LastActiveCues[0].PreWaitRemaining);
+        Assert.InRange(View.LastActiveCues[0].PreWaitRemaining!.Value, 1.0, 2.0);
+
+        Clock.Advance(2100);   // pre_wait consumido: empieza la acción
+        Controller.Tick();
+        Assert.Null(View.LastActiveCues[0].PreWaitRemaining);
+    }
+
+    [Fact]
     public void MoveCue_GroupMovesAsBlockWithChildren()
     {
         AddCue(CueType.Memo, "a");

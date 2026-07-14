@@ -160,7 +160,8 @@
                                         <TextBlock Text="{Binding Title}" FontWeight="Bold"
                                                    TextTrimming="CharacterEllipsis"/>
                                         <TextBlock Text="{Binding TimeText}"
-                                                   Foreground="#2ecc71" FontFamily="Consolas"/>
+                                                   Foreground="{Binding TimeBrush}"
+                                                   FontFamily="Consolas"/>
                                         <ProgressBar Height="4" Maximum="1"
                                                      Value="{Binding Fraction, Mode=OneWay}"
                                                      Foreground="#2ecc71" Background="#222"
