@@ -141,6 +141,54 @@ public class EditingAndSafetyTests : ControllerTestBase
         Assert.Equal(new[] { "a", "b", "c" }, Model.Cues.Select(c => c.Name));
     }
 
+    [Fact]
+    public void MoveCue_GroupMovesAsBlockWithChildren()
+    {
+        AddCue(CueType.Memo, "a");
+        var g = AddCue(CueType.Group, "G");
+        AddCue(CueType.Audio, "h1", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Audio, "h2", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Memo, "b");
+
+        Controller.OnMoveCue(1, 4);   // arrastrar el GRUPO más allá de "b"
+
+        Assert.Equal(new[] { "a", "b", "G", "h1", "h2" },
+            Model.Cues.Select(c => c.Name));
+        Assert.Equal(g.Id, Model.Cues[3].ParentId);   // los hijos siguen dentro
+        Assert.Equal(g.Id, Model.Cues[4].ParentId);
+        Assert.Null(Model.Cues[2].ParentId);          // el grupo sigue en la raíz
+    }
+
+    [Fact]
+    public void MoveCue_IntoGroupRegion_AdoptsGroupParent()
+    {
+        var g = AddCue(CueType.Group, "G");
+        AddCue(CueType.Audio, "h1", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Audio, "h2", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Memo, "suelto");
+
+        Controller.OnMoveCue(3, 2);   // soltar "suelto" entre h1 y h2
+
+        Assert.Equal(new[] { "G", "h1", "suelto", "h2" },
+            Model.Cues.Select(c => c.Name));
+        Assert.Equal(g.Id, Model.Cues[2].ParentId);   // entra en el grupo
+    }
+
+    [Fact]
+    public void MoveCue_OutOfGroup_ClearsParent()
+    {
+        var g = AddCue(CueType.Group, "G");
+        AddCue(CueType.Audio, "h1", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Audio, "h2", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Memo, "fin");
+
+        Controller.OnMoveCue(1, 3);   // sacar h1 más allá de "fin"
+
+        Assert.Equal(new[] { "G", "h2", "fin", "h1" },
+            Model.Cues.Select(c => c.Name));
+        Assert.Null(Model.Cues[3].ParentId);          // ya no pertenece al grupo
+    }
+
     // ------------------------------------------------------------------
     // Pausa por cue / stop por id
     // ------------------------------------------------------------------

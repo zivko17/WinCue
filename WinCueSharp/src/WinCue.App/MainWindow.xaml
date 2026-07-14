@@ -166,11 +166,10 @@
             </DockPanel>
         </Border>
 
-        <!-- ═══════════ CENTRO: tabla + timeline + inspector ═══════════ -->
+        <!-- ═══════════ CENTRO: tabla + (inspector | timeline) ═══════════ -->
         <Grid>
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="120"/>
-                <RowDefinition Height="Auto"/>
                 <RowDefinition Height="Auto"/>
                 <RowDefinition Height="330" MinHeight="140"/>
             </Grid.RowDefinitions>
@@ -256,15 +255,20 @@
             </DataGrid.Columns>
         </DataGrid>
 
-            <!-- Línea de tiempo del show, estilo Watchout (siempre visible,
-                 plegable desde su cabecera) -->
-            <local:TimelinePanel x:Name="Timeline" Grid.Row="1"/>
-
-            <GridSplitter Grid.Row="2" Height="5" HorizontalAlignment="Stretch"
+            <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                           Background="#333333" ResizeBehavior="PreviousAndNext"/>
 
-            <local:InspectorPanel x:Name="Inspector" Grid.Row="3"
-                                  Background="#252526"/>
+            <!-- Zona inferior: inspector y timeline comparten sitio.
+                 En modo SHOW se selecciona sola la pestaña del timeline. -->
+            <TabControl x:Name="BottomTabs" Grid.Row="2"
+                        Background="#252526" BorderThickness="0" Padding="0">
+                <TabItem Header="🛠 Inspector">
+                    <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
+                </TabItem>
+                <TabItem Header="⏱ Timeline">
+                    <local:TimelinePanel x:Name="Timeline"/>
+                </TabItem>
+            </TabControl>
         </Grid>
     </DockPanel>
 </Window>

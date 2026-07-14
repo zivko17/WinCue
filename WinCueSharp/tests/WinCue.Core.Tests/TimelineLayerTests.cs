@@ -1,8 +1,8 @@
 // =============================================================================
-// TimelineLayerTests.cs — Campo timeline_layer (editor de línea de tiempo)
+// TimelineLayerTests.cs — Campo timeline_layer (línea de tiempo)
 // =============================================================================
 // timeline_layer es un campo C#-only (como audio_output): Python lo ignora al
-// cargar. Aquí se cubre el round-trip, el default retrocompatible y el clamp.
+// cargar. -1 = capa automática (el timeline apila solo); 0–4 = fijada a mano.
 // =============================================================================
 
 using WinCue.Core;
@@ -23,16 +23,17 @@ public class TimelineLayerTests
     }
 
     [Fact]
-    public void FromJson_SinClave_DefaultCero()
+    public void FromJson_SinClave_DefaultAutomatica()
     {
         var cues = CueModel.FromJson(
             """{"version":1,"cues":[{"id":1,"type":"AUDIO","name":"a","duration":0,"file_path":""}]}""");
 
-        Assert.Equal(0, cues[0].TimelineLayer);
+        Assert.Equal(-1, cues[0].TimelineLayer);
     }
 
     [Theory]
-    [InlineData(-3, 0)]
+    [InlineData(-5, -1)]
+    [InlineData(-1, -1)]
     [InlineData(0, 0)]
     [InlineData(4, 4)]
     [InlineData(99, 4)]

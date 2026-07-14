@@ -1181,17 +1181,40 @@ public class MainController
         Encoder = System.Text.Encodings.Web.JavaScriptEncoder.UnsafeRelaxedJsonEscaping,
     };
 
-    /// <summary>Mueve un cue de fila (drag &amp; drop de la tabla).</summary>
+    /// <summary>Mueve un cue de fila (drag &amp; drop de la tabla o del timeline).
+    /// Un GROUP se mueve como BLOQUE con todos sus descendientes, y el cue
+    /// movido adopta el grupo del punto de destino (soltar entre los hijos de
+    /// un grupo lo mete dentro; soltar fuera lo saca).</summary>
     public void OnMoveCue(int fromRow, int toRow)
     {
         if (fromRow == toRow ||
             fromRow < 0 || fromRow >= _model.Count ||
             toRow < 0 || toRow >= _model.Count)
             return;
+        int end = _model.GroupExtent(fromRow);   // bloque [fromRow, end)
+        if (toRow >= fromRow && toRow < end)
+            return;   // destino dentro del propio bloque
+
+        var all = _model.Cues.ToList();
+        int blockLen = end - fromRow;
+        var block = all.GetRange(fromRow, blockLen);
+        all.RemoveRange(fromRow, blockLen);
+        int insertAt = Math.Clamp(
+            toRow < fromRow ? toRow : toRow - blockLen + 1, 0, all.Count);
+
+        // El cue movido adopta el grupo del cue que desplaza en el destino
+        var moveIds = block.Select(c => c.Id).ToHashSet();
+        int? newParent = insertAt < all.Count ? all[insertAt].ParentId : null;
+        if (newParent is int np && moveIds.Contains(np))
+            return;   // no puede quedar dentro de sí mismo
+
         PushUndo();
-        _model.MoveCue(fromRow, toRow);
+        block[0].ParentId = newParent;
+
+        all.InsertRange(insertAt, block);
+        _model.ReplaceAll(all);
         _view.ReloadTable();
-        SetPlayhead(toRow);
+        SetPlayhead(_model.IndexOfId(block[0].Id));
     }
 
     // ==================================================================

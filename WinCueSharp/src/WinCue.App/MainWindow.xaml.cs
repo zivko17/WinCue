@@ -104,9 +104,6 @@ public partial class MainWindow : Window, IShowView
             if (row >= 0 && CueGrid.SelectedIndex != row)
                 CueGrid.SelectedIndex = row;
         };
-        Timeline.SetCollapsed(_settings.Get("timeline_collapsed", false));
-        Timeline.CollapsedChanged += collapsed =>
-            _settings.Set("timeline_collapsed", collapsed);
 
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
@@ -508,6 +505,7 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x7e, 0x34));
         ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
+        BottomTabs.SelectedIndex = 1;   // en SHOW, abajo se ve el timeline
     }
 
     private void OnEditMode(object sender, RoutedEventArgs e)
@@ -516,6 +514,7 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
         ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
+        BottomTabs.SelectedIndex = 0;   // en EDIT, vuelve el inspector
     }
 
     /// <summary>Botón de salida: rojo sin salida activa, verde con ella.</summary>
