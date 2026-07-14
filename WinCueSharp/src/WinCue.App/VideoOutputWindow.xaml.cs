@@ -15,6 +15,7 @@
 using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
+using System.Windows.Controls;
 using System.Windows.Interop;
 using WF = System.Windows.Forms;
 
@@ -32,10 +33,15 @@ public partial class VideoOutputWindow : Window
 
     private bool _shutdown;
 
-    // 5 superficies apiladas (una por pista): el índice 0 es la de ARRIBA.
-    // mpv renderiza sobre el HWND del panel de su pista; las vacías se
-    // ocultan para no tapar (un panel WinForms pinta su fondo negro).
+    // MODO CLÁSICO: 5 superficies HWND apiladas (una por pista): el índice 0
+    // es la de ARRIBA. mpv renderiza sobre el HWND del panel de su pista;
+    // las vacías se ocultan (un panel WinForms pinta su fondo negro).
     private readonly WF.Panel[] _layers = new WF.Panel[5];
+    private readonly System.Windows.Forms.Integration.WindowsFormsHost _hwndHost;
+
+    // MODO COMPOSITOR GPU: 5 D3DImage apiladas con opacidad real por capa
+    private readonly CompositorLayerControl[] _gpuLayers = new CompositorLayerControl[5];
+    private readonly Grid _gpuHost;
 
     public VideoOutputWindow()
     {
@@ -58,10 +64,48 @@ public partial class VideoOutputWindow : Window
             // En WinForms el índice 0 del z-order es el FRENTE: pista 0 arriba
             container.Controls.SetChildIndex(_layers[i], i);
         }
-        Content = new System.Windows.Forms.Integration.WindowsFormsHost
+        _hwndHost = new System.Windows.Forms.Integration.WindowsFormsHost
         {
             Child = container,
         };
+
+        // Compositor: en WPF el ÚLTIMO hijo queda encima → añadir 4..0
+        _gpuHost = new Grid { Background = System.Windows.Media.Brushes.Black };
+        for (int i = _gpuLayers.Length - 1; i >= 0; i--)
+        {
+            _gpuLayers[i] = new CompositorLayerControl();
+            _gpuHost.Children.Add(_gpuLayers[i]);
+        }
+
+        var root = new Grid { Background = System.Windows.Media.Brushes.Black };
+        root.Children.Add(_hwndHost);
+        root.Children.Add(_gpuHost);
+        _gpuHost.Visibility = Visibility.Collapsed;
+        Content = root;
+    }
+
+    /// <summary>La ventana se adapta al modo que USA el motor: pedir un HWND
+    /// activa el modo clásico; pedir una superficie GPU, el compositor.</summary>
+    private void ShowHwndMode(bool hwndMode)
+    {
+        _hwndHost.Visibility = hwndMode ? Visibility.Visible : Visibility.Collapsed;
+        _gpuHost.Visibility = hwndMode ? Visibility.Collapsed : Visibility.Visible;
+    }
+
+    /// <summary>Superficie del compositor GPU para la pista dada.</summary>
+    public CompositorLayerControl GetCompositorSurface(int layer)
+    {
+        if (!IsVisible)
+            Show();
+        ShowHwndMode(false);
+        return _gpuLayers[Math.Clamp(layer, 0, _gpuLayers.Length - 1)];
+    }
+
+    /// <summary>Opacidad (0..1) de una pista del compositor.</summary>
+    public void SetLayerOpacity(int layer, double opacity)
+    {
+        if (layer >= 0 && layer < _gpuLayers.Length)
+            _gpuLayers[layer].Opacity = Math.Clamp(opacity, 0.0, 1.0);
     }
 
     /// <summary>HWND de la superficie de la pista dada (la hace visible).</summary>
@@ -69,6 +113,7 @@ public partial class VideoOutputWindow : Window
     {
         if (!IsVisible)
             Show();
+        ShowHwndMode(true);
         _ = new WindowInteropHelper(this).EnsureHandle();
         var panel = _layers[Math.Clamp(layer, 0, _layers.Length - 1)];
         panel.Visible = true;

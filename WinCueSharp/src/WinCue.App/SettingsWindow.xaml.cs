@@ -116,6 +116,9 @@ public partial class SettingsWindow : Window
         Combo("video_output_screen", scr, "Monitor:", screens);
         Check("video_fullscreen_output", scr, "Salida a pantalla completa (blackout)");
         Note(scr, "Desmárcalo solo para probar en una ventana con bordes.");
+        Check("video_compositor", scr, "Compositor GPU (opacidad real entre capas)");
+        Note(scr, "Las pistas se funden según su Opacidad % (Geometry). Requiere " +
+                  "driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.");
 
         var pb = Group(root, "REPRODUCCIÓN");
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);

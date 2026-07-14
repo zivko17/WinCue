@@ -37,6 +37,9 @@ public sealed class MpvPlayer : IDisposable
     /// <summary>True si libmpv-2.dll está disponible en este sistema.</summary>
     public static bool IsAvailable { get; } = ProbeAvailable();
 
+    /// <summary>Handle nativo del core (para el render context del compositor).</summary>
+    internal nint NativeHandle => _handle;
+
     /// <summary>
     /// Crea e inicializa una instancia mpv con las opciones dadas.
     /// Lanza InvalidOperationException si mpv_create/initialize fallan.

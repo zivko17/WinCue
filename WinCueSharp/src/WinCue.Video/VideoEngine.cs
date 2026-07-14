@@ -73,6 +73,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly Dictionary<int, string> _files = new();          // verificados
     private readonly Dictionary<int, MpvPlayer> _players = new();
     private readonly Dictionary<int, int> _playerLayers = new();      // cue → pista
+
+    // Compositor GPU: renderer + superficie de la vista, por cue
+    private Func<int, IVideoLayerSurface>? _gpuSurfaces;
+    private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
+    private readonly Dictionary<int, (MpvGpuRenderer Renderer, IVideoLayerSurface Sink)>
+        _renderers = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
     private readonly Dictionary<int, double> _volumes = new();
@@ -111,6 +117,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// en la de su Layer y las pistas superiores tapan a las inferiores.</summary>
     public void SetLayerHandleProvider(Func<int, nint>? provider) =>
         _getLayerHandle = provider;
+
+    /// <summary>Activa el COMPOSITOR GPU (render API → superficies D3D con
+    /// opacidad real entre capas). null = volver al modo clásico HWND.</summary>
+    public void SetGpuLayerSurfaceProvider(Func<int, IVideoLayerSurface>? provider)
+    {
+        _gpuSurfaces = provider;
+        _gpuFailed = false;
+    }
 
     public static bool MpvAvailable => MpvPlayer.IsAvailable;
 
@@ -425,10 +439,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         int layer = Math.Clamp(p.Layer, 0, 4);
+        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
 
-        // ── Validación del HWND (salvo vo forzado en tests) ─────────────
+        // ── Validación del HWND (modo clásico; el compositor no usa wid) ─
         nint hwnd = 0;
-        if (_forcedVo is null)
+        if (_forcedVo is null && !gpu)
         {
             hwnd = _getLayerHandle?.Invoke(layer) ?? _getWindowHandle();
             if (hwnd == 0)
@@ -459,7 +474,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         MpvPlayer? player = null;
         string usedVo = "gpu";
-        string[] voCandidates = _forcedVo is not null ? new[] { _forcedVo } : VoFallbacks;
+        string[] voCandidates = gpu ? new[] { "libmpv" }
+            : _forcedVo is not null ? new[] { _forcedVo } : VoFallbacks;
         foreach (string vo in voCandidates)
         {
             var options = new Dictionary<string, string>
@@ -500,8 +516,35 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             return;
         }
 
-        if (usedVo != "gpu" && _forcedVo is null)
+        if (usedVo != "gpu" && _forcedVo is null && !gpu)
             ErrorOccurred?.Invoke(cueId, $"[AVISO] vo=gpu no disponible. Usando vo={usedVo}.");
+
+        // ── Compositor GPU: render context → superficie D3D de la pista ─
+        if (gpu)
+        {
+            try
+            {
+                var geo = p.Geometry ?? new VideoGeometry();
+                var renderer = new MpvGpuRenderer(player,
+                    (int)geo.SurfW, (int)geo.SurfH);
+                var sink = _gpuSurfaces!(layer);
+                sink.SetSurface(renderer.Surface, renderer.Width, renderer.Height);
+                renderer.FrameRendered += sink.InvalidateFrame;
+                _renderers[cueId] = (renderer, sink);
+            }
+            catch (Exception exc)
+            {
+                // Driver sin interop GL↔D3D (o similar): caer al modo clásico
+                // de forma permanente en esta sesión y reintentar este cue.
+                player.Dispose();
+                _gpuFailed = true;
+                ErrorOccurred?.Invoke(cueId,
+                    $"[AVISO] Compositor GPU no disponible ({exc.Message}). " +
+                    "Usando modo clásico por HWND.");
+                StartPlayback(cueId);
+                return;
+            }
+        }
 
         // ── Eventos mpv (llegan en el hilo de eventos → remitir) ────────
         long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -525,9 +568,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
             {
                 SetState(cueId, MediaCueState.Stopped);   // publicar ANTES del Dispose
-                _playerLayers.Remove(cueId);
-                _players.Remove(cueId, out var ended);
-                ended?.Dispose();
+                TerminatePlayer(cueId);
             }
         });
 
@@ -598,6 +639,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private void TerminatePlayer(int cueId)
     {
         _playerLayers.Remove(cueId);
+        // Regla de mpv: el render context se libera ANTES que el core
+        if (_renderers.Remove(cueId, out var r))
+        {
+            r.Renderer.Dispose();
+            r.Sink.ClearSurface();
+        }
         if (_players.Remove(cueId, out var player))
             player.Dispose();
     }

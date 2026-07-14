@@ -105,6 +105,22 @@ public interface IAudioEngine
     float[]? GetSpectrum(int cueId) => null;
 }
 
+/// <summary>Superficie de una pista del COMPOSITOR GPU: recibe la render
+/// target D3D9 compartida donde mpv dibuja, y los avisos de frame nuevo.
+/// La implementa la ventana de salida (D3DImage + opacidad por capa).</summary>
+public interface IVideoLayerSurface
+{
+    /// <summary>Fija la superficie D3D9 (puntero COM) y su tamaño. Se llama
+    /// en el main thread al arrancar el vídeo de la pista.</summary>
+    void SetSurface(nint d3d9Surface, int width, int height);
+
+    /// <summary>Hay un frame nuevo en la superficie (¡hilo de render!).</summary>
+    void InvalidateFrame();
+
+    /// <summary>La pista quedó vacía: soltar la superficie (main thread).</summary>
+    void ClearSurface();
+}
+
 /// <summary>Motor de vídeo (implementado por WinCue.Video sobre libmpv).</summary>
 public interface IVideoEngine
 {
@@ -135,6 +151,11 @@ public interface IVideoEngine
     /// vídeo renderiza en la superficie de su Layer (prioridad visual).
     /// Implementación por defecto: no-op (motores falsos / compatibilidad).</summary>
     void SetLayerHandleProvider(Func<int, nint>? provider) { }
+
+    /// <summary>MODO COMPOSITOR GPU: si se fija, los vídeos renderizan vía
+    /// render API a superficies D3D compartidas (opacidad real entre capas)
+    /// en vez de a HWNDs. null = modo clásico. Default: no-op (fakes).</summary>
+    void SetGpuLayerSurfaceProvider(Func<int, IVideoLayerSurface>? provider) { }
 
     void Cleanup();
 }

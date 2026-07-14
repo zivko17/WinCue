@@ -1167,7 +1167,11 @@ public class MainController
         foreach (var (cid, r) in _running)
             if (r.Kind == CueType.Video && _video.IsPlaying(cid)
                 && _model.GetById(cid) is Cue c)
-                activeLayers.Add(VideoLayerOf(c));
+            {
+                int layer = VideoLayerOf(c);
+                activeLayers.Add(layer);
+                _view.SetVideoLayerOpacity(layer, c.Opacity / 100.0);
+            }
         _view.SetActiveVideoLayers(activeLayers);
         _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
     }
@@ -1684,6 +1688,12 @@ public class MainController
             && fields.Keys.Any(GeoKeys.Contains))
         {
             _video.ApplyGeometry(cue.Id, GeoFor(cue));
+        }
+        // Opacidad de la pista en vivo (compositor GPU)
+        if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
+            && fields.ContainsKey("opacity"))
+        {
+            _view.SetVideoLayerOpacity(VideoLayerOf(cue), cue.Opacity / 100.0);
         }
     }
 

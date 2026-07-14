@@ -432,6 +432,20 @@ public partial class MainWindow : Window, IShowView
     public void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) =>
         _videoOutput?.SetActiveLayers(activeLayers);
 
+    public void SetVideoLayerOpacity(int layer, double opacity) =>
+        _videoOutput?.SetLayerOpacity(layer, opacity);
+
+    /// <summary>Superficie del compositor GPU (la usa App para el provider).</summary>
+    public CompositorLayerControl GetCompositorSurface(int layer)
+    {
+        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
+        EnsureVideoOutputWindow();
+        var surface = _videoOutput!.GetCompositorSurface(layer);
+        if (firstOpen)
+            PlaceVideoOutput();
+        return surface;
+    }
+
     private void EnsureVideoOutputWindow()
     {
         if (_videoOutput is not null)

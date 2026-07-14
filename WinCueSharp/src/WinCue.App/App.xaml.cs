@@ -60,6 +60,16 @@ public partial class App : Application
         _remote = new RemoteInputService(_controller, settings, dispatch);
         _remote.Status += msg => dispatch(() => window.FlashStatus(msg));
 
+        // Compositor GPU (Settings → Vídeo): opacidad real entre capas
+        void ApplyCompositorMode()
+        {
+            _video.SetGpuLayerSurfaceProvider(
+                settings.Get("video_compositor", false)
+                    ? layer => window.GetCompositorSurface(layer)
+                    : null);
+        }
+        ApplyCompositorMode();
+
         window.Attach(model, _controller, settings, applyEngineSettings: () =>
         {
             // Reconfigurar el dispositivo de audio en caliente tras guardar settings
@@ -72,7 +82,8 @@ public partial class App : Application
             _audio.SetDevice(deviceId, driver,
                 asioDriverName: driver == "asio" ? devName : null);
             _controller.OnMasterVolume(settings.Get("master_volume", 100));
-            _remote.Apply();   // OSC/MIDI IN en caliente
+            _remote.Apply();          // OSC/MIDI IN en caliente
+            ApplyCompositorMode();    // modo compositor en caliente
         });
         _remote.Apply();
 
