@@ -651,12 +651,14 @@ public sealed class TimelineCanvas : FrameworkElement
         foreach (var span in _spans)
             DrawSpanFrame(dc, span, lh, w);
 
-        // Cursor: posición real más avanzada de los cues sonando
+        // Cursor: posición real más avanzada de los cues sonando (limitada al
+        // final de su bloque: con trim, el contador nunca debe salirse de él)
         double? cursor = null;
         foreach (var b in _blocks)
             if (_activeElapsed.TryGetValue(b.Cue.Id, out double elapsed))
             {
-                double pos = b.Start + Math.Clamp(elapsed, 0, Math.Max(b.Dur, elapsed));
+                double lim = b.Dur > 0 ? b.Dur : elapsed;
+                double pos = b.Start + Math.Min(Math.Max(0, elapsed), lim);
                 cursor = Math.Max(cursor ?? 0, pos);
             }
         if (cursor is double cs)

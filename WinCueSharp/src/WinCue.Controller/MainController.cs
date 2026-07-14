@@ -648,9 +648,9 @@ public class MainController
                     Loop: cue.Loop, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
                     PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
                     Eq: EqFor(cue)));
-                run.Duration = cue.Duration;
-                if (cue.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(cue.Duration * 1000), () => DurationElapsed(cue.Id));
+                run.Duration = ActionDuration(cue);
+                if (run.Duration > 0.0 && !cue.Loop)
+                    Schedule(run, (int)(run.Duration * 1000), () => DurationElapsed(cue.Id));
                 PreloadUpcoming();
                 break;
 
@@ -664,9 +664,9 @@ public class MainController
                     Geometry: GeoFor(cue),
                     Layer: VideoLayerOf(cue)));
                 RefreshVideoTally();
-                run.Duration = cue.Duration;
-                if (cue.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(cue.Duration * 1000), () => DurationElapsed(cue.Id));
+                run.Duration = ActionDuration(cue);
+                if (run.Duration > 0.0 && !cue.Loop)
+                    Schedule(run, (int)(run.Duration * 1000), () => DurationElapsed(cue.Id));
                 break;
 
             case CueType.Wait:
@@ -708,6 +708,19 @@ public class MainController
                 OnActionEnd(cue.Id);
                 break;
         }
+    }
+
+    /// <summary>Duración efectiva de la ACCIÓN: en media, con el TRIM aplicado
+    /// (el countdown y el timer de fin deben medir lo que va a sonar de
+    /// verdad, no la longitud del archivo).</summary>
+    private static double ActionDuration(Cue c)
+    {
+        if (!c.IsMedia())
+            return Math.Max(0.0, c.Duration);
+        double end = c.TrimEnd > 0
+            ? (c.Duration > 0 ? Math.Min(c.TrimEnd, c.Duration) : c.TrimEnd)
+            : c.Duration;
+        return Math.Max(0.0, end - c.TrimStart);
     }
 
     /// <summary>Pista de prioridad visual de un cue de vídeo: la del timeline

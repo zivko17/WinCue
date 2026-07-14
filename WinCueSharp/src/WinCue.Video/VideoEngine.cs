@@ -224,13 +224,33 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     public bool AnyPlaying => _states.Values.Any(s => s == MediaCueState.Playing);
 
-    /// <summary>Duración total del vídeo en s (0 si mpv aún no la conoce).</summary>
-    public double GetDuration(int cueId) =>
-        _players.TryGetValue(cueId, out var pl) ? pl.GetPropertyDouble("duration") ?? 0.0 : 0.0;
+    /// <summary>Duración EFECTIVA en s (con el trim aplicado; 0 si mpv aún no
+    /// la conoce). Coherente con GetElapsed: ambos son relativos al recorte.</summary>
+    public double GetDuration(int cueId)
+    {
+        if (!_players.TryGetValue(cueId, out var pl))
+            return 0.0;
+        double d = pl.GetPropertyDouble("duration") ?? 0.0;
+        var p = _playParams.GetValueOrDefault(cueId);
+        if (p is null)
+            return d;
+        double end = p.TrimEnd > 0
+            ? (d > 0 ? Math.Min(p.TrimEnd, d) : p.TrimEnd)
+            : d;
+        return Math.Max(0.0, end - p.TrimStart);
+    }
 
-    /// <summary>Segundos reproducidos (time-pos de mpv).</summary>
-    public double GetElapsed(int cueId) =>
-        _players.TryGetValue(cueId, out var pl) ? pl.GetPropertyDouble("time-pos") ?? 0.0 : 0.0;
+    /// <summary>Segundos reproducidos DESDE el punto de entrada (time-pos de
+    /// mpv es absoluto en el archivo; con trim_start se resta el offset —
+    /// mismas semánticas que el motor de audio).</summary>
+    public double GetElapsed(int cueId)
+    {
+        if (!_players.TryGetValue(cueId, out var pl))
+            return 0.0;
+        double t = pl.GetPropertyDouble("time-pos") ?? 0.0;
+        double trimStart = _playParams.GetValueOrDefault(cueId)?.TrimStart ?? 0.0;
+        return Math.Max(0.0, t - trimStart);
+    }
 
     // ------------------------------------------------------------------
     // Volumen / fade / pausa — control estilo QLab
@@ -531,6 +551,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 sink.SetSurface(renderer.Surface, renderer.Width, renderer.Height);
                 renderer.FrameRendered += sink.InvalidateFrame;
                 _renderers[cueId] = (renderer, sink);
+                // Confirmación visible del modo (barra de estado): sin esto es
+                // imposible saber desde fuera si el compositor está activo
+                ErrorOccurred?.Invoke(cueId,
+                    $"[AVISO] Compositor GPU activo — pista {layer + 1}.");
             }
             catch (Exception exc)
             {
