@@ -51,16 +51,30 @@ public sealed class VuMeterControl : FrameworkElement
         _decay.Start();
     }
 
-    /// <summary>Nivel RMS instantáneo (0..1). El pico se retiene ~1.2 s.</summary>
+    /// <summary>Nivel RMS instantáneo (0..1 lineal). Se muestra en escala dB
+    /// (−60…0 dBFS): es como se lee un VU de verdad — un tono a −15 dB luce
+    /// al ~75 %, no al 17 % que daría la escala lineal.</summary>
     public void SetLevel(float rms)
     {
-        double v = Math.Clamp(rms * 1.4, 0.0, 1.0);   // ligera ganancia visual
-        _level = Math.Max(_level, v);                  // el decay lo baja suave
+        double norm = 0.0;
+        if (rms > 0.00001)
+        {
+            double db = 20.0 * Math.Log10(rms);
+            norm = Math.Clamp((db + 60.0) / 60.0, 0.0, 1.0);
+        }
+
+        // Ataque instantáneo, release suave POR CADA report: la barra baila
+        // con la señal (antes solo subía y se clavaba en el máximo visto)
+        if (norm >= _level)
+            _level = norm;
+        else
+            _level = _level * 0.55 + norm * 0.45;
+
         long now = System.Diagnostics.Stopwatch.GetTimestamp();
         _lastUpdateTicks = now;
-        if (v >= _peak)
+        if (norm >= _peak)
         {
-            _peak = v;
+            _peak = norm;
             _peakTicks = now;
         }
         InvalidateVisual();
