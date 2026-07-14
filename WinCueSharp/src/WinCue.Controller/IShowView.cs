@@ -56,19 +56,23 @@ public interface IShowView
     nint GetVideoOutputHandle();
 
     /// <summary>HWND de la superficie de la PISTA dada (0..4) dentro de la
-    /// salida. Por defecto cae a la superficie única (vistas falsas).</summary>
-    nint GetVideoOutputLayerHandle(int layer) => GetVideoOutputHandle();
+    /// SALIDA dada (0..3). Por defecto cae a la superficie única (fakes).</summary>
+    nint GetVideoOutputLayerHandle(int screen, int layer) => GetVideoOutputHandle();
 
-    /// <summary>Pistas de vídeo con contenido activo: la ventana de salida
-    /// oculta las superficies vacías para que no tapen a las de abajo.</summary>
-    void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) { }
+    /// <summary>Pistas con contenido activo EN UNA SALIDA: su ventana oculta
+    /// las superficies vacías para que no tapen a las de abajo.</summary>
+    void SetActiveVideoLayers(int screen, IReadOnlyCollection<int> activeLayers) { }
 
-    /// <summary>Opacidad (0..1) de una pista de vídeo (solo compositor GPU).
+    /// <summary>Opacidad (0..1) de una pista de una salida (compositor GPU).
     /// fadeSeconds &gt; 0 → transición animada (fundidos/crossfade de vídeo).</summary>
-    void SetVideoLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0) { }
+    void SetVideoLayerOpacity(int screen, int layer, double opacity, double fadeSeconds = 0.0) { }
 
     /// <summary>Dimensiones del canvas de salida (para la geometría CUSTOM).</summary>
     (double Width, double Height) SurfaceDimensions();
+
+    /// <summary>Dimensiones del canvas de UNA salida concreta. Por defecto
+    /// cae a las de la salida principal (vistas falsas).</summary>
+    (double Width, double Height) SurfaceDimensions(int screen) => SurfaceDimensions();
 
     /// <summary>Testigo: nombre del vídeo en pantalla, o null = NEGRO.</summary>
     void SetOutputContent(string? videoName);

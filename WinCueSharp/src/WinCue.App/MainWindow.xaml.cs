@@ -23,7 +23,9 @@ public partial class MainWindow : Window, IShowView
     private MainController _controller = null!;
     private SettingsManager _settings = null!;
     private Action? _applyEngineSettings;   // lo inyecta App (reconfigurar audio)
-    private VideoOutputWindow? _videoOutput;
+    // Hasta 4 salidas de vídeo independientes; la 0 es la principal (legado).
+    // Se crean bajo demanda: solo existen las ventanas que algún cue usa.
+    private readonly VideoOutputWindow?[] _videoOutputs = new VideoOutputWindow?[4];
     private readonly DispatcherTimer _statusTimer;
 
     // Mini-monitores PVW/PGM en vivo (mpv embebido y silenciado)
@@ -417,62 +419,82 @@ public partial class MainWindow : Window, IShowView
 
     public nint GetVideoOutputHandle()
     {
-        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
-        EnsureVideoOutputWindow();
-        nint handle = _videoOutput!.EnsureVisibleHandle();
+        bool firstOpen = _videoOutputs[0] is null || !_videoOutputs[0]!.IsVisible;
+        EnsureVideoOutputWindow(0);
+        nint handle = _videoOutputs[0]!.EnsureVisibleHandle();
         if (firstOpen)
-            PlaceVideoOutput();
+            PlaceVideoOutput(0);
         return handle;
     }
 
-    public nint GetVideoOutputLayerHandle(int layer)
+    public nint GetVideoOutputLayerHandle(int screen, int layer)
     {
-        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
-        EnsureVideoOutputWindow();
-        nint handle = _videoOutput!.EnsureLayerHandle(layer);
+        screen = Math.Clamp(screen, 0, _videoOutputs.Length - 1);
+        bool firstOpen = _videoOutputs[screen] is null || !_videoOutputs[screen]!.IsVisible;
+        EnsureVideoOutputWindow(screen);
+        nint handle = _videoOutputs[screen]!.EnsureLayerHandle(layer);
         if (firstOpen)
-            PlaceVideoOutput();
+            PlaceVideoOutput(screen);
         return handle;
     }
 
-    public void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) =>
-        _videoOutput?.SetActiveLayers(activeLayers);
+    public void SetActiveVideoLayers(int screen, IReadOnlyCollection<int> activeLayers)
+    {
+        // Solo sobre ventanas YA creadas: el tally barre las 4 salidas y no
+        // debe materializar ventanas que ningún cue usa.
+        if (screen >= 0 && screen < _videoOutputs.Length)
+            _videoOutputs[screen]?.SetActiveLayers(activeLayers);
+    }
 
-    public void SetVideoLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0) =>
-        _videoOutput?.SetLayerOpacity(layer, opacity, fadeSeconds);
+    public void SetVideoLayerOpacity(int screen, int layer, double opacity, double fadeSeconds = 0.0)
+    {
+        if (screen >= 0 && screen < _videoOutputs.Length)
+            _videoOutputs[screen]?.SetLayerOpacity(layer, opacity, fadeSeconds);
+    }
 
     /// <summary>Superficie del compositor GPU (la usa App para el provider).</summary>
-    public CompositorLayerControl GetCompositorSurface(int layer)
+    public CompositorLayerControl GetCompositorSurface(int screen, int layer)
     {
-        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
-        EnsureVideoOutputWindow();
-        var surface = _videoOutput!.GetCompositorSurface(layer);
+        screen = Math.Clamp(screen, 0, _videoOutputs.Length - 1);
+        bool firstOpen = _videoOutputs[screen] is null || !_videoOutputs[screen]!.IsVisible;
+        EnsureVideoOutputWindow(screen);
+        var surface = _videoOutputs[screen]!.GetCompositorSurface(layer);
         if (firstOpen)
-            PlaceVideoOutput();
+            PlaceVideoOutput(screen);
         return surface;
     }
 
-    private void EnsureVideoOutputWindow()
+    private void EnsureVideoOutputWindow(int screen)
     {
-        if (_videoOutput is not null)
+        if (_videoOutputs[screen] is not null)
             return;
-        _videoOutput = new VideoOutputWindow { Owner = this };
-        // El botón refleja si la salida está activa (verde) o no (rojo)
-        _videoOutput.IsVisibleChanged += (_, _) => UpdateVideoOutButton();
+        var w = new VideoOutputWindow { Owner = this };
+        w.Title = $"WinCue — Salida de vídeo {screen + 1}";
+        // El botón refleja si alguna salida está activa (verde) o no (rojo)
+        w.IsVisibleChanged += (_, _) => UpdateVideoOutButton();
+        _videoOutputs[screen] = w;
     }
 
-    /// <summary>Coloca la salida en la pantalla configurada (Settings → Vídeo).</summary>
-    private void PlaceVideoOutput()
+    /// <summary>Clave de settings del monitor de una salida (la 1 conserva la
+    /// clave histórica para no romper settings existentes).</summary>
+    private static string ScreenSettingKey(int screen) =>
+        screen == 0 ? "video_output_screen" : $"video_output_screen{screen + 1}";
+
+    /// <summary>Coloca una salida en su pantalla configurada (Settings → Vídeo).</summary>
+    private void PlaceVideoOutput(int screen)
     {
-        _videoOutput?.PlaceOnScreen(
-            _settings.Get("video_output_screen", 0),
+        _videoOutputs[screen]?.PlaceOnScreen(
+            _settings.Get(ScreenSettingKey(screen), 0),
             _settings.Get("video_fullscreen_output", false));
     }
 
-    public (double Width, double Height) SurfaceDimensions()
+    public (double Width, double Height) SurfaceDimensions() => SurfaceDimensions(0);
+
+    public (double Width, double Height) SurfaceDimensions(int screen)
     {
-        if (_videoOutput is { IsVisible: true })
-            return (_videoOutput.ActualWidth, _videoOutput.ActualHeight);
+        if (screen >= 0 && screen < _videoOutputs.Length
+            && _videoOutputs[screen] is { IsVisible: true } w)
+            return (w.ActualWidth, w.ActualHeight);
         return (1920.0, 1080.0);
     }
 
@@ -583,10 +605,10 @@ public partial class MainWindow : Window, IShowView
         SetEditingEnabled(true);
     }
 
-    /// <summary>Botón de salida: rojo sin salida activa, verde con ella.</summary>
+    /// <summary>Botón de salida: rojo sin salida activa, verde con alguna.</summary>
     private void UpdateVideoOutButton()
     {
-        bool active = _videoOutput is { IsVisible: true };
+        bool active = _videoOutputs.Any(w => w is { IsVisible: true });
         VideoOutButton.Background = new SolidColorBrush(active
             ? Color.FromRgb(0x1e, 0x7e, 0x34)
             : Color.FromRgb(0x7e, 0x1e, 0x1e));
@@ -611,16 +633,18 @@ public partial class MainWindow : Window, IShowView
 
     private void OnVideoOutputClick(object sender, RoutedEventArgs e)
     {
-        EnsureVideoOutputWindow();
-        if (_videoOutput!.IsVisible)
+        // Con alguna salida visible el botón las oculta TODAS (blackout de
+        // operador); sin ninguna, abre la principal (el resto aparecen solas
+        // cuando un cue las usa).
+        if (_videoOutputs.Any(w => w is { IsVisible: true }))
         {
-            _videoOutput.Hide();
+            foreach (var w in _videoOutputs)
+                w?.Hide();
+            return;
         }
-        else
-        {
-            _videoOutput.Show();
-            PlaceVideoOutput();
-        }
+        EnsureVideoOutputWindow(0);
+        _videoOutputs[0]!.Show();
+        PlaceVideoOutput(0);
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
@@ -632,8 +656,9 @@ public partial class MainWindow : Window, IShowView
             ApplyViewSettings();
             _controller.OnMasterVolume(_settings.Get("master_volume", 100));
             _applyEngineSettings?.Invoke();
-            if (_videoOutput is { IsVisible: true })
-                PlaceVideoOutput();   // recolocar en la pantalla elegida
+            for (int s = 0; s < _videoOutputs.Length; s++)
+                if (_videoOutputs[s] is { IsVisible: true })
+                    PlaceVideoOutput(s);   // recolocar en la pantalla elegida
             FlashStatus("Configuración guardada y aplicada.");
         };
         dlg.ShowDialog();
@@ -1256,7 +1281,8 @@ public partial class MainWindow : Window, IShowView
         _pvw.Shutdown();
         _pgm.Shutdown();
         Inspector.ShutdownPreview();
-        _videoOutput?.CloseForShutdown();
+        foreach (var w in _videoOutputs)
+            w?.CloseForShutdown();
         base.OnClosed(e);
     }
 

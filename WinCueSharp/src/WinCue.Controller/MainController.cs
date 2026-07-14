@@ -122,7 +122,8 @@ public class MainController
         _video.ErrorOccurred += OnVideoError;
         _video.StateChanged += OnVideoStateChanged;
         _video.SetWindowHandleProvider(() => _view.GetVideoOutputHandle());
-        _video.SetLayerHandleProvider(layer => _view.GetVideoOutputLayerHandle(layer));
+        _video.SetLayerHandleProvider(
+            (screen, layer) => _view.GetVideoOutputLayerHandle(screen, layer));
 
         SetPlayhead(0);
     }
@@ -721,20 +722,22 @@ public class MainController
                     Rate: cue.Rate, PlayCount: cue.PlayCount,
                     PreservePitch: cue.PreservePitch,
                     Geometry: GeoFor(cue),
-                    Layer: VideoLayerOf(cue)));
+                    Layer: VideoLayerOf(cue),
+                    Screen: ScreenOf(cue)));
                 RefreshVideoTally();
                 // Opacidad de la pista: con fade_in entra fundiendo desde 0
                 // (dos vídeos solapados con fades = crossfade real)
+                int vScreen = ScreenOf(cue);
                 int vLayer = VideoLayerOf(cue);
                 double targetOpacity = cue.Opacity / 100.0;
                 if (cue.FadeIn > 0.0)
                 {
-                    _view.SetVideoLayerOpacity(vLayer, 0.0);
-                    _view.SetVideoLayerOpacity(vLayer, targetOpacity, cue.FadeIn);
+                    _view.SetVideoLayerOpacity(vScreen, vLayer, 0.0);
+                    _view.SetVideoLayerOpacity(vScreen, vLayer, targetOpacity, cue.FadeIn);
                 }
                 else
                 {
-                    _view.SetVideoLayerOpacity(vLayer, targetOpacity);
+                    _view.SetVideoLayerOpacity(vScreen, vLayer, targetOpacity);
                 }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
@@ -806,6 +809,9 @@ public class MainController
     private static int VideoLayerOf(Cue c) =>
         c.TimelineLayer < 0 ? 2 : Math.Min(c.TimelineLayer, 4);
 
+    /// <summary>Salida de vídeo del cue (0 = Salida 1 … 3 = Salida 4).</summary>
+    private static int ScreenOf(Cue c) => Math.Clamp(c.VideoOutput, 0, 3);
+
     /// <summary>Al disparar un media, corta otros cues según el modo de GO.
     /// El vídeo es exclusivo POR PISTA: misma pista → sustituye; pistas
     /// distintas conviven (la superior tapa a la inferior).</summary>
@@ -820,7 +826,8 @@ public class MainController
             bool sameVideoLayer = cue.Type == CueType.Video
                 && other.Kind == CueType.Video
                 && _model.GetById(otherId) is Cue oc
-                && VideoLayerOf(oc) == VideoLayerOf(cue);
+                && VideoLayerOf(oc) == VideoLayerOf(cue)
+                && ScreenOf(oc) == ScreenOf(cue);
             if (stopAll || sameVideoLayer)
                 EndCue(otherId, markStopped: true, fade: 0.0);
         }
@@ -994,7 +1001,7 @@ public class MainController
                 _video.FadeVolume(cueId, 0.0, fade, stopAfter: true);
                 // Fundido VISUAL a la par que el de audio (compositor)
                 if (_model.GetById(cueId) is Cue vc)
-                    _view.SetVideoLayerOpacity(VideoLayerOf(vc), 0.0, fade);
+                    _view.SetVideoLayerOpacity(ScreenOf(vc), VideoLayerOf(vc), 0.0, fade);
             }
             else
             {
@@ -1246,21 +1253,23 @@ public class MainController
         return top is null ? null : (top.FilePath, _video.GetElapsed(top.Id));
     }
 
-    /// <summary>Vídeo visible en la salida: el de la pista MÁS ALTA activa.</summary>
+    /// <summary>Vídeo visible en la salida: el de la pista MÁS ALTA activa,
+    /// priorizando la Salida 1 (el monitor PGM refleja la salida principal).</summary>
     private Cue? TopVideo(bool requirePlaying)
     {
         Cue? top = null;
-        int topLayer = int.MaxValue;
+        var topSlot = (Screen: int.MaxValue, Layer: int.MaxValue);
         foreach (var (cid, r) in _running)
         {
             if (r.Kind != CueType.Video || _model.GetById(cid) is not Cue c)
                 continue;
             if (requirePlaying && !_video.IsPlaying(cid))
                 continue;
-            int layer = VideoLayerOf(c);
-            if (layer < topLayer)
+            var slot = (Screen: ScreenOf(c), Layer: VideoLayerOf(c));
+            if (slot.Screen < topSlot.Screen
+                || (slot.Screen == topSlot.Screen && slot.Layer < topSlot.Layer))
             {
-                topLayer = layer;
+                topSlot = slot;
                 top = c;
             }
         }
@@ -1269,15 +1278,23 @@ public class MainController
 
     private void RefreshVideoTally()
     {
-        // Pistas activas → la ventana de salida oculta las superficies vacías.
-        // (La opacidad NO se toca aquí: la fijan los fades de StartAction y
-        // EndCue; pisarla en cada tally cortaría los crossfades en curso.)
-        var activeLayers = new List<int>();
+        // Pistas activas POR SALIDA → cada ventana oculta sus superficies
+        // vacías. Se notifican TODAS las salidas (también las vacías, para
+        // que limpien). (La opacidad NO se toca aquí: la fijan los fades de
+        // StartAction y EndCue; pisarla cortaría los crossfades en curso.)
+        var activeBy = new Dictionary<int, List<int>>();
         foreach (var (cid, r) in _running)
             if (r.Kind == CueType.Video && _video.IsPlaying(cid)
                 && _model.GetById(cid) is Cue c)
-                activeLayers.Add(VideoLayerOf(c));
-        _view.SetActiveVideoLayers(activeLayers);
+            {
+                int screen = ScreenOf(c);
+                if (!activeBy.TryGetValue(screen, out var list))
+                    activeBy[screen] = list = new List<int>();
+                list.Add(VideoLayerOf(c));
+            }
+        for (int screen = 0; screen < 4; screen++)
+            _view.SetActiveVideoLayers(screen,
+                activeBy.GetValueOrDefault(screen) ?? (IReadOnlyCollection<int>)Array.Empty<int>());
         _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
     }
 
@@ -1290,7 +1307,7 @@ public class MainController
 
     private VideoGeometry GeoFor(Cue cue)
     {
-        var (sw, sh) = _view.SurfaceDimensions();
+        var (sw, sh) = _view.SurfaceDimensions(ScreenOf(cue));
         return new VideoGeometry(
             Mode: cue.GeoMode == GeoMode.Custom ? "CUSTOM" : "FULL",
             PreserveAspect: cue.PreserveAspect,
@@ -1798,7 +1815,7 @@ public class MainController
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
             && fields.ContainsKey("opacity"))
         {
-            _view.SetVideoLayerOpacity(VideoLayerOf(cue), cue.Opacity / 100.0);
+            _view.SetVideoLayerOpacity(ScreenOf(cue), VideoLayerOf(cue), cue.Opacity / 100.0);
         }
     }
 

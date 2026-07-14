@@ -89,6 +89,11 @@ public class Cue
     /// Campo nuevo de la versión C# — Python lo ignora al cargar.</summary>
     [JsonPropertyName("timeline_layer")] public int TimelineLayer { get; set; } = -1;
 
+    /// <summary>Salida de vídeo del cue: 0 = Salida 1 (principal) … 3 = Salida 4.
+    /// Cada salida es una ventana propia colocable en un monitor distinto
+    /// (Settings → Vídeo). Campo C#-only — Python lo ignora al cargar.</summary>
+    [JsonPropertyName("video_output")] public int VideoOutput { get; set; }
+
     // ── Inspector: Básicos extra ───────────────────────────────────────
     [JsonPropertyName("flagged")]   public bool Flagged  { get; set; }
     [JsonPropertyName("auto_load")] public bool AutoLoad { get; set; }
@@ -172,6 +177,7 @@ public class Cue
         FadeOut  = Math.Max(0.0, FadeOut);
         Volume   = Math.Clamp(Volume, 0.0, 1.0);
         TimelineLayer = Math.Clamp(TimelineLayer, -1, 4);
+        VideoOutput = Math.Clamp(VideoOutput, 0, 3);
         GainDb  = Math.Clamp(GainDb, -24.0, 12.0);
         HpfFreq = Math.Clamp(HpfFreq, 20.0, 2000.0);
         LpfFreq = Math.Clamp(LpfFreq, 200.0, 20000.0);

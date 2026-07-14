@@ -108,14 +108,19 @@ public partial class SettingsWindow : Window
     {
         var root = new StackPanel();
 
-        var scr = Group(root, "PANTALLA DE SALIDA");
+        var scr = Group(root, "SALIDAS DE VÍDEO (monitor por salida)");
         var screens = System.Windows.Forms.Screen.AllScreens
             .Select((s, i) => ((object)i,
                 $"Pantalla {i}{(s.Primary ? " (principal)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}"))
             .ToArray();
-        Combo("video_output_screen", scr, "Monitor:", screens);
-        Check("video_fullscreen_output", scr, "Salida a pantalla completa (blackout)");
-        Note(scr, "Desmárcalo solo para probar en una ventana con bordes.");
+        Combo("video_output_screen", scr, "Salida 1 (principal):", screens);
+        Combo("video_output_screen2", scr, "Salida 2:", screens);
+        Combo("video_output_screen3", scr, "Salida 3:", screens);
+        Combo("video_output_screen4", scr, "Salida 4:", screens);
+        Note(scr, "Cada cue de vídeo elige su salida en el inspector (Geometry). " +
+                  "Las ventanas de salida se abren solas al usarlas un cue.");
+        Check("video_fullscreen_output", scr, "Salidas a pantalla completa (blackout)");
+        Note(scr, "Desmárcalo solo para probar en ventanas con bordes.");
         Check("video_compositor", scr, "Compositor GPU (opacidad real entre capas)");
         Note(scr, "Las pistas se funden según su Opacidad % (Geometry). Requiere " +
                   "driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.");

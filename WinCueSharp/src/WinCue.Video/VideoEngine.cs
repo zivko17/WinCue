@@ -65,17 +65,17 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     private readonly Action<Action>? _dispatch;
     private Func<nint> _getWindowHandle;
-    private Func<int, nint>? _getLayerHandle;             // superficie por pista
+    private Func<int, int, nint>? _getLayerHandle;        // superficie por (salida, pista)
     private readonly string? _forcedVo;                   // tests: "null"
     private readonly bool _nullAudio;                     // tests: ao=null
 
     private readonly Dictionary<int, MediaCueState> _states = new();
     private readonly Dictionary<int, string> _files = new();          // verificados
     private readonly Dictionary<int, MpvPlayer> _players = new();
-    private readonly Dictionary<int, int> _playerLayers = new();      // cue → pista
+    private readonly Dictionary<int, (int Screen, int Layer)> _playerSlots = new();
 
     // Compositor GPU: renderer + superficie de la vista, por cue
-    private Func<int, IVideoLayerSurface>? _gpuSurfaces;
+    private Func<int, int, IVideoLayerSurface>? _gpuSurfaces;
     private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
     private readonly Dictionary<int, (MpvGpuRenderer Renderer, IVideoLayerSurface Sink)>
         _renderers = new();
@@ -113,14 +113,15 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     public void SetWindowHandleProvider(Func<nint> getWindowHandle) =>
         _getWindowHandle = getWindowHandle;
 
-    /// <summary>Proveedor de superficie POR PISTA (0..4): cada vídeo renderiza
-    /// en la de su Layer y las pistas superiores tapan a las inferiores.</summary>
-    public void SetLayerHandleProvider(Func<int, nint>? provider) =>
+    /// <summary>Proveedor de superficie POR (SALIDA, PISTA): cada vídeo
+    /// renderiza en la de su (Screen, Layer); las pistas superiores tapan
+    /// a las inferiores dentro de cada salida.</summary>
+    public void SetLayerHandleProvider(Func<int, int, nint>? provider) =>
         _getLayerHandle = provider;
 
     /// <summary>Activa el COMPOSITOR GPU (render API → superficies D3D con
     /// opacidad real entre capas). null = volver al modo clásico HWND.</summary>
-    public void SetGpuLayerSurfaceProvider(Func<int, IVideoLayerSurface>? provider)
+    public void SetGpuLayerSurfaceProvider(Func<int, int, IVideoLayerSurface>? provider)
     {
         _gpuSurfaces = provider;
         _gpuFailed = false;
@@ -459,13 +460,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         int layer = Math.Clamp(p.Layer, 0, 4);
+        int screen = Math.Clamp(p.Screen, 0, 3);
         bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
 
         // ── Validación del HWND (modo clásico; el compositor no usa wid) ─
         nint hwnd = 0;
         if (_forcedVo is null && !gpu)
         {
-            hwnd = _getLayerHandle?.Invoke(layer) ?? _getWindowHandle();
+            hwnd = _getLayerHandle?.Invoke(screen, layer) ?? _getWindowHandle();
             if (hwnd == 0)
             {
                 EmitError(cueId,
@@ -475,14 +477,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             }
         }
 
-        // ── Salida única POR PISTA: terminar los players de la MISMA pista.
-        // Pistas distintas conviven (la superior tapa a la inferior). El
-        // huérfano pasa a STOPPED (mejora sobre Python, que dejaba su
-        // estado en PLAYING para siempre y any_playing() mentía).
+        // ── Salida única POR (SALIDA, PISTA): terminar los players de la
+        // MISMA pista de la MISMA salida. Pistas distintas (o salidas
+        // distintas) conviven. El huérfano pasa a STOPPED (mejora sobre
+        // Python, que dejaba su estado en PLAYING y any_playing() mentía).
         foreach (int otherId in _players.Keys.ToList())
         {
             if (otherId == cueId) continue;
-            if (_playerLayers.GetValueOrDefault(otherId, 2) != layer) continue;
+            if (_playerSlots.GetValueOrDefault(otherId, (0, 2)) != (screen, layer)) continue;
             CancelFade(otherId);
             SetState(otherId, MediaCueState.Stopped);
             TerminatePlayer(otherId);
@@ -547,14 +549,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 var geo = p.Geometry ?? new VideoGeometry();
                 var renderer = new MpvGpuRenderer(player,
                     (int)geo.SurfW, (int)geo.SurfH);
-                var sink = _gpuSurfaces!(layer);
+                var sink = _gpuSurfaces!(screen, layer);
                 sink.SetSurface(renderer.Surface, renderer.Width, renderer.Height);
                 renderer.FrameRendered += sink.InvalidateFrame;
                 _renderers[cueId] = (renderer, sink);
                 // Confirmación visible del modo (barra de estado): sin esto es
                 // imposible saber desde fuera si el compositor está activo
                 ErrorOccurred?.Invoke(cueId,
-                    $"[AVISO] Compositor GPU activo — pista {layer + 1}.");
+                    $"[AVISO] Compositor GPU activo — salida {screen + 1}, pista {layer + 1}.");
             }
             catch (Exception exc)
             {
@@ -613,7 +615,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         // ── Iniciar reproducción — T0 justo antes de play() ─────────────
         _players[cueId] = player;
-        _playerLayers[cueId] = layer;
+        _playerSlots[cueId] = (screen, layer);
         t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
@@ -662,7 +664,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     private void TerminatePlayer(int cueId)
     {
-        _playerLayers.Remove(cueId);
+        _playerSlots.Remove(cueId);
         // Regla de mpv: el render context se libera ANTES que el core
         if (_renderers.Remove(cueId, out var r))
         {

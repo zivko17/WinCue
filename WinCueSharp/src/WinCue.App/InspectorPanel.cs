@@ -543,6 +543,42 @@ public sealed class InspectorPanel : ContentControl
         _loaders["opacity"] = c => opacityBox.Text = c.Opacity.ToString("0.#",
             System.Globalization.CultureInfo.InvariantCulture);
 
+        // ── Salida de vídeo del cue (multi-monitor estilo Watchout) ─────
+        Header(controls, "SALIDA");
+        var outRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        outRow.Children.Add(new TextBlock
+        {
+            Text = "Salida:", VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Margin = new Thickness(0, 0, 4, 0),
+        });
+        var screenCombo = new ComboBox { MinWidth = 170 };
+        for (int s = 0; s < 4; s++)
+            screenCombo.Items.Add(new ComboBoxItem
+            {
+                Content = s == 0 ? "Salida 1 (principal)" : $"Salida {s + 1}",
+                Tag = s,
+            });
+        screenCombo.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _cue is null) return;
+            if ((screenCombo.SelectedItem as ComboBoxItem)?.Tag is int scr)
+                Commit("video_output", scr);
+        };
+        outRow.Children.Add(screenCombo);
+        controls.Children.Add(outRow);
+        var outNote = new TextBlock
+        {
+            Text = "El monitor de cada salida se asigna en Settings → Vídeo.",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        controls.Children.Add(outNote);
+        _loaders["video_output"] = c =>
+            screenCombo.SelectedIndex = Math.Clamp(c.VideoOutput, 0, 3);
+
         // Sincroniza radios/paneles/lienzo al cargar un cue
         _loaders["__geo_sync"] = SyncGeometryUi;
 

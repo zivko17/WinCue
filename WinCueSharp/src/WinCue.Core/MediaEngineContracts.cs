@@ -64,7 +64,9 @@ public sealed record VideoGeometry(
 /// <summary>Parámetros de reproducción de un cue de vídeo.
 /// Layer: pista de prioridad de la salida (0 = arriba del todo … 4 = fondo;
 /// 2 = por defecto). Vídeos en pistas distintas conviven — el de la pista
-/// superior tapa al de abajo; en la misma pista se sustituyen.</summary>
+/// superior tapa al de abajo; en la misma pista se sustituyen.
+/// Screen: salida de vídeo de destino (0 = principal … 3); cada salida tiene
+/// sus propias 5 pistas — la exclusividad de pista es POR SALIDA.</summary>
 public sealed record VideoPlayParams(
     double Volume = 1.0,
     bool Loop = false,
@@ -75,7 +77,8 @@ public sealed record VideoPlayParams(
     int PlayCount = 1,
     bool PreservePitch = true,
     VideoGeometry? Geometry = null,
-    int Layer = 2);
+    int Layer = 2,
+    int Screen = 0);
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine
@@ -158,15 +161,16 @@ public interface IVideoEngine
     void ApplyGeometry(int cueId, VideoGeometry geo);
     void SetWindowHandleProvider(Func<nint> getWindowHandle);
 
-    /// <summary>Proveedor de superficie POR PISTA (0..4). Si se fija, cada
-    /// vídeo renderiza en la superficie de su Layer (prioridad visual).
+    /// <summary>Proveedor de superficie POR (SALIDA, PISTA). Si se fija, cada
+    /// vídeo renderiza en la superficie de su (Screen, Layer).
     /// Implementación por defecto: no-op (motores falsos / compatibilidad).</summary>
-    void SetLayerHandleProvider(Func<int, nint>? provider) { }
+    void SetLayerHandleProvider(Func<int, int, nint>? provider) { }
 
     /// <summary>MODO COMPOSITOR GPU: si se fija, los vídeos renderizan vía
     /// render API a superficies D3D compartidas (opacidad real entre capas)
-    /// en vez de a HWNDs. null = modo clásico. Default: no-op (fakes).</summary>
-    void SetGpuLayerSurfaceProvider(Func<int, IVideoLayerSurface>? provider) { }
+    /// en vez de a HWNDs, por (salida, pista). null = modo clásico.
+    /// Default: no-op (fakes).</summary>
+    void SetGpuLayerSurfaceProvider(Func<int, int, IVideoLayerSurface>? provider) { }
 
     void Cleanup();
 }
