@@ -255,146 +255,124 @@ public sealed class InspectorPanel : ContentControl
     private UIElement BuildBasics()
     {
         var (scroll, panel) = Page();
-        var (colL, colR) = TwoColumns(panel);
+        var cols = Columns(panel, 3);
 
-        Header(colL, "IDENTIDAD");
-        Txt(colL, "number", "Número:", c => c.Number);
-        _nameBox = Txt(colL, "name", "Nombre:", c => c.Name);
-        ColorSwatches(colL);
-        var armedRow = ChkRow(colL);
+        Header(cols[0], "IDENTIDAD");
+        Txt(cols[0], "number", "Número:", c => c.Number);
+        _nameBox = Txt(cols[0], "name", "Nombre:", c => c.Name);
+        ColorSwatches(cols[0]);
+        var armedRow = ChkRow(cols[0]);
         Chk(armedRow, "armed", "Armado", c => c.Armed);
         Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
-        TxtMultiline(colL, "notes", "Notas (se muestran al operador en standby):",
+        TxtMultiline(cols[0], "notes", "Notas (se muestran en standby):",
             c => c.Notes);
 
-        Header(colR, "TEMPORIZACIÓN Y DESTINO");
-        Cmb(colR, "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
+        Header(cols[1], "TEMPORIZACIÓN");
+        Cmb(cols[1], "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
             ("None", "Nada (GO manual)"),
             ("AutoContinue", "Auto-continue (tras post-wait)"),
             ("AutoFollow", "Auto-follow (al acabar la acción)"));
-        TimeF(colR, "pre_wait", "Pre-wait:", c => c.PreWait);
-        TimeF(colR, "duration", "Duración:", c => c.Duration);
-        TimeF(colR, "post_wait", "Post-wait:", c => c.PostWait);
+        TimeF(cols[1], "pre_wait", "Pre-wait:", c => c.PreWait);
+        TimeF(cols[1], "duration", "Duración:", c => c.Duration);
+        TimeF(cols[1], "post_wait", "Post-wait:", c => c.PostWait);
 
-        FileRow(colR);
+        Header(cols[2], "DESTINO");
+        FileRow(cols[2]);
 
         // Solo cues que apuntan a otro cue
-        var targetRow = Conditional(colR, c => c.TargetsOther());
+        var targetRow = Conditional(cols[2], c => c.TargetsOther());
         TargetCombo(targetRow);
-        var fadeStopRow = Conditional(colR, c => c.Type == CueType.Fade);
+        var fadeStopRow = Conditional(cols[2], c => c.Type == CueType.Fade);
         Chk(fadeStopRow, "fade_stop_on_done", "Detener el objetivo al llegar a 0",
             c => c.FadeStopOnDone);
 
         // Solo grupos
-        var groupRow = Conditional(colR, c => c.Type == CueType.Group);
+        var groupRow = Conditional(cols[2], c => c.Type == CueType.Group);
         CmbInline(groupRow, "group_mode", "Modo de grupo:", c => c.GroupMode.ToString(),
             ("Enter", "ENTER — el playhead entra"),
             ("Timeline", "TIMELINE — todos a la vez"),
             ("GoNext", "GO NEXT — primer hijo"),
             ("Random", "RANDOM — aleatorio round-robin"));
 
-        var stopOthersRow = ChkRow(colR);
+        var stopOthersRow = ChkRow(cols[2]);
         Chk(stopOthersRow, "stop_others", "Detener los demás al empezar (GO per-cue)",
             c => c.StopOthers);
 
         return scroll;
     }
 
-    /// <summary>Dos columnas independientes dentro de una página del inspector.</summary>
-    private static (StackPanel Left, StackPanel Right) TwoColumns(StackPanel panel)
-    {
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var left = new StackPanel();
-        var right = new StackPanel();
-        Grid.SetColumn(left, 0);
-        Grid.SetColumn(right, 2);
-        grid.Children.Add(left);
-        grid.Children.Add(right);
-        panel.Children.Add(grid);
-        return (left, right);
-    }
 
     private UIElement BuildTriggers()
     {
         var (scroll, panel) = Page();
-        var (colL, colR) = TwoColumns(panel);
+        var cols = Columns(panel, 3);
 
-        Header(colL, "DISPARO LOCAL");
-        Txt(colL, "hotkey", "Hotkey (tecla):", c => c.Hotkey);
-        Cmb(colL, "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
+        Header(cols[0], "DISPARO LOCAL");
+        Txt(cols[0], "hotkey", "Hotkey (tecla):", c => c.Hotkey);
+        Cmb(cols[0], "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
             ("None", "Ignorar"),
             ("Panic", "Panic (fade y parar)"),
             ("Stop", "Parar"),
             ("HardStop", "Parada dura"),
             ("HardRestart", "Reiniciar"));
 
-        Header(colL, "FUNDIR Y PARAR OTROS");
-        var foRow = ChkRow(colL);
+        Header(cols[0], "FUNDIR Y PARAR OTROS");
+        var foRow = ChkRow(cols[0]);
         Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
-        Num(colL, "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
-        Cmb(colL, "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
+        Num(cols[0], "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
+        Cmb(cols[0], "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
             ("Peers", "PEERS — mismo nivel/grupo"),
             ("List", "LIST — toda la lista"),
             ("All", "ALL — todo"));
 
-        Header(colR, "WALL-CLOCK (disparo por hora del día)");
-        var wcRow = ChkRow(colR);
+        Header(cols[1], "WALL-CLOCK (disparo por hora)");
+        var wcRow = ChkRow(cols[1]);
         Chk(wcRow, "wallclock_enabled", "Disparar a una hora del día", c => c.WallclockEnabled);
-        Txt(colR, "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
-        Note(colR, "Se dispara cada día a esa hora mientras el show esté abierto.");
+        Txt(cols[1], "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
+        Note(cols[1], "Se dispara cada día a esa hora\nmientras el show esté abierto.");
 
-        Header(colR, "MIDI (backend en fase 6)");
-        var midiRow = ChkRow(colR);
+        Header(cols[2], "MIDI (backend en fase 6)");
+        var midiRow = ChkRow(cols[2]);
         Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
-        Cmb(colR, "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
+        Cmb(cols[2], "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
             ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
             ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
-        Int(colR, "midi_channel", "Canal:", c => c.MidiChannel);
-        Int(colR, "midi_note", "Nota / CC:", c => c.MidiNote);
-        Int(colR, "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
+        Int(cols[2], "midi_channel", "Canal:", c => c.MidiChannel);
+        Int(cols[2], "midi_note", "Nota / CC:", c => c.MidiNote);
+        Int(cols[2], "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
 
         return scroll;
     }
 
     private UIElement BuildTimeLoops()
     {
-        var (scroll, panel) = Page();
+        // Sin scroll: campos arriba y la barra de trim ESTIRADA al alto restante
+        var root = new DockPanel { Margin = new Thickness(10, 4, 10, 10) };
 
-        // ── Opciones en DOS columnas (menos apiñado) ────────────────────
-        var grid = new Grid();
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(28) });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        var colL = new StackPanel();
-        var colR = new StackPanel();
-        Grid.SetColumn(colL, 0);
-        Grid.SetColumn(colR, 2);
-        grid.Children.Add(colL);
-        grid.Children.Add(colR);
-        panel.Children.Add(grid);
+        var top = new StackPanel();
+        DockPanel.SetDock(top, Dock.Top);
+        root.Children.Add(top);
 
-        Header(colL, "REPRODUCCIÓN");
-        var loopRow = ChkRow(colL);
+        var cols = Columns(top, 2);
+
+        Header(cols[0], "REPRODUCCIÓN");
+        var loopRow = ChkRow(cols[0]);
         Chk(loopRow, "loop", "Loop infinito (hasta STOP)", c => c.Loop);
-        Int(colL, "play_count", "Repeticiones (play count):", c => c.PlayCount);
-        Num(colL, "rate", "Velocidad (1.0 = normal):", c => c.Rate);
-        var pitchRow = ChkRow(colL);
+        Int(cols[0], "play_count", "Repeticiones (play count):", c => c.PlayCount);
+        Num(cols[0], "rate", "Velocidad (1.0 = normal):", c => c.Rate);
+        var pitchRow = ChkRow(cols[0]);
         Chk(pitchRow, "preserve_pitch", "Mantener tono al cambiar velocidad",
             c => c.PreservePitch);
 
-        Header(colR, "FUNDIDOS Y RECORTE");
-        TimeF(colR, "fade_in", "Fade in:", c => c.FadeIn);
-        TimeF(colR, "fade_out", "Fade out:", c => c.FadeOut);
-        TimeF(colR, "trim_start", "Trim: inicio:", c => c.TrimStart);
-        TimeF(colR, "trim_end", "Trim: fin (0 = final):", c => c.TrimEnd);
+        Header(cols[1], "FUNDIDOS Y RECORTE");
+        TimeF(cols[1], "fade_in", "Fade in:", c => c.FadeIn);
+        TimeF(cols[1], "fade_out", "Fade out:", c => c.FadeOut);
+        TimeF(cols[1], "trim_start", "Trim: inicio:", c => c.TrimStart);
+        TimeF(cols[1], "trim_end", "Trim: fin (0 = final):", c => c.TrimEnd);
 
-        // ── Barra de trim abajo, a todo lo ancho ────────────────────────
-        Header(panel, "BARRA DE TRIM — arrastra los manejadores");
-        _wave.Margin = new Thickness(0, 4, 0, 6);
-        _wave.Height = 110;
+        Header(top, "BARRA DE TRIM — arrastra los manejadores");
+        _wave.Margin = new Thickness(0, 4, 0, 0);
+        _wave.MinHeight = 64;   // sin altura fija: llena el resto de la pestaña
         _wave.MarkersChanged += (start, end) =>
         {
             if (_cue is null) return;
@@ -409,9 +387,9 @@ public sealed class InspectorPanel : ContentControl
             }
             finally { _loading = false; }
         };
-        panel.Children.Add(_wave);
+        root.Children.Add(_wave);
 
-        return scroll;
+        return root;
     }
 
     // ── Pestaña Geometry: controles + lienzo interactivo ───────────────
@@ -526,8 +504,34 @@ public sealed class InspectorPanel : ContentControl
         _customPanel.Children.Add(btnRow);
 
         Header(controls, "COMPOSITOR (fase 3b)");
-        Txt(controls, "layer", "Layer (top/bottom/1..999):", c => c.Layer);
-        Num(controls, "opacity", "Opacidad (%):", c => c.Opacity);
+        var compRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        compRow.Children.Add(new TextBlock
+        {
+            Text = "Layer:", VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Margin = new Thickness(0, 0, 4, 0),
+        });
+        var layerBox = MakeTextBox(64);
+        WireTextCommit(layerBox, "layer", () => layerBox.Text);
+        compRow.Children.Add(layerBox);
+        compRow.Children.Add(new TextBlock
+        {
+            Text = "Opacidad %:", VerticalAlignment = VerticalAlignment.Center,
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Margin = new Thickness(12, 0, 4, 0),
+        });
+        var opacityBox = MakeTextBox(48);
+        WireTextCommit(opacityBox, "opacity", () =>
+            double.TryParse(opacityBox.Text.Replace(',', '.'),
+                System.Globalization.NumberStyles.Float,
+                System.Globalization.CultureInfo.InvariantCulture, out double ov)
+                ? ov : (object?)null);
+        compRow.Children.Add(opacityBox);
+        controls.Children.Add(compRow);
+        _loaders["layer"] = c => layerBox.Text = c.Layer;
+        _loaders["opacity"] = c => opacityBox.Text = c.Opacity.ToString("0.#",
+            System.Globalization.CultureInfo.InvariantCulture);
 
         // Sincroniza radios/paneles/lienzo al cargar un cue
         _loaders["__geo_sync"] = SyncGeometryUi;
@@ -807,12 +811,30 @@ public sealed class InspectorPanel : ContentControl
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
         row.Children.Add(new TextBlock
         {
-            Text = label, Width = 210,
+            Text = label, Width = 185,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
         });
         panel.Children.Add(row);
         return row;
+    }
+
+    /// <summary>N columnas independientes dentro de una página del inspector.</summary>
+    private static StackPanel[] Columns(StackPanel panel, int count)
+    {
+        var grid = new Grid();
+        var cols = new StackPanel[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (i > 0)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            cols[i] = new StackPanel();
+            Grid.SetColumn(cols[i], i * 2);
+            grid.Children.Add(cols[i]);
+        }
+        panel.Children.Add(grid);
+        return cols;
     }
 
     private static StackPanel ChkRow(StackPanel panel)

@@ -166,7 +166,7 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="120"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="280" MinHeight="140"/>
+                <RowDefinition Height="330" MinHeight="140"/>
             </Grid.RowDefinitions>
 
         <DataGrid x:Name="CueGrid" Grid.Row="0"
