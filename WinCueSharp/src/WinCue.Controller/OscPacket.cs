@@ -122,4 +122,62 @@ public static class OscPacket
 
     /// <summary>Redondea hacia arriba al múltiplo de 4 (padding OSC).</summary>
     private static int Align4(int n) => (n + 3) & ~3;
+
+    // ------------------------------------------------------------------
+    // Construcción (feedback de salida hacia Companion/TouchOSC)
+    // ------------------------------------------------------------------
+
+    /// <summary>Serializa un mensaje OSC (int→i, float/double→f, string→s,
+    /// bool→T/F). Inverso de Parse.</summary>
+    public static byte[] Build(string address, params object?[] args)
+    {
+        var bytes = new List<byte>(64);
+        void PadString(string s)
+        {
+            var raw = Encoding.UTF8.GetBytes(s);
+            bytes.AddRange(raw);
+            int pad = 4 - (raw.Length % 4);
+            for (int i = 0; i < pad; i++)
+                bytes.Add(0);
+        }
+        void AddBE(int v)
+        {
+            Span<byte> b = stackalloc byte[4];
+            BinaryPrimitives.WriteInt32BigEndian(b, v);
+            bytes.AddRange(b.ToArray());
+        }
+
+        PadString(address);
+        var tags = new StringBuilder(",");
+        foreach (object? a in args)
+            tags.Append(a switch
+            {
+                int or long => 'i',
+                float or double => 'f',
+                bool b2 => b2 ? 'T' : 'F',
+                _ => 's',
+            });
+        PadString(tags.ToString());
+        foreach (object? a in args)
+        {
+            switch (a)
+            {
+                case int i: AddBE(i); break;
+                case long l: AddBE((int)l); break;
+                case float f:
+                    Span<byte> bf = stackalloc byte[4];
+                    BinaryPrimitives.WriteSingleBigEndian(bf, f);
+                    bytes.AddRange(bf.ToArray());
+                    break;
+                case double d:
+                    Span<byte> bd = stackalloc byte[4];
+                    BinaryPrimitives.WriteSingleBigEndian(bd, (float)d);
+                    bytes.AddRange(bd.ToArray());
+                    break;
+                case bool: break;   // T/F van solo en los tags
+                default: PadString(a?.ToString() ?? ""); break;
+            }
+        }
+        return bytes.ToArray();
+    }
 }

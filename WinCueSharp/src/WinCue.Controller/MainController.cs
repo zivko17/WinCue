@@ -447,6 +447,61 @@ public class MainController
         }
     }
 
+    // ── Timecode (MTC) ─────────────────────────────────────────────────
+
+    private double _tcLastSeconds = -1;
+    private readonly HashSet<int> _tcFired = new();
+
+    /// <summary>Posición de timecode entrante (segundos desde 00:00:00:00).
+    /// Dispara los cues con Triggers → Timecode cuya marca se acaba de cruzar
+    /// (una vez por pasada; un salto atrás &gt; 0,5 s re-arma todo).</summary>
+    public void OnTimecode(double seconds)
+    {
+        if (seconds < _tcLastSeconds - 0.5)
+            _tcFired.Clear();   // rebobinado / nueva pasada
+        _tcLastSeconds = seconds;
+
+        for (int i = 0; i < _model.Count; i++)
+        {
+            var c = _model.Cues[i];
+            if (!c.TimecodeEnabled || !c.Armed || _tcFired.Contains(c.Id)
+                || _running.ContainsKey(c.Id))
+                continue;
+            if (ParseTimecode(c.TimecodeValue) is not double mark)
+                continue;
+            if (seconds >= mark && seconds - mark < 1.0)
+            {
+                _tcFired.Add(c.Id);
+                Log($"TIMECODE {c.TimecodeValue} → {c.DisplayNumber} · {c.Name}");
+                Trigger(i, advanceChain: false);
+            }
+        }
+    }
+
+    /// <summary>"HH:MM:SS:FF" (frames a fps dado), "HH:MM:SS.mmm" o "MM:SS".</summary>
+    public static double? ParseTimecode(string text, double fps = 30.0)
+    {
+        var parts = text.Trim().Split(':');
+        try
+        {
+            var inv = System.Globalization.CultureInfo.InvariantCulture;
+            return parts.Length switch
+            {
+                4 => int.Parse(parts[0]) * 3600.0 + int.Parse(parts[1]) * 60.0
+                     + int.Parse(parts[2]) + int.Parse(parts[3]) / Math.Max(1.0, fps),
+                3 => int.Parse(parts[0]) * 3600.0 + int.Parse(parts[1]) * 60.0
+                     + double.Parse(parts[2].Replace(',', '.'), inv),
+                2 => int.Parse(parts[0]) * 60.0
+                     + double.Parse(parts[1].Replace(',', '.'), inv),
+                _ => null,
+            };
+        }
+        catch (Exception exc) when (exc is FormatException or OverflowException)
+        {
+            return null;
+        }
+    }
+
     private Cue? FindByNumber(string number) =>
         _model.Cues.FirstOrDefault(c => c.DisplayNumber == number);
 

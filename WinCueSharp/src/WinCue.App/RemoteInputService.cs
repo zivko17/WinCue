@@ -19,19 +19,27 @@ namespace WinCue.App;
 public sealed class RemoteInputService : IDisposable
 {
     private readonly MainController _controller;
+    private readonly CueModel _model;
     private readonly SettingsManager _settings;
     private readonly Action<Action> _dispatch;
 
     private UdpClient? _osc;
+    private UdpClient? _oscOut;                    // feedback → Companion
+    private System.Threading.Timer? _feedback;
     private MidiIn? _midi;
+
+    // Ensamblado de MIDI Timecode (8 quarter-frames por posición)
+    private readonly int[] _mtc = new int[8];
+    private int _mtcMask;
 
     /// <summary>Mensajes de estado ("OSC escuchando en 8000", errores…).</summary>
     public event Action<string>? Status;
 
-    public RemoteInputService(MainController controller, SettingsManager settings,
-        Action<Action> dispatch)
+    public RemoteInputService(MainController controller, CueModel model,
+        SettingsManager settings, Action<Action> dispatch)
     {
         _controller = controller;
+        _model = model;
         _settings = settings;
         _dispatch = dispatch;
     }
@@ -51,8 +59,31 @@ public sealed class RemoteInputService : IDisposable
     {
         _osc?.Dispose();
         _osc = null;
+        _feedback?.Dispose();
+        _feedback = null;
+        _oscOut?.Dispose();
+        _oscOut = null;
         if (!_settings.Get("osc_enabled", false))
             return;
+
+        // Feedback de SALIDA (playhead/activos) hacia Companion/TouchOSC
+        string sendHost = _settings.Get("osc_send_host", "");
+        int sendPort = _settings.Get("osc_send_port", 9000);
+        if (sendHost.Length > 0 && sendPort > 0)
+        {
+            try
+            {
+                var outClient = new UdpClient();
+                outClient.Connect(sendHost, sendPort);
+                _oscOut = outClient;
+                _feedback = new System.Threading.Timer(
+                    _ => _dispatch(SendFeedback), null, 500, 500);
+            }
+            catch (SocketException exc)
+            {
+                Status?.Invoke($"OSC out: {exc.SocketErrorCode}");
+            }
+        }
 
         int port = _settings.Get("osc_listen_port", 8000);
         UdpClient client;
@@ -88,6 +119,34 @@ public sealed class RemoteInputService : IDisposable
         }
     }
 
+    /// <summary>Estado del show por OSC (2 Hz, hilo de UI): el playhead, los
+    /// cues sonando y la pausa. Companion los usa para iluminar botones.</summary>
+    private void SendFeedback()
+    {
+        var outClient = _oscOut;
+        if (outClient is null)
+            return;
+        try
+        {
+            var standby = _model.GetCue(_controller.Playhead);
+            Send(OscPacket.Build("/wincue/playhead",
+                standby?.DisplayNumber ?? "-", standby?.Name ?? ""));
+
+            var numbers = _controller.RunningCueIds
+                .Select(id => _model.GetById(id)?.DisplayNumber)
+                .Where(n => n is not null).ToList();
+            Send(OscPacket.Build("/wincue/running",
+                numbers.Count, string.Join(",", numbers)));
+            Send(OscPacket.Build("/wincue/paused", _controller.IsPaused ? 1 : 0));
+        }
+        catch (Exception exc) when (exc is SocketException or ObjectDisposedException)
+        {
+            // Red caída / apagado: el feedback nunca tira el show
+        }
+
+        void Send(byte[] datagram) => outClient.Send(datagram, datagram.Length);
+    }
+
     // ------------------------------------------------------------------
     // MIDI IN (NAudio)
     // ------------------------------------------------------------------
@@ -112,6 +171,13 @@ public sealed class RemoteInputService : IDisposable
         {
             _midi = new MidiIn(index);
             _midi.MessageReceived += OnMidiIn;
+            // NAudio remite los mensajes que no sabe parsear por ErrorReceived:
+            // los quarter-frames de MTC (0xF1) pueden llegar por aquí
+            _midi.ErrorReceived += (_, e) =>
+            {
+                if ((e.RawMessage & 0xFF) == 0xF1)
+                    OnMtcQuarterFrame((e.RawMessage >> 8) & 0x7F);
+            };
             _midi.Start();
             Status?.Invoke($"MIDI IN activo: {MidiIn.DeviceInfo(index).ProductName}");
         }
@@ -137,8 +203,39 @@ public sealed class RemoteInputService : IDisposable
         return MidiIn.NumberOfDevices > 0 ? 0 : -1;
     }
 
+    /// <summary>Quarter-frame de MIDI Timecode: 8 piezas = una posición.
+    /// Al completarse se calcula el instante y se remite al controlador.</summary>
+    private void OnMtcQuarterFrame(int data1)
+    {
+        int piece = (data1 >> 4) & 7;
+        _mtc[piece] = data1 & 0xF;
+        _mtcMask |= 1 << piece;
+        if (piece != 7 || _mtcMask != 0xFF)
+            return;
+        _mtcMask = 0;
+
+        int frames = _mtc[0] | ((_mtc[1] & 1) << 4);
+        int secs = _mtc[2] | ((_mtc[3] & 3) << 4);
+        int mins = _mtc[4] | ((_mtc[5] & 3) << 4);
+        int hours = _mtc[6] | ((_mtc[7] & 1) << 4);
+        double fps = ((_mtc[7] >> 1) & 3) switch
+        {
+            0 => 24.0, 1 => 25.0, 2 => 29.97, _ => 30.0,
+        };
+        // MTC describe la posición de hace 2 frames (llega en 8 mensajes)
+        double t = hours * 3600.0 + mins * 60.0 + secs + (frames + 2) / fps;
+        _dispatch(() => _controller.OnTimecode(t));
+    }
+
     private void OnMidiIn(object? sender, MidiInMessageEventArgs e)
     {
+        // MIDI Timecode (0xF1): ensamblar sin pasar por el parser de NAudio
+        if ((e.RawMessage & 0xFF) == 0xF1)
+        {
+            OnMtcQuarterFrame((e.RawMessage >> 8) & 0x7F);
+            return;
+        }
+
         // Llega en el hilo de callback de winmm → remitir al hilo de UI
         (MidiTriggerType Type, int Channel, int Data1, int Data2)? msg = e.MidiEvent switch
         {
@@ -158,6 +255,10 @@ public sealed class RemoteInputService : IDisposable
 
     public void Dispose()
     {
+        _feedback?.Dispose();
+        _feedback = null;
+        _oscOut?.Dispose();
+        _oscOut = null;
         _osc?.Dispose();
         _osc = null;
         if (_midi is not null)

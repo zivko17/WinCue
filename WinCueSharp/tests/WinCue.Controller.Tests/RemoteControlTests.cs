@@ -173,6 +173,42 @@ public class RemoteRoutingTests : ControllerTestBase
         Assert.Contains(target.Id, Controller.RunningCueIds);
     }
 
+    [Theory]
+    [InlineData("01:00:00:00", 3600.0)]
+    [InlineData("00:01:30:15", 90.5)]     // 15 frames a 30 fps
+    [InlineData("00:00:05.250", 5.25)]
+    [InlineData("02:30", 150.0)]
+    public void ParseTimecode_FormatosValidos(string text, double expected)
+    {
+        Assert.Equal(expected, MainController.ParseTimecode(text)!.Value, 3);
+    }
+
+    [Fact]
+    public void Timecode_DisparaAlCruzarLaMarca_UnaSolaVez()
+    {
+        var cue = AddCue(CueType.Wait, "tc", duration: 5.0, setup: c =>
+        {
+            c.TimecodeEnabled = true;
+            c.TimecodeValue = "00:00:10:00";
+        });
+
+        Controller.OnTimecode(9.5);
+        Assert.Empty(Controller.RunningCueIds);
+
+        Controller.OnTimecode(10.1);
+        Assert.Contains(cue.Id, Controller.RunningCueIds);
+
+        // Parar y seguir avanzando: no re-dispara
+        Controller.OnStopPressed();
+        Controller.OnTimecode(10.4);
+        Assert.Empty(Controller.RunningCueIds);
+
+        // Rebobinar re-arma la marca
+        Controller.OnTimecode(2.0);
+        Controller.OnTimecode(10.2);
+        Assert.Contains(cue.Id, Controller.RunningCueIds);
+    }
+
     [Fact]
     public void Midi_NoteOnVelocityZero_ActsAsNoteOff()
     {

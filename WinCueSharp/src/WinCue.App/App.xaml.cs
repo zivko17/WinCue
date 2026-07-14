@@ -57,7 +57,7 @@ public partial class App : Application
         _controller = new MainController(model, window, _audio, _video, scheduler, settings);
 
         // Fase 6: disparo remoto (OSC UDP + MIDI IN) según settings → Red
-        _remote = new RemoteInputService(_controller, settings, dispatch);
+        _remote = new RemoteInputService(_controller, model, settings, dispatch);
         _remote.Status += msg => dispatch(() => window.FlashStatus(msg));
 
         // Compositor GPU (Settings → Vídeo): opacidad real entre capas
