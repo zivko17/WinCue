@@ -1081,6 +1081,9 @@ public sealed class TimelineCanvas : FrameworkElement
         int layer = _dragLayer;
         double trimStart = _dragTrimStart, trimEnd = _dragTrimEnd;
         double duration = _dragDuration;
+        // Pista donde el usuario VE el bloque al soltar (incluye el apilado
+        // automático del layout del arrastre)
+        int shownLayer = _blocks.FirstOrDefault(b => b.Cue.Id == cue.Id)?.Layer ?? -1;
         _dragCue = null;
         ReleaseMouseCapture();
 
@@ -1094,13 +1097,15 @@ public sealed class TimelineCanvas : FrameworkElement
                 case DragMode.Move:
                     if (!TryReorder(cue, preWait - _dragOrigPreWait))
                     {
+                        bool linked = false;
                         double committed = preWait < -1e-9
-                            ? LinkOverlapWithPrev(cue, preWait)
+                            ? LinkOverlapWithPrev(cue, preWait, shownLayer, out linked)
                             : preWait;
                         if (Math.Abs(committed - _dragOrigPreWait) > 1e-9)
                             CommitField?.Invoke(cue.Id, "pre_wait",
                                 Math.Max(0, committed));
-                        if (!isGroup && layer != _dragOrigLayer)
+                        // Si el solape ya fijó las pistas, no pisarlas aquí
+                        if (!isGroup && !linked && layer != _dragOrigLayer)
                             CommitField?.Invoke(cue.Id, "timeline_layer", layer);
                     }
                     break;
@@ -1127,8 +1132,10 @@ public sealed class TimelineCanvas : FrameworkElement
     /// donde se soltó. Es lo que hace que "las capas se junten" en el timeline.
     /// Dentro de un grupo TIMELINE los hijos ya son paralelos: ahí solo se
     /// recorta el offset a 0 (encadenar duplicaría disparos).</summary>
-    private double LinkOverlapWithPrev(Cue cue, double draggedPre)
+    private double LinkOverlapWithPrev(Cue cue, double draggedPre, int shownLayer,
+        out bool linked)
     {
+        linked = false;
         if (_model is null)
             return 0;
 
@@ -1150,6 +1157,25 @@ public sealed class TimelineCanvas : FrameworkElement
 
         if (prev.ContinueMode != ContinueMode.AutoContinue)
             CommitField?.Invoke(prev.Id, "continue_mode", "AUTO_CONTINUE");
+        linked = true;
+
+        // Dos VÍDEOS solapados: fijar AMBOS en las pistas donde se ven — si
+        // quedaran en pista "auto" irían los dos a la misma superficie y el
+        // segundo sustituiría al primero en vez de convivir/mezclarse.
+        if (cue.Type == CueType.Video && prev.Type == CueType.Video)
+        {
+            int prevShown = _blocks.FirstOrDefault(b => b.Cue.Id == prev.Id)?.Layer ?? 2;
+            if (prev.TimelineLayer < 0)
+                CommitField?.Invoke(prev.Id, "timeline_layer", prevShown);
+            int prevEff = prev.TimelineLayer >= 0 ? prev.TimelineLayer : prevShown;
+            int mine = shownLayer >= 0 ? shownLayer : prevEff - 1;
+            if (mine == prevEff)
+                mine = prevEff > 0 ? prevEff - 1 : prevEff + 1;
+            mine = Math.Clamp(mine, 0, MaxLayers - 1);
+            if (cue.TimelineLayer != mine)
+                CommitField?.Invoke(cue.Id, "timeline_layer", mine);
+        }
+
         return Math.Max(0, desired - newTrigger);
     }
 
