@@ -29,6 +29,7 @@ public partial class App : Application
     private MainController? _controller;
     private AudioEngine? _audio;
     private VideoEngine? _video;
+    private RemoteInputService? _remote;
     private DispatcherTimer? _tick;
     private DispatcherTimer? _autosaveTimer;
     private string _autosavePath = "";
@@ -54,6 +55,11 @@ public partial class App : Application
 
         var scheduler = new TimerScheduler(dispatch);
         _controller = new MainController(model, window, _audio, _video, scheduler, settings);
+
+        // Fase 6: disparo remoto (OSC UDP + MIDI IN) según settings → Red
+        _remote = new RemoteInputService(_controller, settings, dispatch);
+        _remote.Status += msg => dispatch(() => window.FlashStatus(msg));
+
         window.Attach(model, _controller, settings, applyEngineSettings: () =>
         {
             // Reconfigurar el dispositivo de audio en caliente tras guardar settings
@@ -66,7 +72,9 @@ public partial class App : Application
             _audio.SetDevice(deviceId, driver,
                 asioDriverName: driver == "asio" ? devName : null);
             _controller.OnMasterVolume(settings.Get("master_volume", 100));
+            _remote.Apply();   // OSC/MIDI IN en caliente
         });
+        _remote.Apply();
 
         // Tick de 100 ms para el panel de activos y el countdown
         _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
@@ -132,6 +140,7 @@ public partial class App : Application
     {
         _tick?.Stop();
         _autosaveTimer?.Stop();
+        _remote?.Dispose();
         _controller?.Shutdown();
         _audio?.Dispose();
         _video?.Dispose();

@@ -320,6 +320,116 @@ public class MainController
     }
 
     // ==================================================================
+    // CONTROL REMOTO — OSC / MIDI IN (fase 6)
+    // ==================================================================
+
+    /// <summary>Rutea un mensaje OSC entrante a la acción correspondiente.
+    /// Direcciones: /wincue/go /wincue/stop /wincue/panic /wincue/fadeall
+    /// /wincue/pause y /wincue/cue/{número}/go|stop (con alias sin prefijo:
+    /// /go /stop /panic /fadeall /pause). Un único argumento numérico 0 se
+    /// ignora (convención "release" de Companion/TouchOSC).</summary>
+    public void OnOscMessage(string address, IReadOnlyList<object?> args)
+    {
+        // Botón soltado (arg único == 0): no reaccionar
+        if (args.Count == 1 && args[0] is int i0 && i0 == 0) return;
+        if (args.Count == 1 && args[0] is float f0 && f0 == 0f) return;
+
+        var parts = address.Trim().TrimEnd('/').ToLowerInvariant()
+            .Split('/', StringSplitOptions.RemoveEmptyEntries);
+        if (parts.Length == 0)
+            return;
+        if (parts[0] == "wincue")
+            parts = parts[1..];
+        if (parts.Length == 0)
+            return;
+
+        if (parts.Length == 1)
+        {
+            switch (parts[0])
+            {
+                case "go": Log($"OSC {address} → GO"); OnGoPressed(); break;
+                case "stop": Log($"OSC {address} → STOP ALL"); OnStopPressed(); break;
+                case "panic": Log($"OSC {address} → PANIC"); OnPanic(); break;
+                case "fadeall": Log($"OSC {address} → FADE ALL"); OnFadeAll(); break;
+                case "pause": Log($"OSC {address} → PAUSA"); OnPauseToggle(); break;
+            }
+            return;
+        }
+
+        // /cue/{número}[/go|/start|/stop]
+        if (parts[0] != "cue")
+            return;
+        string number = parts[1];
+        string verb = parts.Length >= 3 ? parts[2] : "go";
+        if (verb is "go" or "start")
+        {
+            TriggerByNumber(number, $"OSC {address}");
+        }
+        else if (verb == "stop" && FindByNumber(number) is Cue tgt
+                 && _running.ContainsKey(tgt.Id))
+        {
+            Log($"OSC {address} → STOP cue {tgt.DisplayNumber}");
+            EndCue(tgt.Id, markStopped: true);
+        }
+    }
+
+    /// <summary>Mensaje MIDI entrante: notas globales de GO/STOP (Settings →
+    /// Red) y triggers por cue (Triggers → MIDI del inspector).
+    /// data1 = nota/CC/programa; data2 = velocity/valor.</summary>
+    public void OnMidiMessage(MidiTriggerType type, int channel, int data1, int data2)
+    {
+        // Convención MIDI: NoteOn con velocity 0 equivale a NoteOff
+        if (type == MidiTriggerType.NoteOn && data2 == 0)
+            type = MidiTriggerType.NoteOff;
+
+        // Notas globales de transporte (cualquier canal)
+        if (type == MidiTriggerType.NoteOn)
+        {
+            if (data1 == _settings.Get("midi_go_note", 60))
+            {
+                Log($"MIDI nota {data1} → GO");
+                OnGoPressed();
+                return;
+            }
+            if (data1 == _settings.Get("midi_stop_note", 61))
+            {
+                Log($"MIDI nota {data1} → STOP ALL");
+                OnStopPressed();
+                return;
+            }
+        }
+
+        // Triggers por cue
+        for (int i = 0; i < _model.Count; i++)
+        {
+            var c = _model.Cues[i];
+            if (c.MidiEnabled && c.MidiType == type && c.MidiChannel == channel
+                && c.MidiNote == data1
+                && (c.MidiVelocity == -1 || c.MidiVelocity == data2))
+            {
+                Log($"MIDI {type} ch{channel} {data1}/{data2} → {c.DisplayNumber} · {c.Name}");
+                Trigger(i, advanceChain: false);
+            }
+        }
+    }
+
+    private Cue? FindByNumber(string number) =>
+        _model.Cues.FirstOrDefault(c => c.DisplayNumber == number);
+
+    private void TriggerByNumber(string number, string source)
+    {
+        if (FindByNumber(number) is Cue cue)
+        {
+            Log($"{source} → GO cue {cue.DisplayNumber} · {cue.Name}");
+            TriggerCueId(cue.Id);
+        }
+        else
+        {
+            _view.FlashStatus($"{source}: no hay cue con número «{number}»");
+        }
+    }
+
+    // ==================================================================
     // NÚCLEO DE DISPARO
     // ==================================================================
 
