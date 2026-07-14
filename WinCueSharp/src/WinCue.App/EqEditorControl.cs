@@ -114,6 +114,41 @@ public sealed class EqEditorControl : ContentControl
         left.Children.Add(_lpfOn);
         left.Children.Add(_lpfFreq);
         left.Children.Add(Hz());
+
+        // Ganancia de VISUALIZACIÓN del RTA (no toca el audio)
+        left.Children.Add(new TextBlock
+        {
+            Text = "RTA +",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(8, 0, 3, 0),
+        });
+        var rtaGain = new Slider
+        {
+            Minimum = 0,
+            Maximum = 48,
+            Value = EqCurveCanvas.RtaGainDb,
+            Width = 90,
+            VerticalAlignment = VerticalAlignment.Center,
+            ToolTip = "Ganancia de visualización del analizador (solo pantalla)",
+        };
+        var rtaLabel = new TextBlock
+        {
+            Text = $"{EqCurveCanvas.RtaGainDb:0} dB",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(3, 0, 0, 0),
+        };
+        rtaGain.ValueChanged += (_, _) =>
+        {
+            EqCurveCanvas.RtaGainDb = rtaGain.Value;
+            rtaLabel.Text = $"{rtaGain.Value:0} dB";
+            _canvas.InvalidateVisual();
+        };
+        left.Children.Add(rtaGain);
+        left.Children.Add(rtaLabel);
         bottom.Children.Add(left);
         _readout = new TextBlock
         {
@@ -234,7 +269,12 @@ public sealed class EqCurveCanvas : FrameworkElement
     private static readonly Pen GridPen = FrozenPen(Color.FromRgb(0x2c, 0x2c, 0x30), 1);
     private static readonly Pen ZeroPen = FrozenPen(Color.FromRgb(0x4a, 0x4a, 0x50), 1);
     private static readonly Brush GridText = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
-    private static readonly Brush RtaFill = Frozen(new SolidColorBrush(Color.FromArgb(70, 0x2e, 0xcc, 0x71)));
+    private static readonly Brush RtaBar = Frozen(new SolidColorBrush(Color.FromArgb(120, 0x2e, 0xcc, 0x71)));
+    private static readonly Brush RtaBarTop = Frozen(new SolidColorBrush(Color.FromArgb(220, 0x5f, 0xf2, 0x9e)));
+
+    /// <summary>Ganancia de VISUALIZACIÓN del RTA en dB (compartida por
+    /// sesión; solo afecta a la pantalla, nunca al audio).</summary>
+    public static double RtaGainDb = 18.0;
     private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
     private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x66, 0x5e, 0x30), 1.5);
 
@@ -331,23 +371,22 @@ public sealed class EqCurveCanvas : FrameworkElement
         }
         dc.DrawLine(ZeroPen, new Point(0, YFromDb(0)), new Point(w, YFromDb(0)));
 
-        // RTA detrás (dBFS -90..0 mapeado al alto completo)
+        // RTA detrás: BARRAS por banda (dBFS -90..0 + ganancia de pantalla)
         if (_spectrum is { Length: > 0 } spec)
         {
-            var geo = new StreamGeometry();
-            using (var ctx = geo.Open())
+            double bw = w / spec.Length;
+            for (int i = 0; i < spec.Length; i++)
             {
-                ctx.BeginFigure(new Point(0, h), true, true);
-                for (int i = 0; i < spec.Length; i++)
-                {
-                    double x = (i + 0.5) / spec.Length * w;
-                    double y = h * (1.0 - (spec[i] + 90.0) / 90.0);
-                    ctx.LineTo(new Point(x, y), true, false);
-                }
-                ctx.LineTo(new Point(w, h), true, false);
+                double db = spec[i] + RtaGainDb;
+                double y = h * (1.0 - Math.Clamp((db + 90.0) / 90.0, 0.0, 1.0));
+                if (h - y < 1)
+                    continue;
+                dc.DrawRectangle(RtaBar, null,
+                    new Rect(i * bw + 0.5, y, Math.Max(1, bw - 1), h - y));
+                // Remate más brillante en la punta de la barra
+                dc.DrawRectangle(RtaBarTop, null,
+                    new Rect(i * bw + 0.5, y, Math.Max(1, bw - 1), 2));
             }
-            geo.Freeze();
-            dc.DrawGeometry(RtaFill, null, geo);
         }
 
         // Curva de respuesta de los filtros

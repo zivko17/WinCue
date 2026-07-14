@@ -122,6 +122,7 @@ public class MainController
         _video.ErrorOccurred += OnVideoError;
         _video.StateChanged += OnVideoStateChanged;
         _video.SetWindowHandleProvider(() => _view.GetVideoOutputHandle());
+        _video.SetLayerHandleProvider(layer => _view.GetVideoOutputLayerHandle(layer));
 
         SetPlayhead(0);
     }
@@ -660,7 +661,8 @@ public class MainController
                     TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
                     Rate: cue.Rate, PlayCount: cue.PlayCount,
                     PreservePitch: cue.PreservePitch,
-                    Geometry: GeoFor(cue)));
+                    Geometry: GeoFor(cue),
+                    Layer: VideoLayerOf(cue)));
                 RefreshVideoTally();
                 run.Duration = cue.Duration;
                 if (cue.Duration > 0.0 && !cue.Loop)
@@ -708,8 +710,15 @@ public class MainController
         }
     }
 
+    /// <summary>Pista de prioridad visual de un cue de vídeo: la del timeline
+    /// (0 = arriba tapa a las demás); sin fijar (-1) → pista 2 por defecto,
+    /// que preserva el comportamiento clásico "un vídeo sustituye al otro".</summary>
+    private static int VideoLayerOf(Cue c) =>
+        c.TimelineLayer < 0 ? 2 : Math.Min(c.TimelineLayer, 4);
+
     /// <summary>Al disparar un media, corta otros cues según el modo de GO.
-    /// El vídeo es SIEMPRE exclusivo (una sola salida).</summary>
+    /// El vídeo es exclusivo POR PISTA: misma pista → sustituye; pistas
+    /// distintas conviven (la superior tapa a la inferior).</summary>
     private void ApplyGoExclusivity(Cue cue)
     {
         string mode = _settings.Get("go_mode", "concurrent");
@@ -718,7 +727,11 @@ public class MainController
         {
             if (otherId == cue.Id || !_running.TryGetValue(otherId, out var other))
                 continue;
-            if (stopAll || (cue.Type == CueType.Video && other.Kind == CueType.Video))
+            bool sameVideoLayer = cue.Type == CueType.Video
+                && other.Kind == CueType.Video
+                && _model.GetById(otherId) is Cue oc
+                && VideoLayerOf(oc) == VideoLayerOf(cue);
+            if (stopAll || sameVideoLayer)
                 EndCue(otherId, markStopped: true, fade: 0.0);
         }
     }
@@ -1122,21 +1135,41 @@ public class MainController
     /// Port de _update_program_monitor de Python.</summary>
     public (string FilePath, double Elapsed)? GetProgramVideo()
     {
-        Cue? last = null;
+        var top = TopVideo(requirePlaying: true);
+        return top is null ? null : (top.FilePath, _video.GetElapsed(top.Id));
+    }
+
+    /// <summary>Vídeo visible en la salida: el de la pista MÁS ALTA activa.</summary>
+    private Cue? TopVideo(bool requirePlaying)
+    {
+        Cue? top = null;
+        int topLayer = int.MaxValue;
         foreach (var (cid, r) in _running)
-            if (r.Kind == CueType.Video && _video.IsPlaying(cid)
-                && _model.GetById(cid) is Cue c)
-                last = c;
-        return last is null ? null : (last.FilePath, _video.GetElapsed(last.Id));
+        {
+            if (r.Kind != CueType.Video || _model.GetById(cid) is not Cue c)
+                continue;
+            if (requirePlaying && !_video.IsPlaying(cid))
+                continue;
+            int layer = VideoLayerOf(c);
+            if (layer < topLayer)
+            {
+                topLayer = layer;
+                top = c;
+            }
+        }
+        return top;
     }
 
     private void RefreshVideoTally()
     {
-        Cue? last = null;
+        // Pistas activas → la ventana de salida oculta las superficies vacías
+        var activeLayers = new List<int>();
         foreach (var (cid, r) in _running)
-            if (r.Kind == CueType.Video && _model.GetById(cid) is Cue c)
-                last = c;
-        _view.SetOutputContent(last?.Name);
+            if (r.Kind == CueType.Video && _video.IsPlaying(cid)
+                && _model.GetById(cid) is Cue c)
+                activeLayers.Add(VideoLayerOf(c));
+        _view.SetActiveVideoLayers(activeLayers);
+        _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
     }
 
     private void PreloadUpcoming()

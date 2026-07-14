@@ -65,12 +65,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     private readonly Action<Action>? _dispatch;
     private Func<nint> _getWindowHandle;
+    private Func<int, nint>? _getLayerHandle;             // superficie por pista
     private readonly string? _forcedVo;                   // tests: "null"
     private readonly bool _nullAudio;                     // tests: ao=null
 
     private readonly Dictionary<int, MediaCueState> _states = new();
     private readonly Dictionary<int, string> _files = new();          // verificados
     private readonly Dictionary<int, MpvPlayer> _players = new();
+    private readonly Dictionary<int, int> _playerLayers = new();      // cue → pista
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
     private readonly Dictionary<int, double> _volumes = new();
@@ -104,6 +106,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// monitor). Solo afecta a los vídeos que se inicien a partir de ahora.</summary>
     public void SetWindowHandleProvider(Func<nint> getWindowHandle) =>
         _getWindowHandle = getWindowHandle;
+
+    /// <summary>Proveedor de superficie POR PISTA (0..4): cada vídeo renderiza
+    /// en la de su Layer y las pistas superiores tapan a las inferiores.</summary>
+    public void SetLayerHandleProvider(Func<int, nint>? provider) =>
+        _getLayerHandle = provider;
 
     public static bool MpvAvailable => MpvPlayer.IsAvailable;
 
@@ -416,11 +423,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             return;
         }
 
+        var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
+        int layer = Math.Clamp(p.Layer, 0, 4);
+
         // ── Validación del HWND (salvo vo forzado en tests) ─────────────
         nint hwnd = 0;
         if (_forcedVo is null)
         {
-            hwnd = _getWindowHandle();
+            hwnd = _getLayerHandle?.Invoke(layer) ?? _getWindowHandle();
             if (hwnd == 0)
             {
                 EmitError(cueId,
@@ -430,12 +440,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             }
         }
 
-        // ── Salida única: terminar CUALQUIER otro player ────────────────
-        // El huérfano pasa a STOPPED (mejora sobre Python, que dejaba su
+        // ── Salida única POR PISTA: terminar los players de la MISMA pista.
+        // Pistas distintas conviven (la superior tapa a la inferior). El
+        // huérfano pasa a STOPPED (mejora sobre Python, que dejaba su
         // estado en PLAYING para siempre y any_playing() mentía).
         foreach (int otherId in _players.Keys.ToList())
         {
             if (otherId == cueId) continue;
+            if (_playerLayers.GetValueOrDefault(otherId, 2) != layer) continue;
             CancelFade(otherId);
             SetState(otherId, MediaCueState.Stopped);
             TerminatePlayer(otherId);
@@ -443,7 +455,6 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         TerminatePlayer(cueId);   // player anterior de este cue, si existía
 
         // ── Crear instancia MPV con cadena de fallback de vo ────────────
-        var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         bool isImage = ImageFormats.Contains(Path.GetExtension(filePath));
 
         MpvPlayer? player = null;
@@ -514,6 +525,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
             {
                 SetState(cueId, MediaCueState.Stopped);   // publicar ANTES del Dispose
+                _playerLayers.Remove(cueId);
                 _players.Remove(cueId, out var ended);
                 ended?.Dispose();
             }
@@ -536,6 +548,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         // ── Iniciar reproducción — T0 justo antes de play() ─────────────
         _players[cueId] = player;
+        _playerLayers[cueId] = layer;
         t0 = System.Diagnostics.Stopwatch.GetTimestamp();
         try
         {
@@ -584,6 +597,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     private void TerminatePlayer(int cueId)
     {
+        _playerLayers.Remove(cueId);
         if (_players.Remove(cueId, out var player))
             player.Dispose();
     }

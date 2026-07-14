@@ -419,6 +419,19 @@ public partial class MainWindow : Window, IShowView
         return handle;
     }
 
+    public nint GetVideoOutputLayerHandle(int layer)
+    {
+        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
+        EnsureVideoOutputWindow();
+        nint handle = _videoOutput!.EnsureLayerHandle(layer);
+        if (firstOpen)
+            PlaceVideoOutput();
+        return handle;
+    }
+
+    public void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) =>
+        _videoOutput?.SetActiveLayers(activeLayers);
+
     private void EnsureVideoOutputWindow()
     {
         if (_videoOutput is not null)

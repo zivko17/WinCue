@@ -16,6 +16,7 @@ using System.ComponentModel;
 using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Interop;
+using WF = System.Windows.Forms;
 
 namespace WinCue.App;
 
@@ -31,9 +32,55 @@ public partial class VideoOutputWindow : Window
 
     private bool _shutdown;
 
+    // 5 superficies apiladas (una por pista): el índice 0 es la de ARRIBA.
+    // mpv renderiza sobre el HWND del panel de su pista; las vacías se
+    // ocultan para no tapar (un panel WinForms pinta su fondo negro).
+    private readonly WF.Panel[] _layers = new WF.Panel[5];
+
     public VideoOutputWindow()
     {
         InitializeComponent();
+
+        var container = new WF.Panel
+        {
+            BackColor = System.Drawing.Color.Black,
+            Dock = WF.DockStyle.Fill,
+        };
+        for (int i = 0; i < _layers.Length; i++)
+        {
+            _layers[i] = new WF.Panel
+            {
+                BackColor = System.Drawing.Color.Black,
+                Dock = WF.DockStyle.Fill,
+                Visible = false,
+            };
+            container.Controls.Add(_layers[i]);
+            // En WinForms el índice 0 del z-order es el FRENTE: pista 0 arriba
+            container.Controls.SetChildIndex(_layers[i], i);
+        }
+        Content = new System.Windows.Forms.Integration.WindowsFormsHost
+        {
+            Child = container,
+        };
+    }
+
+    /// <summary>HWND de la superficie de la pista dada (la hace visible).</summary>
+    public nint EnsureLayerHandle(int layer)
+    {
+        if (!IsVisible)
+            Show();
+        _ = new WindowInteropHelper(this).EnsureHandle();
+        var panel = _layers[Math.Clamp(layer, 0, _layers.Length - 1)];
+        panel.Visible = true;
+        return panel.Handle;   // fuerza la creación del HWND si hace falta
+    }
+
+    /// <summary>Oculta las superficies sin contenido (para que su fondo negro
+    /// no tape a las pistas de abajo).</summary>
+    public void SetActiveLayers(IReadOnlyCollection<int> activeLayers)
+    {
+        for (int i = 0; i < _layers.Length; i++)
+            _layers[i].Visible = activeLayers.Contains(i);
     }
 
     /// <summary>HWND nativo de la ventana (0 si aún no se ha creado).</summary>

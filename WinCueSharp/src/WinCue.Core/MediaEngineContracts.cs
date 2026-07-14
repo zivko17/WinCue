@@ -50,7 +50,10 @@ public sealed record VideoGeometry(
     double SurfW = 1920.0,           // dimensiones del canvas de salida
     double SurfH = 1080.0);
 
-/// <summary>Parámetros de reproducción de un cue de vídeo.</summary>
+/// <summary>Parámetros de reproducción de un cue de vídeo.
+/// Layer: pista de prioridad de la salida (0 = arriba del todo … 4 = fondo;
+/// 2 = por defecto). Vídeos en pistas distintas conviven — el de la pista
+/// superior tapa al de abajo; en la misma pista se sustituyen.</summary>
 public sealed record VideoPlayParams(
     double Volume = 1.0,
     bool Loop = false,
@@ -60,7 +63,8 @@ public sealed record VideoPlayParams(
     double Rate = 1.0,
     int PlayCount = 1,
     bool PreservePitch = true,
-    VideoGeometry? Geometry = null);
+    VideoGeometry? Geometry = null,
+    int Layer = 2);
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine
@@ -126,5 +130,11 @@ public interface IVideoEngine
     double GetElapsed(int cueId);
     void ApplyGeometry(int cueId, VideoGeometry geo);
     void SetWindowHandleProvider(Func<nint> getWindowHandle);
+
+    /// <summary>Proveedor de superficie POR PISTA (0..4). Si se fija, cada
+    /// vídeo renderiza en la superficie de su Layer (prioridad visual).
+    /// Implementación por defecto: no-op (motores falsos / compatibilidad).</summary>
+    void SetLayerHandleProvider(Func<int, nint>? provider) { }
+
     void Cleanup();
 }

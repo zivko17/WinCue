@@ -55,6 +55,14 @@ public interface IShowView
     /// 0 si aún no existe.</summary>
     nint GetVideoOutputHandle();
 
+    /// <summary>HWND de la superficie de la PISTA dada (0..4) dentro de la
+    /// salida. Por defecto cae a la superficie única (vistas falsas).</summary>
+    nint GetVideoOutputLayerHandle(int layer) => GetVideoOutputHandle();
+
+    /// <summary>Pistas de vídeo con contenido activo: la ventana de salida
+    /// oculta las superficies vacías para que no tapen a las de abajo.</summary>
+    void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) { }
+
     /// <summary>Dimensiones del canvas de salida (para la geometría CUSTOM).</summary>
     (double Width, double Height) SurfaceDimensions();
 
