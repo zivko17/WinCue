@@ -139,9 +139,24 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
         }
     }
 
-    /// <summary>Oculto si un ancestro está colapsado.</summary>
+    // ── Filtro de búsqueda (Ctrl+F) ────────────────────────────────────
+    private bool _filterHidden;
+
+    /// <summary>true = la fila no coincide con la búsqueda activa.</summary>
+    public bool FilterHidden
+    {
+        get => _filterHidden;
+        set
+        {
+            if (_filterHidden == value) return;
+            _filterHidden = value;
+            OnChanged(nameof(RowVisibility));
+        }
+    }
+
+    /// <summary>Oculto si un ancestro está colapsado o el filtro lo excluye.</summary>
     public System.Windows.Visibility RowVisibility =>
-        _model.IsAncestorCollapsed(_cue)
+        _filterHidden || _model.IsAncestorCollapsed(_cue)
             ? System.Windows.Visibility.Collapsed
             : System.Windows.Visibility.Visible;
 

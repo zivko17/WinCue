@@ -104,6 +104,13 @@ public partial class MainWindow : Window, IShowView
             if (row >= 0 && CueGrid.SelectedIndex != row)
                 CueGrid.SelectedIndex = row;
         };
+        Timeline.CueActivated += cueId =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row < 0) return;
+            CueGrid.SelectedIndex = row;
+            BottomTabs.SelectedIndex = 1;   // pestaña del inspector
+        };
         Timeline.TriggerRequested = cueId => _controller.TriggerCueId(cueId);
         Timeline.StopRequested = cueId =>
         {
@@ -518,8 +525,24 @@ public partial class MainWindow : Window, IShowView
         BottomTabs.SelectedIndex = 0;   // en SHOW, abajo SIEMPRE el timeline
     }
 
+    private bool _modeReverting;
+
     private void OnEditMode(object sender, RoutedEventArgs e)
     {
+        // Con cues sonando, salir de SHOW merece confirmación (un misclick
+        // en directo reabriría la edición)
+        if (!_modeReverting && _controller is not null &&
+            _controller.RunningCueIds.Count > 0 &&
+            MessageBox.Show(this,
+                "Hay cues EN REPRODUCCIÓN.\n\n¿Salir del modo SHOW y volver a EDIT?",
+                "WinCue — Modo SHOW", MessageBoxButton.YesNo,
+                MessageBoxImage.Warning) != MessageBoxResult.Yes)
+        {
+            _modeReverting = true;
+            ModeToggle.IsChecked = true;   // re-dispara OnShowMode (idempotente)
+            _modeReverting = false;
+            return;
+        }
         ModeToggle.Content = "Modo: EDIT";
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
         ModeToggle.Foreground = Brushes.Black;
@@ -622,14 +645,106 @@ public partial class MainWindow : Window, IShowView
     {
         var dlg = new OpenFileDialog { Filter = "WinCue Show (*.json)|*.json|Todos|*.*" };
         if (dlg.ShowDialog(this) == true)
+        {
             _controller.LoadShow(dlg.FileName);
+            AddRecentShow(dlg.FileName);
+        }
     }
 
     private void OnSaveShow(object sender, RoutedEventArgs e)
     {
         var dlg = new SaveFileDialog { Filter = "WinCue Show (*.json)|*.json" };
         if (dlg.ShowDialog(this) == true)
+        {
             _controller.SaveShow(dlg.FileName);
+            AddRecentShow(dlg.FileName);
+        }
+    }
+
+    // ── Shows recientes (botón ▾ junto a Abrir) ────────────────────────
+
+    private void AddRecentShow(string path)
+    {
+        if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            path += ".json";
+        var recent = _settings.Get("recent_shows", new List<string>());
+        recent.RemoveAll(p => string.Equals(p, path, StringComparison.OrdinalIgnoreCase));
+        recent.Insert(0, path);
+        if (recent.Count > 5)
+            recent.RemoveRange(5, recent.Count - 5);
+        _settings.Set("recent_shows", recent);
+    }
+
+    private void OnRecentShows(object sender, RoutedEventArgs e)
+    {
+        var recent = _settings.Get("recent_shows", new List<string>())
+            .Where(System.IO.File.Exists).ToList();
+        var menu = new ContextMenu();
+        if (recent.Count == 0)
+        {
+            menu.Items.Add(new MenuItem { Header = "(sin shows recientes)", IsEnabled = false });
+        }
+        else
+        {
+            foreach (string path in recent)
+            {
+                string p = path;
+                menu.Items.Add(Mi(System.IO.Path.GetFileName(p), "", () =>
+                {
+                    _controller.LoadShow(p);
+                    AddRecentShow(p);
+                }));
+                ((MenuItem)menu.Items[^1]).ToolTip = p;
+            }
+        }
+        menu.PlacementTarget = (Button)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    // ── Búsqueda / filtro (Ctrl+F) ─────────────────────────────────────
+
+    private void ToggleSearchBox()
+    {
+        bool show = SearchBox.Visibility != Visibility.Visible;
+        SearchBox.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        SearchLabel.Visibility = SearchBox.Visibility;
+        if (show)
+        {
+            SearchBox.Focus();
+            SearchBox.SelectAll();
+        }
+        else
+        {
+            SearchBox.Text = "";
+            CueGrid.Focus();
+        }
+    }
+
+    private void OnSearchChanged(object sender, TextChangedEventArgs e)
+    {
+        string q = SearchBox.Text.Trim();
+        int matches = 0;
+        foreach (var vm in _rows)
+        {
+            bool hit = q.Length == 0
+                || vm.Name.Contains(q, StringComparison.OrdinalIgnoreCase)
+                || vm.Number.Contains(q, StringComparison.OrdinalIgnoreCase);
+            vm.FilterHidden = !hit;
+            if (hit && q.Length > 0)
+                matches++;
+        }
+        if (q.Length > 0)
+            FlashStatus($"🔍 {matches} cue(s) coinciden con «{q}»");
+    }
+
+    private void OnSearchKeyDown(object sender, KeyEventArgs e)
+    {
+        if (e.Key == Key.Escape)
+        {
+            ToggleSearchBox();   // cierra y limpia el filtro
+            e.Handled = true;
+        }
     }
 
     private void OnGridSelectionChanged(object sender, SelectionChangedEventArgs e)
@@ -935,6 +1050,9 @@ public partial class MainWindow : Window, IShowView
                 case Key.P:
                     _controller.OnPauseCueToggle(CueGrid.SelectedIndex);
                     e.Handled = true; return;
+                case Key.F:
+                    ToggleSearchBox();
+                    e.Handled = true; return;
             }
         }
 
@@ -1042,6 +1160,29 @@ public partial class MainWindow : Window, IShowView
     // ==================================================================
     // Cierre
     // ==================================================================
+
+    /// <summary>Cerrar con cues sonando o cambios sin guardar pide confirmación
+    /// (un Alt+F4 accidental en mitad del show sería fatal).</summary>
+    protected override void OnClosing(System.ComponentModel.CancelEventArgs e)
+    {
+        if (_controller is not null && !App.SmokeMode)
+        {
+            string? warning = null;
+            if (_controller.RunningCueIds.Count > 0)
+                warning = "Hay cues EN REPRODUCCIÓN.";
+            else if (_controller.HasUnsavedChanges)
+                warning = "Hay cambios sin guardar (el autoguardado se descarta al cerrar).";
+            if (warning is not null && MessageBox.Show(this,
+                    $"{warning}\n\n¿Cerrar WinCue igualmente?",
+                    "WinCue — Confirmar cierre", MessageBoxButton.YesNo,
+                    MessageBoxImage.Warning) != MessageBoxResult.Yes)
+            {
+                e.Cancel = true;
+                return;
+            }
+        }
+        base.OnClosing(e);
+    }
 
     protected override void OnClosed(EventArgs e)
     {

@@ -1040,8 +1040,13 @@ public class MainController
 
     private long _lastUndoPushTicks;
 
+    /// <summary>true si hubo ediciones desde el último Guardar/Cargar
+    /// (la vista lo usa para confirmar el cierre).</summary>
+    public bool HasUnsavedChanges { get; private set; }
+
     private void PushUndo()
     {
+        HasUnsavedChanges = true;
         _redoStack.Clear();
         // Coalescencia de ráfagas: un slider o un arrastre commitean decenas de
         // veces por segundo — solo la PRIMERA instantánea del gesto va al undo.
@@ -1527,6 +1532,7 @@ public class MainController
         try
         {
             File.WriteAllText(path, _model.ToJson());
+            HasUnsavedChanges = false;
             Log($"Show guardado: {path}");
             _view.FlashStatus($"Show guardado: {Path.GetFileName(path)}");
         }
@@ -1601,6 +1607,7 @@ public class MainController
 
         _view.ReloadTable();
         SetPlayhead(0);
+        HasUnsavedChanges = false;
         Log($"Show cargado: {path}");
         _view.FlashStatus(missing > 0
             ? $"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados"

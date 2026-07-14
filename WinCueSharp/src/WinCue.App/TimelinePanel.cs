@@ -52,6 +52,13 @@ public sealed class TimelinePanel : Border
         remove => _canvas.CueSelected -= value;
     }
 
+    /// <summary>Doble clic en un bloque: abrir ese cue en el inspector.</summary>
+    public event Action<int>? CueActivated
+    {
+        add => _canvas.CueActivated += value;
+        remove => _canvas.CueActivated -= value;
+    }
+
     /// <summary>Menú contextual: disparar un cue por id.</summary>
     public Action<int>? TriggerRequested
     {
@@ -196,6 +203,9 @@ public sealed class TimelineCanvas : FrameworkElement
     public Action<int>? StopRequested;
     public Func<bool>? IsEditAllowed;
     public event Action<int>? CueSelected;
+
+    /// <summary>Doble clic en un bloque: abrir ese cue en el inspector.</summary>
+    public event Action<int>? CueActivated;
 
     private CueModel? _model;
     private int _selectedId = -1;
@@ -882,6 +892,13 @@ public sealed class TimelineCanvas : FrameworkElement
 
         _selectedId = cue.Id;
         CueSelected?.Invoke(cue.Id);
+
+        if (e.ClickCount == 2)
+        {
+            CueActivated?.Invoke(cue.Id);   // doble clic → inspector
+            InvalidateVisual();
+            return;
+        }
 
         // En modo SHOW se selecciona pero no se edita (igual que la tabla)
         if (!(IsEditAllowed?.Invoke() ?? true))

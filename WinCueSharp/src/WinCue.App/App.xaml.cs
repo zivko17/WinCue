@@ -22,6 +22,10 @@ namespace WinCue.App;
 
 public partial class App : Application
 {
+    /// <summary>true en arranque --smoke: sin diálogos modales (colgarían la
+    /// verificación desatendida).</summary>
+    public static bool SmokeMode { get; private set; }
+
     private MainController? _controller;
     private AudioEngine? _audio;
     private VideoEngine? _video;
@@ -88,6 +92,7 @@ public partial class App : Application
         // Recuperación de autoguardado (cierre inesperado en la sesión anterior).
         // En modo --smoke NO se pregunta: un diálogo modal colgaría la verificación.
         bool smokeMode = e.Args.Contains("--smoke");
+        SmokeMode = smokeMode;
         _autosavePath = Path.Combine(AppContext.BaseDirectory, "autosave.json");
         bool recovered = false;
         if (!smokeMode && File.Exists(_autosavePath) && new FileInfo(_autosavePath).Length > 10)

@@ -88,6 +88,8 @@
         <Border DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
             <StackPanel Orientation="Horizontal">
                 <Button Click="OnOpenShow" Content="📂 Abrir"/>
+                <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
+                        ToolTip="Shows recientes"/>
                 <Button Click="OnSaveShow" Content="💾 Guardar"/>
                 <Separator Width="14" Background="Transparent"/>
                 <TextBlock Text="Añadir:" VerticalAlignment="Center" Margin="0,0,4,0"
@@ -104,6 +106,15 @@
                 <Separator Width="14" Background="Transparent"/>
                 <Button Click="OnImportFiles" Content="＋ Importar archivos…"/>
                 <Button x:Name="DeleteButton" Click="OnDeleteCue" Content="🗑 Eliminar"/>
+                <Separator Width="14" Background="Transparent"/>
+                <TextBlock x:Name="SearchLabel" Text="🔍" VerticalAlignment="Center"
+                           Visibility="Collapsed" Margin="0,0,3,0"/>
+                <TextBox x:Name="SearchBox" Width="170" Visibility="Collapsed"
+                         VerticalContentAlignment="Center"
+                         Background="#1a1a1a" Foreground="#ddd" BorderBrush="#555"
+                         TextChanged="OnSearchChanged"
+                         PreviewKeyDown="OnSearchKeyDown"
+                         ToolTip="Filtrar cues por nombre o número (Esc cierra)"/>
             </StackPanel>
         </Border>
 
