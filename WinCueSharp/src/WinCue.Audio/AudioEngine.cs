@@ -46,6 +46,9 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// aplica peak-hold, así que con varios streams muestra el más alto.</summary>
     public event Action<float>? LevelReport;
 
+    /// <summary>Nivel RMS de UN cue concreto (VU por cue del inspector).</summary>
+    public event Action<int, float>? CueLevelReport;
+
     // ------------------------------------------------------------------
     // Estado interno
     // ------------------------------------------------------------------
@@ -397,7 +400,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             playCount: p.PlayCount);
         provider.SetMaster(_master);
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
-        provider.LevelReport += rms => Post(() => LevelReport?.Invoke(rms));
+        provider.LevelReport += rms => Post(() =>
+        {
+            LevelReport?.Invoke(rms);
+            CueLevelReport?.Invoke(cueId, rms);
+        });
 
         var input = AdaptToMixerFormat(provider);
         _active[cueId] = new ActiveCue(provider, input, bus);

@@ -115,6 +115,7 @@ public class MainController
         _audio.ErrorOccurred += OnAudioError;
         _audio.StateChanged += OnAudioStateChanged;
         _audio.LevelReport += OnLevelReport;
+        _audio.CueLevelReport += (cueId, rms) => _view.UpdateCueVuMeter(cueId, rms);
 
         _video.LatencyReport += OnLatencyReport;
         _video.ErrorOccurred += OnVideoError;

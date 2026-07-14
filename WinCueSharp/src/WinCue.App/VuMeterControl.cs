@@ -22,14 +22,28 @@ public sealed class VuMeterControl : FrameworkElement
         }, 0));
     private static readonly Brush PeakBrush = Make(new SolidColorBrush(Colors.White));
 
+    private static readonly Brush BarBrushVertical = Make(new LinearGradientBrush(
+        new GradientStopCollection
+        {
+            new GradientStop(Color.FromRgb(0xc0, 0x39, 0x2b), 0.0),
+            new GradientStop(Color.FromRgb(0xe8, 0xc0, 0x00), 0.20),
+            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 0.38),
+            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 1.0),
+        }, 90));
+
+    private readonly bool _vertical;
     private double _level;          // 0..1
     private double _peak;           // 0..1 con hold
     private long _peakTicks;
     private long _lastUpdateTicks;
     private readonly DispatcherTimer _decay;
 
-    public VuMeterControl()
+    /// <summary>Constructor sin parámetros para XAML (horizontal).</summary>
+    public VuMeterControl() : this(false) { }
+
+    public VuMeterControl(bool vertical)
     {
+        _vertical = vertical;
         _decay = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(50) };
         _decay.Tick += (_, _) => Decay();
         _decay.Start();
@@ -81,6 +95,24 @@ public sealed class VuMeterControl : FrameworkElement
     {
         double w = ActualWidth, h = ActualHeight;
         dc.DrawRectangle(BgBrush, null, new Rect(0, 0, w, h));
+
+        if (_vertical)
+        {
+            // Barra de abajo hacia arriba (verde abajo, rojo arriba)
+            if (_level > 0)
+            {
+                dc.PushClip(new RectangleGeometry(
+                    new Rect(0, h * (1 - _level), w, h * _level)));
+                dc.DrawRectangle(BarBrushVertical, null, new Rect(0, 0, w, h));
+                dc.Pop();
+            }
+            if (_peak > 0.01)
+            {
+                double y = Math.Max(h * (1 - _peak), 0);
+                dc.DrawRectangle(PeakBrush, null, new Rect(0, y, w, 2));
+            }
+            return;
+        }
 
         if (_level > 0)
         {

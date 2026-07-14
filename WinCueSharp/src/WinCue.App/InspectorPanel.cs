@@ -255,84 +255,106 @@ public sealed class InspectorPanel : ContentControl
     private UIElement BuildBasics()
     {
         var (scroll, panel) = Page();
+        var (colL, colR) = TwoColumns(panel);
 
-        Txt(panel, "number", "Número:", c => c.Number);
-        _nameBox = Txt(panel, "name", "Nombre:", c => c.Name);
-        ColorSwatches(panel);
-        var armedRow = ChkRow(panel);
+        Header(colL, "IDENTIDAD");
+        Txt(colL, "number", "Número:", c => c.Number);
+        _nameBox = Txt(colL, "name", "Nombre:", c => c.Name);
+        ColorSwatches(colL);
+        var armedRow = ChkRow(colL);
         Chk(armedRow, "armed", "Armado", c => c.Armed);
         Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
-        Chk(armedRow, "auto_load", "Auto-load", c => c.AutoLoad);
+        TxtMultiline(colL, "notes", "Notas (se muestran al operador en standby):",
+            c => c.Notes);
 
-        Cmb(panel, "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
+        Header(colR, "TEMPORIZACIÓN Y DESTINO");
+        Cmb(colR, "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
             ("None", "Nada (GO manual)"),
             ("AutoContinue", "Auto-continue (tras post-wait)"),
             ("AutoFollow", "Auto-follow (al acabar la acción)"));
+        TimeF(colR, "pre_wait", "Pre-wait:", c => c.PreWait);
+        TimeF(colR, "duration", "Duración:", c => c.Duration);
+        TimeF(colR, "post_wait", "Post-wait:", c => c.PostWait);
 
-        TimeF(panel, "pre_wait", "Pre-wait:", c => c.PreWait);
-        TimeF(panel, "duration", "Duración:", c => c.Duration);
-        TimeF(panel, "post_wait", "Post-wait:", c => c.PostWait);
-
-        FileRow(panel);
+        FileRow(colR);
 
         // Solo cues que apuntan a otro cue
-        var targetRow = Conditional(panel, c => c.TargetsOther());
+        var targetRow = Conditional(colR, c => c.TargetsOther());
         TargetCombo(targetRow);
-        var fadeStopRow = Conditional(panel, c => c.Type == CueType.Fade);
+        var fadeStopRow = Conditional(colR, c => c.Type == CueType.Fade);
         Chk(fadeStopRow, "fade_stop_on_done", "Detener el objetivo al llegar a 0",
             c => c.FadeStopOnDone);
 
         // Solo grupos
-        var groupRow = Conditional(panel, c => c.Type == CueType.Group);
+        var groupRow = Conditional(colR, c => c.Type == CueType.Group);
         CmbInline(groupRow, "group_mode", "Modo de grupo:", c => c.GroupMode.ToString(),
             ("Enter", "ENTER — el playhead entra"),
             ("Timeline", "TIMELINE — todos a la vez"),
             ("GoNext", "GO NEXT — primer hijo"),
             ("Random", "RANDOM — aleatorio round-robin"));
 
-        var stopOthersRow = ChkRow(panel);
-        Chk(stopOthersRow, "stop_others", "Detener los demás al empezar (modo GO per-cue)",
+        var stopOthersRow = ChkRow(colR);
+        Chk(stopOthersRow, "stop_others", "Detener los demás al empezar (GO per-cue)",
             c => c.StopOthers);
 
-        TxtMultiline(panel, "notes", "Notas:", c => c.Notes);
         return scroll;
+    }
+
+    /// <summary>Dos columnas independientes dentro de una página del inspector.</summary>
+    private static (StackPanel Left, StackPanel Right) TwoColumns(StackPanel panel)
+    {
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(32) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        var left = new StackPanel();
+        var right = new StackPanel();
+        Grid.SetColumn(left, 0);
+        Grid.SetColumn(right, 2);
+        grid.Children.Add(left);
+        grid.Children.Add(right);
+        panel.Children.Add(grid);
+        return (left, right);
     }
 
     private UIElement BuildTriggers()
     {
         var (scroll, panel) = Page();
+        var (colL, colR) = TwoColumns(panel);
 
-        Txt(panel, "hotkey", "Hotkey (tecla):", c => c.Hotkey);
-        Cmb(panel, "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
+        Header(colL, "DISPARO LOCAL");
+        Txt(colL, "hotkey", "Hotkey (tecla):", c => c.Hotkey);
+        Cmb(colL, "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
             ("None", "Ignorar"),
             ("Panic", "Panic (fade y parar)"),
             ("Stop", "Parar"),
             ("HardStop", "Parada dura"),
             ("HardRestart", "Reiniciar"));
-        Header(panel, "FUNDIR Y PARAR OTROS");
-        var foRow = ChkRow(panel);
+
+        Header(colL, "FUNDIR Y PARAR OTROS");
+        var foRow = ChkRow(colL);
         Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
-        Num(panel, "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
-        Cmb(panel, "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
+        Num(colL, "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
+        Cmb(colL, "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
             ("Peers", "PEERS — mismo nivel/grupo"),
             ("List", "LIST — toda la lista"),
             ("All", "ALL — todo"));
 
-        Header(panel, "WALL-CLOCK (disparo por hora del día)");
-        var wcRow = ChkRow(panel);
+        Header(colR, "WALL-CLOCK (disparo por hora del día)");
+        var wcRow = ChkRow(colR);
         Chk(wcRow, "wallclock_enabled", "Disparar a una hora del día", c => c.WallclockEnabled);
-        Txt(panel, "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
-        Note(panel, "Se dispara cada día a esa hora mientras el show esté abierto.");
+        Txt(colR, "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
+        Note(colR, "Se dispara cada día a esa hora mientras el show esté abierto.");
 
-        Header(panel, "MIDI (backend en fase 6)");
-        var midiRow = ChkRow(panel);
+        Header(colR, "MIDI (backend en fase 6)");
+        var midiRow = ChkRow(colR);
         Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
-        Cmb(panel, "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
+        Cmb(colR, "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
             ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
             ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
-        Int(panel, "midi_channel", "Canal:", c => c.MidiChannel);
-        Int(panel, "midi_note", "Nota / CC:", c => c.MidiNote);
-        Int(panel, "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
+        Int(colR, "midi_channel", "Canal:", c => c.MidiChannel);
+        Int(colR, "midi_note", "Nota / CC:", c => c.MidiNote);
+        Int(colR, "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
 
         return scroll;
     }
@@ -596,38 +618,88 @@ public sealed class InspectorPanel : ContentControl
         };
     }
 
+    // VU vertical del cue seleccionado (recibe niveles reales del mixer)
+    private readonly VuMeterControl _levelVu = new(vertical: true)
+    {
+        Width = 16,
+        Height = 170,
+    };
+
+    /// <summary>Nivel RMS de un cue (solo se pinta si es el seleccionado).</summary>
+    public void UpdateCueLevel(int cueId, float rms)
+    {
+        if (_cue?.Id == cueId)
+            _levelVu.SetLevel(rms);
+    }
+
     private UIElement BuildLevels()
     {
         var (scroll, panel) = Page();
 
-        var row = LabeledRow(panel, "Volumen:");
+        // ── Bloque estilo mesa: fader vertical + VU vertical + lectura ──
+        var mixer = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        panel.Children.Add(mixer);
+
+        var faderCol = new StackPanel { Margin = new Thickness(4, 0, 0, 0) };
+        faderCol.Children.Add(new TextBlock
+        {
+            Text = "VOL",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
         var slider = new Slider
         {
-            Minimum = 0, Maximum = 100, Width = 260,
-            VerticalAlignment = VerticalAlignment.Center,
-            IsSnapToTickEnabled = false,
+            Orientation = Orientation.Vertical,
+            Minimum = 0, Maximum = 100, Height = 170,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 0),
         };
+        faderCol.Children.Add(slider);
+        mixer.Children.Add(faderCol);
+
+        var vuCol = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
+        vuCol.Children.Add(new TextBlock
+        {
+            Text = "VU",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        _levelVu.Margin = new Thickness(0, 4, 0, 0);
+        vuCol.Children.Add(_levelVu);
+        mixer.Children.Add(vuCol);
+
+        // Columna de información y ajustes a la derecha del fader
+        var infoCol = new StackPanel { Margin = new Thickness(26, 4, 0, 0) };
+        mixer.Children.Add(infoCol);
+
         var label = new TextBlock
         {
-            Width = 110, Margin = new Thickness(10, 0, 0, 0),
-            VerticalAlignment = VerticalAlignment.Center,
             FontFamily = new FontFamily("Consolas"),
+            FontSize = 20,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)),
         };
+        infoCol.Children.Add(label);
+        Note(infoCol, "Se aplica EN VIVO si el cue está sonando.\n" +
+                      "El VU muestra el nivel real de ESTE cue.");
+
         slider.ValueChanged += (_, e) =>
         {
             double v = e.NewValue / 100.0;
             label.Text = VolumeLabel(v);
             Commit("volume", v);   // en vivo: el controlador lo aplica al motor
         };
-        row.Children.Add(slider);
-        row.Children.Add(label);
         _loaders["volume"] = c =>
         {
             slider.Value = c.Volume * 100.0;
             label.Text = VolumeLabel(c.Volume);
         };
-        Note(panel, "El volumen se aplica EN VIVO si el cue está sonando. " +
-                    "El VU master está en la barra superior.");
+        // La salida por cue y la audición van en la columna de información
+        panel = infoCol;
 
         // ── Salida de audio por cue ─────────────────────────────────────
         Header(panel, "SALIDA DE AUDIO DE ESTE CUE");

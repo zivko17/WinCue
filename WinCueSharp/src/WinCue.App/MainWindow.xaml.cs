@@ -301,6 +301,9 @@ public partial class MainWindow : Window, IShowView
 
     public void UpdateVuMeter(float rms) => VuBar.SetLevel(rms);
 
+    public void UpdateCueVuMeter(int cueId, float rms) =>
+        Inspector.UpdateCueLevel(cueId, rms);
+
     public nint GetVideoOutputHandle()
     {
         bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;

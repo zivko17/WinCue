@@ -54,6 +54,8 @@ public interface IAudioEngine
     event Action<int, double>? LatencyReport;
     event Action<int, string>? ErrorOccurred;
     event Action<float>? LevelReport;
+    /// <summary>Nivel RMS de UN cue concreto (para el VU del inspector).</summary>
+    event Action<int, float>? CueLevelReport;
 
     void Play(int cueId, string filePath, AudioPlayParams? p = null);
     void Preload(int cueId, string filePath);

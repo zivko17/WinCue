@@ -43,6 +43,9 @@ public interface IShowView
     void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows);
     void UpdateVuMeter(float rms);
 
+    /// <summary>Nivel RMS de un cue concreto (VU por cue del inspector).</summary>
+    void UpdateCueVuMeter(int cueId, float rms);
+
     // ── Salida de vídeo ────────────────────────────────────────────────
     /// <summary>HWND del destino de vídeo actual (ventana de salida o testigo).
     /// 0 si aún no existe.</summary>
