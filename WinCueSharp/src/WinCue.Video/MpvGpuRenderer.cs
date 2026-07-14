@@ -90,7 +90,7 @@ public sealed class MpvGpuRenderer : IDisposable
             _gl = new GlContext();
             (_d3dDevice, _d3dSurface, nint shared) =
                 D3D9Minimal.CreateSharedSurface(0, _width, _height);
-            _gl.AttachD3DSurface(_d3dDevice, _d3dSurface, shared);
+            _gl.AttachD3DSurface(_d3dDevice, _d3dSurface, shared, _width, _height);
             CreateMpvContext();
             _ready.Set();
         }
@@ -102,12 +102,15 @@ public sealed class MpvGpuRenderer : IDisposable
             return;
         }
 
-        // Bucle: mpv avisa por el update callback; render bajo lock de interop
-        var fbo = new MpvOpenGlFbo { Fbo = (int)_gl.Fbo, W = _width, H = _height };
+        // Bucle: mpv avisa por el update callback → renderiza en el FBO
+        // PRIVADO y se presenta el frame completo con un blit a la superficie
+        // compartida (así el DWM nunca captura un frame a medias → sin cortes
+        // a negro). flip_y=0: la orientación la fija el propio pipeline D3D.
+        var fbo = new MpvOpenGlFbo { Fbo = (int)_gl.PrivateFbo, W = _width, H = _height };
         nint fboMem = Marshal.AllocHGlobal(Marshal.SizeOf<MpvOpenGlFbo>());
         nint flipMem = Marshal.AllocHGlobal(sizeof(int));
         Marshal.StructureToPtr(fbo, fboMem, false);
-        Marshal.WriteInt32(flipMem, 1);   // GL dibuja de abajo arriba; D3D al revés
+        Marshal.WriteInt32(flipMem, 0);
         nint renderParams = BuildParams(
             (ParamOpenGlFbo, fboMem),
             (ParamFlipY, flipMem));
@@ -123,10 +126,8 @@ public sealed class MpvGpuRenderer : IDisposable
                 if ((flags & UpdateFrame) == 0)
                     continue;
 
-                _gl.Lock();
                 _ = mpv_render_context_render(_renderCtx, renderParams);
-                GlContext.glFlush();
-                _gl.Unlock();
+                _gl.PresentFrame();
                 try { FrameRendered?.Invoke(); } catch (Exception) { }
             }
         }

@@ -201,13 +201,21 @@ internal sealed class GlContext : IDisposable
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void GenFn(int n, out uint name);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void DeleteFn(int n, ref uint name);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void BindFramebufferFn(uint target, uint fbo);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void BindRenderbufferFn(uint target, uint rb);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void RenderbufferStorageFn(uint target, uint internalFormat, int w, int h);
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void BlitFramebufferFn(int sx0, int sy0, int sx1, int sy1, int dx0, int dy0, int dx1, int dy1, uint mask, uint filter);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate void FramebufferRenderbufferFn(uint target, uint attachment, uint rbTarget, uint rb);
     [UnmanagedFunctionPointer(CallingConvention.StdCall)] private delegate uint CheckFramebufferStatusFn(uint target);
 
     private const uint GL_FRAMEBUFFER = 0x8D40;
+    private const uint GL_READ_FRAMEBUFFER = 0x8CA8;
+    private const uint GL_DRAW_FRAMEBUFFER = 0x8CA9;
     private const uint GL_RENDERBUFFER = 0x8D41;
     private const uint GL_COLOR_ATTACHMENT0 = 0x8CE0;
     private const uint GL_FRAMEBUFFER_COMPLETE = 0x8CD5;
+    private const uint GL_RGBA8 = 0x8058;
+    private const uint GL_COLOR_BUFFER_BIT = 0x4000;
+    private const uint GL_NEAREST = 0x2600;
     private const uint WGL_ACCESS_READ_WRITE_NV = 0x0001;
 
     private DXOpenDeviceFn _dxOpen = null!;
@@ -220,6 +228,9 @@ internal sealed class GlContext : IDisposable
     private GenFn _genFramebuffers = null!, _genRenderbuffers = null!;
     private DeleteFn _delFramebuffers = null!, _delRenderbuffers = null!;
     private BindFramebufferFn _bindFramebuffer = null!;
+    private BindRenderbufferFn _bindRenderbuffer = null!;
+    private RenderbufferStorageFn _renderbufferStorage = null!;
+    private BlitFramebufferFn _blitFramebuffer = null!;
     private FramebufferRenderbufferFn _fbRenderbuffer = null!;
     private CheckFramebufferStatusFn _checkStatus = null!;
 
@@ -229,8 +240,16 @@ internal sealed class GlContext : IDisposable
     private nint _interopDevice;
     private nint _interopObject;
     private uint _renderbuffer;
+    private uint _privateRb;
+    private int _surfW, _surfH;
 
+    /// <summary>FBO ligado a la superficie D3D compartida (destino del blit).</summary>
     public uint Fbo { get; private set; }
+
+    /// <summary>FBO PRIVADO donde renderiza mpv: la superficie compartida solo
+    /// recibe frames COMPLETOS vía blit (sin él, el DWM podía capturar el
+    /// lienzo recién limpiado por mpv → cortes a negro).</summary>
+    public uint PrivateFbo { get; private set; }
 
     /// <summary>Crea ventana oculta + contexto GL y lo deja CURRENT en el
     /// hilo llamante. Lanza si el driver no da OpenGL.</summary>
@@ -270,6 +289,12 @@ internal sealed class GlContext : IDisposable
         _delFramebuffers = Ext<DeleteFn>("glDeleteFramebuffersEXT", "glDeleteFramebuffers");
         _delRenderbuffers = Ext<DeleteFn>("glDeleteRenderbuffersEXT", "glDeleteRenderbuffers");
         _bindFramebuffer = Ext<BindFramebufferFn>("glBindFramebufferEXT", "glBindFramebuffer");
+        _bindRenderbuffer = Ext<BindRenderbufferFn>(
+            "glBindRenderbufferEXT", "glBindRenderbuffer");
+        _renderbufferStorage = Ext<RenderbufferStorageFn>(
+            "glRenderbufferStorageEXT", "glRenderbufferStorage");
+        _blitFramebuffer = Ext<BlitFramebufferFn>(
+            "glBlitFramebuffer", "glBlitFramebufferEXT");
         _fbRenderbuffer = Ext<FramebufferRenderbufferFn>(
             "glFramebufferRenderbufferEXT", "glFramebufferRenderbuffer");
         _checkStatus = Ext<CheckFramebufferStatusFn>(
@@ -299,8 +324,11 @@ internal sealed class GlContext : IDisposable
 
     /// <summary>Registra la superficie D3D9 compartida como renderbuffer del
     /// FBO. Debe llamarse con el contexto current (mismo hilo del ctor).</summary>
-    public void AttachD3DSurface(nint d3dDevice, nint d3dSurface, nint sharedHandle)
+    public void AttachD3DSurface(nint d3dDevice, nint d3dSurface, nint sharedHandle,
+        int width, int height)
     {
+        _surfW = width;
+        _surfH = height;
         _interopDevice = _dxOpen(d3dDevice);
         if (_interopDevice == 0)
             throw new NotSupportedException(
@@ -325,6 +353,34 @@ internal sealed class GlContext : IDisposable
         _bindFramebuffer(GL_FRAMEBUFFER, 0);
         if (status != GL_FRAMEBUFFER_COMPLETE)
             throw new NotSupportedException($"FBO incompleto (0x{status:X}).");
+
+        // FBO privado (renderbuffer RGBA8 normal) donde renderiza mpv
+        _genRenderbuffers(1, out _privateRb);
+        _bindRenderbuffer(GL_RENDERBUFFER, _privateRb);
+        _renderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+        _genFramebuffers(1, out uint priv);
+        PrivateFbo = priv;
+        _bindFramebuffer(GL_FRAMEBUFFER, priv);
+        _fbRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _privateRb);
+        uint privStatus = _checkStatus(GL_FRAMEBUFFER);
+        _bindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (privStatus != GL_FRAMEBUFFER_COMPLETE)
+            throw new NotSupportedException($"FBO privado incompleto (0x{privStatus:X}).");
+    }
+
+    /// <summary>Copia el frame completo del FBO privado a la superficie D3D
+    /// (bajo el lock del interop). El DWM nunca ve un frame a medias.</summary>
+    public void PresentFrame()
+    {
+        Lock();
+        _bindFramebuffer(GL_READ_FRAMEBUFFER, PrivateFbo);
+        _bindFramebuffer(GL_DRAW_FRAMEBUFFER, Fbo);
+        _blitFramebuffer(0, 0, _surfW, _surfH, 0, 0, _surfW, _surfH,
+            GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        _bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
+        _bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
+        glFlush();
+        Unlock();
     }
 
     /// <summary>Toma posesión GL de la superficie (antes de renderizar).</summary>
@@ -342,10 +398,17 @@ internal sealed class GlContext : IDisposable
             _dxUnregister(_interopDevice, _interopObject);
         if (_renderbuffer != 0)
             _delRenderbuffers(1, ref _renderbuffer);
+        if (_privateRb != 0)
+            _delRenderbuffers(1, ref _privateRb);
         if (Fbo != 0)
         {
             uint fbo = Fbo;
             _delFramebuffers(1, ref fbo);
+        }
+        if (PrivateFbo != 0)
+        {
+            uint priv = PrivateFbo;
+            _delFramebuffers(1, ref priv);
         }
         if (_interopDevice != 0)
             _dxClose(_interopDevice);

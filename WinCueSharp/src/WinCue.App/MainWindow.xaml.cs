@@ -432,8 +432,8 @@ public partial class MainWindow : Window, IShowView
     public void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) =>
         _videoOutput?.SetActiveLayers(activeLayers);
 
-    public void SetVideoLayerOpacity(int layer, double opacity) =>
-        _videoOutput?.SetLayerOpacity(layer, opacity);
+    public void SetVideoLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0) =>
+        _videoOutput?.SetLayerOpacity(layer, opacity, fadeSeconds);
 
     /// <summary>Superficie del compositor GPU (la usa App para el provider).</summary>
     public CompositorLayerControl GetCompositorSurface(int layer)

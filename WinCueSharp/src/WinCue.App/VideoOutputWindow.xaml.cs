@@ -101,11 +101,28 @@ public partial class VideoOutputWindow : Window
         return _gpuLayers[Math.Clamp(layer, 0, _gpuLayers.Length - 1)];
     }
 
-    /// <summary>Opacidad (0..1) de una pista del compositor.</summary>
-    public void SetLayerOpacity(int layer, double opacity)
+    /// <summary>Opacidad (0..1) de una pista del compositor. fadeSeconds &gt; 0
+    /// = transición animada (fundidos de entrada/salida y crossfades).</summary>
+    public void SetLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0)
     {
-        if (layer >= 0 && layer < _gpuLayers.Length)
-            _gpuLayers[layer].Opacity = Math.Clamp(opacity, 0.0, 1.0);
+        if (layer < 0 || layer >= _gpuLayers.Length)
+            return;
+        var target = _gpuLayers[layer];
+        double value = Math.Clamp(opacity, 0.0, 1.0);
+        if (fadeSeconds > 0.0)
+        {
+            target.BeginAnimation(OpacityProperty,
+                new System.Windows.Media.Animation.DoubleAnimation(
+                    value, TimeSpan.FromSeconds(fadeSeconds))
+                {
+                    FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd,
+                });
+        }
+        else
+        {
+            target.BeginAnimation(OpacityProperty, null);   // cortar fade previo
+            target.Opacity = value;
+        }
     }
 
     /// <summary>HWND de la superficie de la pista dada (la hace visible).</summary>

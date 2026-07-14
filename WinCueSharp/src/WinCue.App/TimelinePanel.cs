@@ -295,7 +295,13 @@ public sealed class TimelineCanvas : FrameworkElement
         bool wasEmpty = _activeElapsed.Count == 0;
         _activeElapsed.Clear();
         foreach (var r in rows)
+        {
+            // En pre_wait la ACCIÓN no ha empezado: su bloque no debe mostrar
+            // progreso ni empujar el cursor (Elapsed cuenta desde el disparo)
+            if (r.PreWaitRemaining is not null)
+                continue;
             _activeElapsed[r.Id] = r.Elapsed;
+        }
         if (!(wasEmpty && rows.Count == 0))
             InvalidateVisual();
     }

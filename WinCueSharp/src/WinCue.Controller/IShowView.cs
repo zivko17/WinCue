@@ -63,8 +63,9 @@ public interface IShowView
     /// oculta las superficies vacías para que no tapen a las de abajo.</summary>
     void SetActiveVideoLayers(IReadOnlyCollection<int> activeLayers) { }
 
-    /// <summary>Opacidad (0..1) de una pista de vídeo (solo compositor GPU).</summary>
-    void SetVideoLayerOpacity(int layer, double opacity) { }
+    /// <summary>Opacidad (0..1) de una pista de vídeo (solo compositor GPU).
+    /// fadeSeconds &gt; 0 → transición animada (fundidos/crossfade de vídeo).</summary>
+    void SetVideoLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0) { }
 
     /// <summary>Dimensiones del canvas de salida (para la geometría CUSTOM).</summary>
     (double Width, double Height) SurfaceDimensions();

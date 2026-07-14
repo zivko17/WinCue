@@ -664,6 +664,19 @@ public class MainController
                     Geometry: GeoFor(cue),
                     Layer: VideoLayerOf(cue)));
                 RefreshVideoTally();
+                // Opacidad de la pista: con fade_in entra fundiendo desde 0
+                // (dos vídeos solapados con fades = crossfade real)
+                int vLayer = VideoLayerOf(cue);
+                double targetOpacity = cue.Opacity / 100.0;
+                if (cue.FadeIn > 0.0)
+                {
+                    _view.SetVideoLayerOpacity(vLayer, 0.0);
+                    _view.SetVideoLayerOpacity(vLayer, targetOpacity, cue.FadeIn);
+                }
+                else
+                {
+                    _view.SetVideoLayerOpacity(vLayer, targetOpacity);
+                }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
                     Schedule(run, (int)(run.Duration * 1000), () => DurationElapsed(cue.Id));
@@ -913,9 +926,16 @@ public class MainController
             // Llamar Stop aunque el vídeo haya hecho end-file: termina el player
             // y limpia a negro para que su último frame no quede pegado.
             if (fade > 0.0 && _video.IsPlaying(cueId))
+            {
                 _video.FadeVolume(cueId, 0.0, fade, stopAfter: true);
+                // Fundido VISUAL a la par que el de audio (compositor)
+                if (_model.GetById(cueId) is Cue vc)
+                    _view.SetVideoLayerOpacity(VideoLayerOf(vc), 0.0, fade);
+            }
             else
+            {
                 _video.Stop(cueId);
+            }
         }
 
         if (markStopped)
@@ -1175,16 +1195,14 @@ public class MainController
 
     private void RefreshVideoTally()
     {
-        // Pistas activas → la ventana de salida oculta las superficies vacías
+        // Pistas activas → la ventana de salida oculta las superficies vacías.
+        // (La opacidad NO se toca aquí: la fijan los fades de StartAction y
+        // EndCue; pisarla en cada tally cortaría los crossfades en curso.)
         var activeLayers = new List<int>();
         foreach (var (cid, r) in _running)
             if (r.Kind == CueType.Video && _video.IsPlaying(cid)
                 && _model.GetById(cid) is Cue c)
-            {
-                int layer = VideoLayerOf(c);
-                activeLayers.Add(layer);
-                _view.SetVideoLayerOpacity(layer, c.Opacity / 100.0);
-            }
+                activeLayers.Add(VideoLayerOf(c));
         _view.SetActiveVideoLayers(activeLayers);
         _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
     }
