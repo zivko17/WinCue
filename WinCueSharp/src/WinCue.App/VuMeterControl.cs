@@ -11,7 +11,9 @@ namespace WinCue.App;
 
 public sealed class VuMeterControl : FrameworkElement
 {
-    private static readonly Brush BgBrush = Make(new SolidColorBrush(Color.FromRgb(0x10, 0x10, 0x10)));
+    private static readonly Brush BgBrush = Make(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)));
+    private static readonly Pen FramePen = MakePen(Color.FromRgb(0x4a, 0x4a, 0x4a), 1);
+    private static readonly Pen TickPen = MakePen(Color.FromArgb(90, 0x77, 0x77, 0x77), 1);
     private static readonly Brush BarBrush = Make(new LinearGradientBrush(
         new GradientStopCollection
         {
@@ -94,10 +96,15 @@ public sealed class VuMeterControl : FrameworkElement
     protected override void OnRender(DrawingContext dc)
     {
         double w = ActualWidth, h = ActualHeight;
-        dc.DrawRectangle(BgBrush, null, new Rect(0, 0, w, h));
+        // Fondo + marco: el medidor se ve SIEMPRE, también en silencio
+        dc.DrawRectangle(BgBrush, FramePen, new Rect(0.5, 0.5, w - 1, h - 1));
 
         if (_vertical)
         {
+            // Marcas de escala (25/50/75 %)
+            foreach (double f in new[] { 0.25, 0.5, 0.75 })
+                dc.DrawLine(TickPen, new Point(1, h * f), new Point(w - 1, h * f));
+
             // Barra de abajo hacia arriba (verde abajo, rojo arriba)
             if (_level > 0)
             {
@@ -128,4 +135,11 @@ public sealed class VuMeterControl : FrameworkElement
     }
 
     private static Brush Make(Brush b) { b.Freeze(); return b; }
+
+    private static Pen MakePen(Color c, double w)
+    {
+        var p = new Pen(new SolidColorBrush(c), w);
+        p.Freeze();
+        return p;
+    }
 }

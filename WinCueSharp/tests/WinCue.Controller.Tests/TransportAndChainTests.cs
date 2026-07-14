@@ -434,6 +434,17 @@ public class TransportAndChainTests : ControllerTestBase
     }
 
     [Fact]
+    public void LevelReports_ReachTheView()
+    {
+        // Cableado motor → controlador → vista (VU de PGM y VU por cue)
+        Audio.RaiseLevel(0.8f, 0.3f);
+        Assert.Equal(0.8f, View.LastVu);          // máx(L,R)
+
+        Audio.RaiseCueLevel(42, 0.5f, 0.7f);
+        Assert.Equal(0.7f, View.CueVuLevels[42]);
+    }
+
+    [Fact]
     public void LatencyReport_StoredInModel()
     {
         var a = AddCue(CueType.Audio);
