@@ -1130,8 +1130,50 @@ public sealed class TimelineCanvas : FrameworkElement
                         CommitField?.Invoke(cue.Id, "duration", duration);
                     break;
             }
+
+            // Solape entre media = CROSSFADE automático (curvas fade_out/
+            // fade_in escritas solas, sin pasar por el inspector)
+            if (!isGroup)
+                AutoCrossfadeAround(cue);
         }
         RefreshFromModel();
+    }
+
+    /// <summary>Tras un arrastre, si el cue queda SOLAPADO con su hermano
+    /// anterior/siguiente (ambos media), la duración del solape se convierte
+    /// en el crossfade: fade_out del que sale = fade_in del que entra.</summary>
+    private void AutoCrossfadeAround(Cue cue)
+    {
+        if (_model is null || !cue.IsMedia())
+            return;
+        RebuildLayout();   // proyección con los commits del arrastre aplicados
+        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
+        int pos = siblings.FindIndex(c => c.Id == cue.Id);
+        if (pos < 0)
+            return;
+        if (pos > 0)
+            ApplyCrossfade(siblings[pos - 1], cue);
+        if (pos < siblings.Count - 1)
+            ApplyCrossfade(cue, siblings[pos + 1]);
+    }
+
+    private void ApplyCrossfade(Cue outgoing, Cue incoming)
+    {
+        if (!outgoing.IsMedia() || !incoming.IsMedia())
+            return;
+        if (!_startById.TryGetValue(outgoing.Id, out double aStart)
+            || !_startById.TryGetValue(incoming.Id, out double bStart))
+            return;
+        double aDur = EffectiveDuration(outgoing);
+        double overlap = aStart + aDur - bStart;
+        if (overlap < 0.05 || aDur <= 0)
+            return;   // sin solape: no tocar los fades del usuario
+        overlap = Math.Round(Math.Min(overlap,
+            Math.Min(aDur, Math.Max(0.1, EffectiveDuration(incoming)))), 1);
+        if (Math.Abs(outgoing.FadeOut - overlap) > 0.01)
+            CommitField?.Invoke(outgoing.Id, "fade_out", overlap);
+        if (Math.Abs(incoming.FadeIn - overlap) > 0.01)
+            CommitField?.Invoke(incoming.Id, "fade_in", overlap);
     }
 
     /// <summary>El bloque se soltó ANTES de su punto de disparo (montado sobre
