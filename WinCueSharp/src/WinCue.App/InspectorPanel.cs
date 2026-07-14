@@ -25,6 +25,11 @@ public sealed class InspectorPanel : ContentControl
     /// <summary>Commit de un campo: (cueId, clave snake_case, valor).</summary>
     public Action<int, string, object?>? CommitField;
 
+    /// <summary>RTA de la pestaña EQ: espectro del cue dado (null = no suena).</summary>
+    public Func<int, float[]?>? SpectrumProvider;
+
+    private readonly EqEditorControl _eqEditor = new();
+
     private readonly TabControl _tabs = new()
     {
         Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26)),
@@ -103,6 +108,10 @@ public sealed class InspectorPanel : ContentControl
         _tabs.Items.Add(Tab("Time & Loops", BuildTimeLoops()));
         _tabs.Items.Add(Tab("Geometry", BuildGeometry()));
         _tabs.Items.Add(Tab("Levels", BuildLevels()));
+        _eqEditor.Commit = (key, value) => Commit(key, value);
+        _eqEditor.SpectrumProvider = () =>
+            _cue is null ? null : SpectrumProvider?.Invoke(_cue.Id);
+        _tabs.Items.Add(Tab("EQ", _eqEditor));
 
         IsEnabled = false;   // sin cue seleccionado
     }
@@ -129,6 +138,7 @@ public sealed class InspectorPanel : ContentControl
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
             UpdateWave(cue);
             UpdateEditPreview(cue);
+            _eqEditor.SetCue(cue);
         }
         finally
         {

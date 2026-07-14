@@ -176,6 +176,9 @@ public class MainController
     /// <summary>Id reservado para la audición local (nunca colisiona con cues).</summary>
     public const int AuditionCueId = -9999;
 
+    /// <summary>Cue que suena por la audición local (para EQ/RTA en vivo).</summary>
+    private int _auditionSourceCueId = -1;
+
     /// <summary>Audición local: reproduce el cue de la fila por el dispositivo
     /// de audición (cascos) SIN pasar por el flujo del show. Toggle.</summary>
     public void AuditionToggle(int row)
@@ -183,6 +186,7 @@ public class MainController
         if (_audio.IsPlaying(AuditionCueId))
         {
             _audio.Stop(AuditionCueId);
+            _auditionSourceCueId = -1;
             _view.FlashStatus("🎧 Audición detenida");
             return;
         }
@@ -192,10 +196,36 @@ public class MainController
             _view.FlashStatus("Audición: selecciona un cue de AUDIO con archivo");
             return;
         }
+        _auditionSourceCueId = cue.Id;
         _audio.Play(AuditionCueId, cue.FilePath, new AudioPlayParams(
             Volume: cue.Volume, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
-            OutputDevice: _settings.Get("audition_device_name", "")));
+            OutputDevice: _settings.Get("audition_device_name", ""),
+            Eq: EqFor(cue)));
         _view.FlashStatus($"🎧 Audición: {cue.Name}");
+    }
+
+    /// <summary>Cadena de EQ del cue para el motor (ganancia + filtros).</summary>
+    private static AudioEqParams EqFor(Cue c) => new(
+        GainDb: c.GainDb,
+        EqEnabled: c.EqEnabled,
+        HpfOn: c.HpfOn, HpfFreq: c.HpfFreq,
+        LpfOn: c.LpfOn, LpfFreq: c.LpfFreq,
+        Bands: new[]
+        {
+            new EqBand(c.Eq1Freq, c.Eq1Gain, c.Eq1Q),
+            new EqBand(c.Eq2Freq, c.Eq2Gain, c.Eq2Q),
+            new EqBand(c.Eq3Freq, c.Eq3Gain, c.Eq3Q),
+            new EqBand(c.Eq4Freq, c.Eq4Gain, c.Eq4Q),
+        });
+
+    /// <summary>Espectro para el RTA del inspector: del cue sonando, o de su
+    /// audición local si es lo que está sonando.</summary>
+    public float[]? GetAudioSpectrum(int cueId)
+    {
+        var s = _audio.GetSpectrum(cueId);
+        if (s is null && cueId == _auditionSourceCueId)
+            s = _audio.GetSpectrum(AuditionCueId);
+        return s;
     }
 
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
@@ -615,7 +645,8 @@ public class MainController
                 _audio.Play(cue.Id, cue.FilePath, new AudioPlayParams(
                     Volume: cue.Volume, FadeIn: cue.FadeIn, FadeOut: cue.FadeOut,
                     Loop: cue.Loop, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
-                    PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput));
+                    PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
+                    Eq: EqFor(cue)));
                 run.Duration = cue.Duration;
                 if (cue.Duration > 0.0 && !cue.Loop)
                     Schedule(run, (int)(cue.Duration * 1000), () => DurationElapsed(cue.Id));
@@ -1598,6 +1629,15 @@ public class MainController
 
     private void ApplyLiveEdits(Cue cue, IReadOnlyDictionary<string, object?> fields)
     {
+        // La EQ se refleja también en la AUDICIÓN (no vive en _running)
+        if (fields.Keys.Any(IsEqKey))
+        {
+            if (_audio.IsPlaying(cue.Id))
+                _audio.SetEq(cue.Id, EqFor(cue));
+            if (cue.Id == _auditionSourceCueId && _audio.IsPlaying(AuditionCueId))
+                _audio.SetEq(AuditionCueId, EqFor(cue));
+        }
+
         if (!_running.ContainsKey(cue.Id))
             return;
         if (fields.ContainsKey("volume"))
@@ -1613,6 +1653,11 @@ public class MainController
             _video.ApplyGeometry(cue.Id, GeoFor(cue));
         }
     }
+
+    private static bool IsEqKey(string key) =>
+        key is "gain_db" or "eq_enabled" or "hpf_on" or "hpf_freq"
+            or "lpf_on" or "lpf_freq"
+        || key.StartsWith("eq", StringComparison.Ordinal);
 
     // ------------------------------------------------------------------
     // Guardar / cargar show en JSON (la vista pone los diálogos)

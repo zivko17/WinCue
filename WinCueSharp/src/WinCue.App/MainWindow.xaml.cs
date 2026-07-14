@@ -87,6 +87,7 @@ public partial class MainWindow : Window, IShowView
         };
         Inspector.AuditionRequested += () =>
             _controller.AuditionToggle(CueGrid.SelectedIndex);
+        Inspector.SpectrumProvider = cueId => _controller.GetAudioSpectrum(cueId);
 
         // Timeline del show, estilo Watchout (siempre presente, plegable)
         Timeline.SetModel(_model);

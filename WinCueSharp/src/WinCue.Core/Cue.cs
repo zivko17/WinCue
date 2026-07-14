@@ -43,6 +43,27 @@ public class Cue
     /// Campo nuevo de la versión C# — la versión Python lo ignora al cargar.</summary>
     [JsonPropertyName("audio_output")] public string AudioOutput { get; set; } = "";
 
+    // ── Procesado de audio por clip (EQ paramétrica) — campos C#-only ──
+    /// <summary>Ganancia del clip en dB (trim pre-EQ, aparte del fader volume).</summary>
+    [JsonPropertyName("gain_db")]    public double GainDb    { get; set; }
+    [JsonPropertyName("eq_enabled")] public bool   EqEnabled { get; set; }
+    [JsonPropertyName("hpf_on")]     public bool   HpfOn     { get; set; }
+    [JsonPropertyName("hpf_freq")]   public double HpfFreq   { get; set; } = 80.0;
+    [JsonPropertyName("lpf_on")]     public bool   LpfOn     { get; set; }
+    [JsonPropertyName("lpf_freq")]   public double LpfFreq   { get; set; } = 12000.0;
+    [JsonPropertyName("eq1_freq")]   public double Eq1Freq   { get; set; } = 100.0;
+    [JsonPropertyName("eq1_gain")]   public double Eq1Gain   { get; set; }
+    [JsonPropertyName("eq1_q")]      public double Eq1Q      { get; set; } = 1.0;
+    [JsonPropertyName("eq2_freq")]   public double Eq2Freq   { get; set; } = 500.0;
+    [JsonPropertyName("eq2_gain")]   public double Eq2Gain   { get; set; }
+    [JsonPropertyName("eq2_q")]      public double Eq2Q      { get; set; } = 1.0;
+    [JsonPropertyName("eq3_freq")]   public double Eq3Freq   { get; set; } = 2000.0;
+    [JsonPropertyName("eq3_gain")]   public double Eq3Gain   { get; set; }
+    [JsonPropertyName("eq3_q")]      public double Eq3Q      { get; set; } = 1.0;
+    [JsonPropertyName("eq4_freq")]   public double Eq4Freq   { get; set; } = 8000.0;
+    [JsonPropertyName("eq4_gain")]   public double Eq4Gain   { get; set; }
+    [JsonPropertyName("eq4_q")]      public double Eq4Q      { get; set; } = 1.0;
+
     // ── Cues que apuntan a otro cue (FADE/START/STOP) ──────────────────
     [JsonPropertyName("target_id")]         public int? TargetId       { get; set; }
     [JsonPropertyName("fade_stop_on_done")] public bool FadeStopOnDone { get; set; } = true;
@@ -143,5 +164,20 @@ public class Cue
         FadeOut  = Math.Max(0.0, FadeOut);
         Volume   = Math.Clamp(Volume, 0.0, 1.0);
         TimelineLayer = Math.Clamp(TimelineLayer, -1, 4);
+        GainDb  = Math.Clamp(GainDb, -24.0, 12.0);
+        HpfFreq = Math.Clamp(HpfFreq, 20.0, 2000.0);
+        LpfFreq = Math.Clamp(LpfFreq, 200.0, 20000.0);
+        Eq1Freq = Math.Clamp(Eq1Freq, 20.0, 20000.0);
+        Eq2Freq = Math.Clamp(Eq2Freq, 20.0, 20000.0);
+        Eq3Freq = Math.Clamp(Eq3Freq, 20.0, 20000.0);
+        Eq4Freq = Math.Clamp(Eq4Freq, 20.0, 20000.0);
+        Eq1Gain = Math.Clamp(Eq1Gain, -18.0, 18.0);
+        Eq2Gain = Math.Clamp(Eq2Gain, -18.0, 18.0);
+        Eq3Gain = Math.Clamp(Eq3Gain, -18.0, 18.0);
+        Eq4Gain = Math.Clamp(Eq4Gain, -18.0, 18.0);
+        Eq1Q = Math.Clamp(Eq1Q, 0.1, 12.0);
+        Eq2Q = Math.Clamp(Eq2Q, 0.1, 12.0);
+        Eq3Q = Math.Clamp(Eq3Q, 0.1, 12.0);
+        Eq4Q = Math.Clamp(Eq4Q, 0.1, 12.0);
     }
 }

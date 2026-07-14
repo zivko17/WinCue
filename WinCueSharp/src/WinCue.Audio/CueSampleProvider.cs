@@ -54,6 +54,19 @@ public sealed class CueSampleProvider : ISampleProvider
     /// <summary>Multiplicador master global (lo fija el AudioEngine).</summary>
     private volatile float _master = 1.0f;
 
+    // ── EQ paramétrica por clip + analizador (RTA) ─────────────────────
+    private readonly EqChain _eq;
+    private const int FftSize = 2048;
+    private const int SpectrumBands = 60;
+    private float[]? _fftMono;                    // acumulador mono (lazy)
+    private int _fftFill;
+    private NAudio.Dsp.Complex[]? _fftWork;
+    private float[]? _hann;
+    private readonly float[] _spectrumDb = new float[SpectrumBands];
+    private readonly object _specLock = new();
+    private volatile bool _spectrumReady;
+    private volatile bool _spectrumWanted;        // solo si la UI lo pide
+
     // ── Callbacks hacia el engine (se invocan EN EL HILO RT) ───────────
     public event Action<double>? LatencyMeasured;   // ms desde Play al primer Read
     /// <summary>RMS estéreo (L, R) 0.0–1.0, throttled ~20 Hz. Mono → L=R.</summary>
@@ -72,10 +85,13 @@ public sealed class CueSampleProvider : ISampleProvider
         bool loop = false,
         double trimStart = 0.0,
         double trimEnd = 0.0,
-        int playCount = 1)
+        int playCount = 1,
+        WinCue.Core.AudioEqParams? eq = null)
     {
         CueId = cueId;
         _buf = buffer;
+        _eq = new EqChain(buffer.SampleRate, buffer.Channels);
+        _eq.Configure(eq);
         _loop = loop;
         _playCount = Math.Max(1, playCount);
         _tStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -177,6 +193,23 @@ public sealed class CueSampleProvider : ISampleProvider
 
     /// <summary>Volumen master global (multiplicador aplicado en el hilo RT).</summary>
     public void SetMaster(float master) => _master = Math.Clamp(master, 0.0f, 1.0f);
+
+    /// <summary>Reconfigura la EQ del clip en vivo (main thread).</summary>
+    public void SetEq(WinCue.Core.AudioEqParams? eq) => _eq.Configure(eq);
+
+    /// <summary>Espectro post-EQ para el RTA: bandas log 20 Hz–20 kHz en dBFS
+    /// (−90..0), o null si aún no hay datos. La primera llamada activa el
+    /// análisis (los cues sin RTA visible no pagan la FFT).</summary>
+    public float[]? GetSpectrum()
+    {
+        _spectrumWanted = true;
+        if (!_spectrumReady)
+            return null;
+        var copy = new float[SpectrumBands];
+        lock (_specLock)
+            Array.Copy(_spectrumDb, copy, SpectrumBands);
+        return copy;
+    }
 
     // ------------------------------------------------------------------
     // Hilo RT — equivalente al callback de sounddevice
@@ -289,6 +322,14 @@ public sealed class CueSampleProvider : ISampleProvider
 
         int samplesWritten = framesWritten * channels;
 
+        // ── EQ paramétrica por clip (in-place, post-envolvente) ──────────
+        if (samplesWritten > 0)
+        {
+            _eq.Process(buffer, offset, samplesWritten);
+            if (_spectrumWanted)
+                FeedSpectrum(buffer, offset, samplesWritten, channels);
+        }
+
         // ── RMS estéreo para VU (throttle: 1 de cada 4 lecturas ≈ 20 Hz) ─
         if (samplesWritten > 0)
         {
@@ -316,6 +357,66 @@ public sealed class CueSampleProvider : ISampleProvider
             _completed = true;   // el mixer nos retira y el engine emite STOPPED
 
         return samplesWritten;
+    }
+
+    /// <summary>Acumula audio mono post-EQ y calcula la FFT del RTA cuando el
+    /// bloque de 2048 muestras se llena (~23 Hz a 48 kHz). Hilo RT: los
+    /// buffers se asignan UNA vez (lazy, la primera vez que la UI pide RTA).</summary>
+    private void FeedSpectrum(float[] buffer, int offset, int samples, int channels)
+    {
+        if (_fftMono is null)
+        {
+            _fftMono = new float[FftSize];
+            _fftWork = new NAudio.Dsp.Complex[FftSize];
+            _hann = new float[FftSize];
+            for (int i = 0; i < FftSize; i++)
+                _hann[i] = (float)(0.5 * (1.0 - Math.Cos(2.0 * Math.PI * i / (FftSize - 1))));
+        }
+
+        for (int i = 0; i + channels <= samples; i += channels)
+        {
+            float sum = 0;
+            for (int c = 0; c < channels; c++)
+                sum += buffer[offset + i + c];
+            _fftMono[_fftFill++] = sum / channels;
+            if (_fftFill < FftSize)
+                continue;
+            _fftFill = 0;
+
+            var work = _fftWork!;
+            var hann = _hann!;
+            for (int k = 0; k < FftSize; k++)
+            {
+                work[k].X = _fftMono[k] * hann[k];
+                work[k].Y = 0;
+            }
+            NAudio.Dsp.FastFourierTransform.FFT(true, 11, work);   // 2^11 = 2048
+
+            // Bandas log 20 Hz → 20 kHz (3 décadas) en dBFS
+            int fs = _buf.SampleRate;
+            lock (_specLock)
+            {
+                for (int b = 0; b < SpectrumBands; b++)
+                {
+                    double f0 = 20.0 * Math.Pow(10.0, 3.0 * b / SpectrumBands);
+                    double f1 = 20.0 * Math.Pow(10.0, 3.0 * (b + 1) / SpectrumBands);
+                    int k0 = Math.Clamp((int)(f0 * FftSize / fs), 1, FftSize / 2 - 1);
+                    int k1 = Math.Clamp((int)(f1 * FftSize / fs), k0 + 1, FftSize / 2);
+                    double peak = 0;
+                    for (int k = k0; k < k1; k++)
+                    {
+                        double m = work[k].X * (double)work[k].X
+                                 + work[k].Y * (double)work[k].Y;
+                        if (m > peak) peak = m;
+                    }
+                    // 2/N por la FFT + 2 por la ventana Hann ≈ amplitud real
+                    double amp = 4.0 * Math.Sqrt(peak) / FftSize;
+                    _spectrumDb[b] = (float)Math.Clamp(
+                        20.0 * Math.Log10(Math.Max(1e-9, amp)), -90.0, 0.0);
+                }
+            }
+            _spectrumReady = true;
+        }
     }
 
     /// <summary>¿Repetir desde el principio? (loop infinito o play_count).</summary>

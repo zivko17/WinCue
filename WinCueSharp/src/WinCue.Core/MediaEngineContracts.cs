@@ -12,6 +12,20 @@ namespace WinCue.Core;
 /// IDLE/LOADING/LOADED/PLAYING/STOPPED/ERROR de la versión Python).</summary>
 public enum MediaCueState { Idle, Loading, Loaded, Playing, Stopped, Error }
 
+/// <summary>Banda paramétrica de EQ (frecuencia central, ganancia y ancho).</summary>
+public sealed record EqBand(double Freq, double GainDb, double Q);
+
+/// <summary>Procesado de audio de un cue: ganancia de clip (dB, pre-EQ),
+/// HPF/LPF y hasta 4 bandas paramétricas. null = sin procesado.</summary>
+public sealed record AudioEqParams(
+    double GainDb = 0.0,
+    bool EqEnabled = false,
+    bool HpfOn = false,
+    double HpfFreq = 80.0,
+    bool LpfOn = false,
+    double LpfFreq = 12000.0,
+    IReadOnlyList<EqBand>? Bands = null);
+
 /// <summary>Parámetros de reproducción de un cue de audio.
 /// OutputDevice: nombre del dispositivo de salida ("" = el principal).</summary>
 public sealed record AudioPlayParams(
@@ -22,7 +36,8 @@ public sealed record AudioPlayParams(
     double TrimStart = 0.0,
     double TrimEnd = 0.0,
     int PlayCount = 1,
-    string OutputDevice = "");
+    string OutputDevice = "",
+    AudioEqParams? Eq = null);
 
 /// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
 public sealed record VideoGeometry(
@@ -76,6 +91,14 @@ public interface IAudioEngine
     /// <summary>Descarta el buffer en RAM de un cue (su archivo cambió).</summary>
     void InvalidateCache(int cueId);
     void Cleanup();
+
+    /// <summary>Aplica EQ/ganancia EN VIVO a un cue sonando (edición desde el
+    /// inspector). Implementación por defecto: no-op (motores falsos).</summary>
+    void SetEq(int cueId, AudioEqParams eq) { }
+
+    /// <summary>Espectro del cue sonando para el RTA: bandas log 20 Hz–20 kHz
+    /// en dBFS, o null si no suena. Por defecto: null (motores falsos).</summary>
+    float[]? GetSpectrum(int cueId) => null;
 }
 
 /// <summary>Motor de vídeo (implementado por WinCue.Video sobre libmpv).</summary>

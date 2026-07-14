@@ -309,6 +309,17 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
     public bool AnyPlaying => _active.Count > 0;
 
+    /// <summary>Reconfigura la EQ/ganancia de un cue sonando (en vivo).</summary>
+    public void SetEq(int cueId, AudioEqParams eq)
+    {
+        if (_active.TryGetValue(cueId, out var a))
+            a.Provider.SetEq(eq);
+    }
+
+    /// <summary>Espectro post-EQ del cue para el RTA (null si no suena).</summary>
+    public float[]? GetSpectrum(int cueId) =>
+        _active.TryGetValue(cueId, out var a) ? a.Provider.GetSpectrum() : null;
+
     /// <summary>Duración del audio en s (de la sesión activa —con trim— o del buffer).</summary>
     public double GetDuration(int cueId)
     {
@@ -397,7 +408,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             cueId, buffer,
             volume: p.Volume, fadeIn: p.FadeIn, fadeOut: p.FadeOut,
             loop: p.Loop, trimStart: p.TrimStart, trimEnd: p.TrimEnd,
-            playCount: p.PlayCount);
+            playCount: p.PlayCount, eq: p.Eq);
         provider.SetMaster(_master);
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
         provider.LevelReport += (l, r) => Post(() =>
