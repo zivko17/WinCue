@@ -104,6 +104,16 @@ public partial class MainWindow : Window, IShowView
             if (row >= 0 && CueGrid.SelectedIndex != row)
                 CueGrid.SelectedIndex = row;
         };
+        Timeline.TriggerRequested = cueId => _controller.TriggerCueId(cueId);
+        Timeline.StopRequested = cueId =>
+        {
+            // Un grupo no "suena" él mismo: detener sus descendientes activos
+            foreach (int id in _controller.RunningCueIds.ToList())
+                if (id == cueId ||
+                    (_model.GetById(id) is Cue c && _model.IsDescendant(c, cueId)))
+                    _controller.StopCueById(id);
+        };
+        Timeline.IsEditAllowed = () => ModeToggle.IsChecked != true;
 
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
@@ -654,6 +664,173 @@ public partial class MainWindow : Window, IShowView
         }
         if (e.Data.GetData(DataFormats.FileDrop) is string[] files && files.Length > 0)
             _controller.AddCuesFromFiles(CueGrid.SelectedIndex, files);
+    }
+
+    // ── Menú contextual de la tabla (botón derecho) ────────────────────
+
+    private void OnGridRightClick(object sender, MouseButtonEventArgs e)
+    {
+        int row = RowIndexAt(e.GetPosition(CueGrid));
+        // Si la fila no está en la selección, seleccionarla (sin romper una
+        // selección múltiple que ya la incluya)
+        if (row >= 0 && !CueGrid.SelectedItems.Cast<CueRowViewModel>()
+                .Any(vm => _model.IndexOfId(vm.CueId) == row))
+            CueGrid.SelectedIndex = row;
+        CueGrid.ContextMenu = BuildGridMenu(row);
+    }
+
+    private ContextMenu BuildGridMenu(int row)
+    {
+        var menu = new ContextMenu();
+        bool edit = ModeToggle.IsChecked != true;
+        var cue = row >= 0 ? _model.GetCue(row) : null;
+        var selRows = CueGrid.SelectedItems.Cast<CueRowViewModel>()
+            .Select(vm => _model.IndexOfId(vm.CueId)).Where(i => i >= 0)
+            .OrderBy(i => i).ToList();
+
+        if (cue is not null)
+        {
+            bool running = _controller.RunningCueIds.Contains(cue.Id);
+            menu.Items.Add(Mi("▶ Disparar (sin mover playhead)", "",
+                () => _controller.TriggerCueId(cue.Id)));
+            if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
+                menu.Items.Add(Mi("🎧 Audición (cascos)", "",
+                    () => _controller.AuditionToggle(row)));
+            menu.Items.Add(Mi("⏸ Pausar / reanudar", "Ctrl+P",
+                () => _controller.OnPauseCueToggle(row), running && cue.IsMedia()));
+            menu.Items.Add(Mi("■ Detener", "S",
+                () => _controller.OnStopSelected(row), running));
+            menu.Items.Add(new Separator());
+
+            menu.Items.Add(Mi("Copiar", "Ctrl+C", () => _controller.CopyCues(selRows)));
+            menu.Items.Add(Mi("Pegar debajo", "Ctrl+V",
+                () => _controller.PasteCues(row), edit));
+            menu.Items.Add(Mi("Duplicar", "Ctrl+D",
+                () => _controller.DuplicateCues(selRows), edit));
+            menu.Items.Add(Mi("🗑 Eliminar", "Supr", () =>
+            {
+                foreach (int r in selRows.OrderByDescending(i => i))
+                    _controller.OnDeleteCue(r);
+            }, edit));
+            menu.Items.Add(new Separator());
+
+            menu.Items.Add(Mi("▸ Agrupar selección", "Ctrl+G",
+                () => _controller.OnGroupSelected(selRows), edit));
+            if (cue.Type == CueType.Group)
+            {
+                menu.Items.Add(Mi("Desagrupar", "",
+                    () => _controller.OnUngroup(row), edit));
+                menu.Items.Add(Mi(cue.Collapsed ? "Expandir" : "Colapsar", "Doble clic",
+                    () => _controller.OnToggleCollapse(row)));
+            }
+            menu.Items.Add(new Separator());
+
+            menu.Items.Add(Mi("✎ Renombrar", "F2", () =>
+            {
+                BottomTabs.SelectedIndex = 1;   // pestaña del inspector
+                Inspector.FocusName();
+            }, edit));
+            menu.Items.Add(ColorSubmenu(
+                color => CommitRowField(row, "color", color), edit));
+            menu.Items.Add(Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",
+                () => CommitRowField(row, "armed", !cue.Armed), edit));
+            menu.Items.Add(Mi(cue.Flagged ? "⚐ Quitar flag" : "⚑ Poner flag", "",
+                () => CommitRowField(row, "flagged", !cue.Flagged), edit));
+            menu.Items.Add(new Separator());
+        }
+        else
+        {
+            menu.Items.Add(Mi("Pegar al final", "Ctrl+V",
+                () => _controller.PasteCues(_model.Count - 1), edit));
+        }
+
+        menu.Items.Add(InsertSubmenu(row, edit));
+        menu.Items.Add(Mi("＋ Importar archivos…", "",
+            () => OnImportFiles(this, new RoutedEventArgs()), edit));
+        return menu;
+    }
+
+    private MenuItem InsertSubmenu(int row, bool enabled)
+    {
+        var sub = new MenuItem { Header = "Insertar cue", IsEnabled = enabled };
+        foreach (var (label, type) in new (string, CueType)[]
+        {
+            ("♪ Audio", CueType.Audio), ("▣ Vídeo", CueType.Video),
+            ("⏱ Wait", CueType.Wait), ("◢ Fade", CueType.Fade),
+            ("▶ Start", CueType.Start), ("■ Stop", CueType.Stop),
+            ("⚙ Script", CueType.Script), ("✎ Memo", CueType.Memo),
+            ("▸ Grupo", CueType.Group),
+        })
+        {
+            var t = type;
+            sub.Items.Add(Mi(label, "", () => _controller.OnInsertCue(t, row)));
+        }
+        return sub;
+    }
+
+    /// <summary>Submenú de color de etiqueta (paleta compartida con Python).</summary>
+    internal static MenuItem ColorSubmenu(Action<string> apply, bool enabled)
+    {
+        var sub = new MenuItem { Header = "Color", IsEnabled = enabled };
+        foreach (var (key, label) in new[]
+        {
+            ("", "Sin color"), ("red", "Rojo"), ("orange", "Naranja"),
+            ("yellow", "Amarillo"), ("green", "Verde"), ("blue", "Azul"),
+            ("purple", "Morado"),
+        })
+        {
+            string k = key;
+            var item = Mi(label, "", () => apply(k));
+            string hex = CueConstants.CueColors[key];
+            item.Icon = new Border
+            {
+                Width = 12, Height = 12, CornerRadius = new CornerRadius(2),
+                BorderBrush = Brushes.Gray, BorderThickness = new Thickness(1),
+                Background = hex.Length > 0
+                    ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
+                    : Brushes.Transparent,
+            };
+            sub.Items.Add(item);
+        }
+        return sub;
+    }
+
+    internal static MenuItem Mi(string header, string gesture, Action onClick,
+        bool enabled = true)
+    {
+        var item = new MenuItem
+        {
+            Header = header,
+            InputGestureText = gesture,
+            IsEnabled = enabled,
+        };
+        item.Click += (_, _) => onClick();
+        return item;
+    }
+
+    private void CommitRowField(int row, string key, object? value)
+    {
+        _controller.OnCueEditCommitted(row,
+            new Dictionary<string, object?> { [key] = value });
+        UpdateInspector();   // el commit vino de fuera del inspector: reapuntar
+    }
+
+    // ── Menú contextual de las tarjetas EN REPRODUCCIÓN ────────────────
+
+    private void OnActivePauseMenu(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ActiveRowVM vm)
+        {
+            int row = _model.IndexOfId(vm.Id);
+            if (row >= 0)
+                _controller.OnPauseCueToggle(row);
+        }
+    }
+
+    private void OnActiveStopMenu(object sender, RoutedEventArgs e)
+    {
+        if ((sender as FrameworkElement)?.DataContext is ActiveRowVM vm)
+            _controller.StopCueById(vm.Id);
     }
 
     // ── Drag & drop de filas para reordenar ────────────────────────────

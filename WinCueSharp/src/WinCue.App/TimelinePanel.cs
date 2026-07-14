@@ -52,6 +52,27 @@ public sealed class TimelinePanel : Border
         remove => _canvas.CueSelected -= value;
     }
 
+    /// <summary>Menú contextual: disparar un cue por id.</summary>
+    public Action<int>? TriggerRequested
+    {
+        get => _canvas.TriggerRequested;
+        set => _canvas.TriggerRequested = value;
+    }
+
+    /// <summary>Menú contextual: detener un cue (o los hijos de un grupo).</summary>
+    public Action<int>? StopRequested
+    {
+        get => _canvas.StopRequested;
+        set => _canvas.StopRequested = value;
+    }
+
+    /// <summary>false en modo SHOW: los items de edición se deshabilitan.</summary>
+    public Func<bool>? IsEditAllowed
+    {
+        get => _canvas.IsEditAllowed;
+        set => _canvas.IsEditAllowed = value;
+    }
+
     public TimelinePanel()
     {
         Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x22));
@@ -171,6 +192,9 @@ public sealed class TimelineCanvas : FrameworkElement
 
     public Action<int, string, object?>? CommitField;
     public Action<int, int>? MoveCueRequested;
+    public Action<int>? TriggerRequested;
+    public Action<int>? StopRequested;
+    public Func<bool>? IsEditAllowed;
     public event Action<int>? CueSelected;
 
     private CueModel? _model;
@@ -859,6 +883,13 @@ public sealed class TimelineCanvas : FrameworkElement
         _selectedId = cue.Id;
         CueSelected?.Invoke(cue.Id);
 
+        // En modo SHOW se selecciona pero no se edita (igual que la tabla)
+        if (!(IsEditAllowed?.Invoke() ?? true))
+        {
+            InvalidateVisual();
+            return;
+        }
+
         _dragCue = cue;
         _dragIsGroup = isGroup;
         _dragMoved = false;
@@ -969,6 +1000,52 @@ public sealed class TimelineCanvas : FrameworkElement
             }
         }
         return false;
+    }
+
+    // ------------------------------------------------------------------
+    // Menú contextual (botón derecho)
+    // ------------------------------------------------------------------
+
+    protected override void OnMouseRightButtonUp(MouseButtonEventArgs e)
+    {
+        if (_model is null)
+            return;
+        var p = e.GetPosition(this);
+        Cue? cue = HitSpanChip(p)?.Group ?? HitBlock(p)?.Cue ?? HitSpan(p)?.Group;
+
+        var menu = new ContextMenu();
+        bool edit = IsEditAllowed?.Invoke() ?? true;
+        if (cue is not null)
+        {
+            _selectedId = cue.Id;
+            CueSelected?.Invoke(cue.Id);
+            InvalidateVisual();
+
+            bool active = _activeElapsed.ContainsKey(cue.Id) ||
+                (cue.Type == CueType.Group && _activeElapsed.Keys.Any(id =>
+                    _model.GetById(id) is Cue c && _model.IsDescendant(c, cue.Id)));
+            menu.Items.Add(MainWindow.Mi("▶ Disparar", "",
+                () => TriggerRequested?.Invoke(cue.Id)));
+            menu.Items.Add(MainWindow.Mi("■ Detener", "",
+                () => StopRequested?.Invoke(cue.Id), active));
+            menu.Items.Add(new Separator());
+            if (cue.TimelineLayer >= 0)
+                menu.Items.Add(MainWindow.Mi("📌 Soltar a capa automática", "",
+                    () => CommitField?.Invoke(cue.Id, "timeline_layer", -1), edit));
+            menu.Items.Add(MainWindow.ColorSubmenu(
+                color => CommitField?.Invoke(cue.Id, "color", color), edit));
+            menu.Items.Add(MainWindow.Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",
+                () => CommitField?.Invoke(cue.Id, "armed", !cue.Armed), edit));
+        }
+        else
+        {
+            menu.Items.Add(MainWindow.Mi("Ajustar a la ventana", "", ZoomToFit));
+            menu.Items.Add(MainWindow.Mi("Acercar", "Ctrl+rueda", () => ZoomStep(1.4)));
+            menu.Items.Add(MainWindow.Mi("Alejar", "Ctrl+rueda", () => ZoomStep(1 / 1.4)));
+        }
+        menu.PlacementTarget = this;
+        menu.IsOpen = true;
+        e.Handled = true;
     }
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
