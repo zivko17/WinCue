@@ -1195,16 +1195,29 @@ public class MainController
         if (toRow >= fromRow && toRow < end)
             return;   // destino dentro del propio bloque
 
+        var targetCue = _model.GetCue(toRow);
         var all = _model.Cues.ToList();
         int blockLen = end - fromRow;
         var block = all.GetRange(fromRow, blockLen);
         all.RemoveRange(fromRow, blockLen);
-        int insertAt = Math.Clamp(
-            toRow < fromRow ? toRow : toRow - blockLen + 1, 0, all.Count);
-
-        // El cue movido adopta el grupo del cue que desplaza en el destino
         var moveIds = block.Select(c => c.Id).ToHashSet();
-        int? newParent = insertAt < all.Count ? all[insertAt].ParentId : null;
+
+        int insertAt;
+        int? newParent;
+        if (targetCue is { Type: CueType.Group } targetGroup
+            && !moveIds.Contains(targetGroup.Id))
+        {
+            // Soltar SOBRE la fila de un grupo = meterlo DENTRO, como 1er hijo
+            insertAt = all.FindIndex(c => c.Id == targetGroup.Id) + 1;
+            newParent = targetGroup.Id;
+        }
+        else
+        {
+            insertAt = Math.Clamp(
+                toRow < fromRow ? toRow : toRow - blockLen + 1, 0, all.Count);
+            // El cue movido adopta el grupo del cue que desplaza en el destino
+            newParent = insertAt < all.Count ? all[insertAt].ParentId : null;
+        }
         if (newParent is int np && moveIds.Contains(np))
             return;   // no puede quedar dentro de sí mismo
 

@@ -175,6 +175,34 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void MoveCue_OntoGroupRow_EntersGroupAsFirstChild()
+    {
+        var g = AddCue(CueType.Group, "G");
+        AddCue(CueType.Audio, "h1", setup: c => c.ParentId = g.Id);
+        AddCue(CueType.Video, "video");
+
+        Controller.OnMoveCue(2, 0);   // soltar "video" SOBRE la fila del grupo
+
+        Assert.Equal(new[] { "G", "video", "h1" },
+            Model.Cues.Select(c => c.Name));
+        Assert.Equal(g.Id, Model.Cues[1].ParentId);   // entra como primer hijo
+    }
+
+    [Fact]
+    public void MoveCue_FromAboveOntoGroupRow_AlsoEntersGroup()
+    {
+        AddCue(CueType.Video, "video");
+        var g = AddCue(CueType.Group, "G");
+        AddCue(CueType.Audio, "h1", setup: c => c.ParentId = g.Id);
+
+        Controller.OnMoveCue(0, 1);   // arrastrar desde arriba sobre el grupo
+
+        Assert.Equal(new[] { "G", "video", "h1" },
+            Model.Cues.Select(c => c.Name));
+        Assert.Equal(g.Id, Model.Cues[1].ParentId);
+    }
+
+    [Fact]
     public void MoveCue_OutOfGroup_ClearsParent()
     {
         var g = AddCue(CueType.Group, "G");
