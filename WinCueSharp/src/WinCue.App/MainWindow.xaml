@@ -50,25 +50,34 @@
                                    FontWeight="Bold" TextTrimming="CharacterEllipsis"
                                    Foreground="#e8c000"/>
                     </StackPanel>
-                    <Separator Width="12" Background="Transparent"/>
+                </StackPanel>
+
+                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right"
+                            VerticalAlignment="Center">
+                    <!-- Reloj del show: clic alterna restante/transcurrido,
+                         doble clic reinicia -->
+                    <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
+                            Padding="12,2" Margin="0,0,16,0" Cursor="Hand"
+                            MouseLeftButtonDown="OnShowClockClick"
+                            ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
+                        <StackPanel>
+                            <TextBlock x:Name="ShowClockMode" Text="SHOW · RESTANTE ▾"
+                                       FontSize="9" Foreground="{StaticResource FgDim}"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock x:Name="ShowClockText" Text="0:00:00"
+                                       FontSize="26" FontWeight="Bold"
+                                       FontFamily="Consolas" Foreground="#e8c000"
+                                       HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Border>
+
                     <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
                                   Checked="OnShowMode" Unchecked="OnEditMode"
                                   Background="#3c3c3c" Foreground="{StaticResource Fg}"
                                   Content="Modo: EDIT"/>
                     <Button Click="OnVideoOutputClick" Height="44" Content="🖵 Salida vídeo"/>
                     <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
-                </StackPanel>
-
-                <StackPanel Orientation="Horizontal" DockPanel.Dock="Right"
-                            VerticalAlignment="Center">
-                    <TextBlock Text="Master" VerticalAlignment="Center" Margin="0,0,6,0"
-                               Foreground="{StaticResource FgDim}"/>
-                    <Slider x:Name="MasterSlider" Width="140" Minimum="0" Maximum="100"
-                            Value="100" VerticalAlignment="Center"
-                            ValueChanged="OnMasterChanged"/>
-                    <TextBlock x:Name="MasterLabel" Text="100" Width="30"
-                               VerticalAlignment="Center" TextAlignment="Right"/>
-                    <Separator Width="16" Background="Transparent"/>
+                    <Separator Width="14" Background="Transparent"/>
                     <local:VuMeterControl x:Name="VuBar" Width="90" Height="14"
                                           VerticalAlignment="Center"/>
                 </StackPanel>

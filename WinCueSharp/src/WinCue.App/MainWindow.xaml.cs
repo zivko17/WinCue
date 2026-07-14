@@ -95,6 +95,15 @@ public partial class MainWindow : Window, IShowView
 
         ApplyViewSettings();
         ReloadTable();
+
+        // Volumen master desde settings (el fader vive en ⚙ → Audio)
+        _controller.OnMasterVolume(_settings.Get("master_volume", 100));
+
+        // Reloj del show (medio segundo de resolución visual)
+        _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
+        _clockTimer.Tick += (_, _) => UpdateShowClock();
+        _clockTimer.Start();
+        UpdateShowClock();
     }
 
     /// <summary>Aplica los settings de vista (columna de latencia, etiqueta
@@ -347,12 +356,61 @@ public partial class MainWindow : Window, IShowView
     private void OnPanicClick(object sender, RoutedEventArgs e) => _controller.OnPanic();
     private void OnPauseClick(object sender, RoutedEventArgs e) => _controller.OnPauseToggle();
 
-    private void OnMasterChanged(object sender, RoutedPropertyChangedEventArgs<double> e)
+    // ── Reloj del show (restante ↔ transcurrido, clic para alternar) ────
+    private bool _clockCountdown = true;
+    private long? _showStartTicks;
+    private DispatcherTimer? _clockTimer;
+
+    private void OnShowClockClick(object sender, MouseButtonEventArgs e)
     {
-        if (_controller is null) return;   // durante InitializeComponent
-        MasterLabel.Text = ((int)e.NewValue).ToString();
-        _controller.OnMasterVolume((int)e.NewValue);
+        if (e.ClickCount == 2)
+        {
+            _showStartTicks = null;   // reiniciar el cronómetro del show
+            FlashStatus("Reloj del show reiniciado.");
+        }
+        else
+        {
+            _clockCountdown = !_clockCountdown;
+        }
+        UpdateShowClock();
     }
+
+    private void UpdateShowClock()
+    {
+        if (_controller is null) return;
+
+        // El show "empieza" cuando arranca el primer cue
+        if (_showStartTicks is null && _controller.RunningCueIds.Count > 0)
+            _showStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+
+        double elapsed = _showStartTicks is long t
+            ? System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalSeconds
+            : 0.0;
+
+        if (_clockCountdown)
+        {
+            // Duración estimada del show: suma de pre-wait + duración (armados)
+            double total = 0.0;
+            foreach (var c in _model.Cues)
+                if (c.Armed)
+                    total += c.PreWait + Math.Max(0.0, c.Duration);
+            double remaining = Math.Max(0.0, total - elapsed);
+            ShowClockMode.Text = "SHOW · RESTANTE ▾";
+            ShowClockText.Text = FormatClock(remaining);
+            ShowClockText.Foreground = remaining <= 0.0 && _showStartTicks is not null
+                ? new SolidColorBrush(Color.FromRgb(0xc0, 0x39, 0x2b))
+                : new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
+        }
+        else
+        {
+            ShowClockMode.Text = "SHOW · TRANSCURRIDO ▾";
+            ShowClockText.Text = FormatClock(elapsed);
+            ShowClockText.Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71));
+        }
+    }
+
+    private static string FormatClock(double seconds) =>
+        TimeSpan.FromSeconds(seconds).ToString(@"h\:mm\:ss");
 
     private void OnShowMode(object sender, RoutedEventArgs e)
     {
@@ -404,7 +462,7 @@ public partial class MainWindow : Window, IShowView
         {
             LoadKeyBindings();
             ApplyViewSettings();
-            MasterSlider.Value = _settings.Get("master_volume", 100);
+            _controller.OnMasterVolume(_settings.Get("master_volume", 100));
             _applyEngineSettings?.Invoke();
             if (_videoOutput is { IsVisible: true })
                 PlaceVideoOutput();   // recolocar en la pantalla elegida
