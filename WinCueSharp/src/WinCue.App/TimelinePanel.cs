@@ -554,9 +554,16 @@ public sealed class TimelineCanvas : FrameworkElement
             return;
         }
 
-        // Recuadros de grupo (marcan todo lo que hay dentro)
+        // Recuadros de grupo: primero el relleno (debajo de los bloques)
         foreach (var span in _spans)
-            DrawSpan(dc, span, lh, w);
+        {
+            var (_, _, box, color) = SpanGeometry(span, lh);
+            if (box.Right < 0 || box.Left > w)
+                continue;
+            var fill = new SolidColorBrush(Color.FromArgb(30, color.R, color.G, color.B));
+            fill.Freeze();
+            dc.DrawRoundedRectangle(fill, null, box, 4, 4);
+        }
 
         // Marcadores GO (a partir de aquí el tiempo es estimado)
         foreach (double t in _goMarks)
@@ -576,6 +583,12 @@ public sealed class TimelineCanvas : FrameworkElement
             : _blocks.FirstOrDefault(b => b.Cue.Id == _dragCue.Id);
         if (dragBlock is not null)
             DrawBlock(dc, dragBlock, lh);
+
+        // Recuadros de grupo: marco + ASA con el nombre, POR ENCIMA de los
+        // bloques (con un solo hijo el bloque taparía el recuadro y no habría
+        // de dónde agarrar el grupo)
+        foreach (var span in _spans)
+            DrawSpanFrame(dc, span, lh, w);
 
         // Cursor: posición real más avanzada de los cues sonando
         double? cursor = null;
@@ -598,11 +611,11 @@ public sealed class TimelineCanvas : FrameworkElement
         }
     }
 
-    private void DrawSpan(DrawingContext dc, Span span, double lh, double w)
+    /// <summary>Geometría del recuadro de un grupo: caja, asa (chip con el
+    /// nombre) y color. La misma para pintar y para el hit-test del arrastre.</summary>
+    private (FormattedText Lbl, Rect Chip, Rect Box, Color Color)
+        SpanGeometry(Span span, double lh)
     {
-        double x0 = SecToX(span.Start), x1 = SecToX(span.End);
-        if (x1 < 0 || x0 > w)
-            return;
         var group = span.Group;
         string hex = group.Color.Length > 0
             && CueConstants.CueColors.TryGetValue(group.Color, out var gc) && gc.Length > 0
@@ -610,32 +623,65 @@ public sealed class TimelineCanvas : FrameworkElement
             : TypeColors[CueType.Group];
         var color = (Color)ColorConverter.ConvertFromString(hex);
 
+        double x0 = SecToX(span.Start) - 4;
+        double x1 = SecToX(span.End) + 4;
         double y = RulerH + span.MinLayer * lh + 1;
         double bh = (span.MaxLayer - span.MinLayer + 1) * lh - 2;
-        var rect = new Rect(x0 - 3, y, Math.Max(8, x1 - x0 + 6), bh);
+        var box = new Rect(x0, y, Math.Max(12, x1 - x0), bh);
 
-        var fill = new SolidColorBrush(Color.FromArgb(22, color.R, color.G, color.B));
-        fill.Freeze();
+        string mode = group.GroupMode.ToString().ToUpperInvariant();
+        var lbl = Label($"▸ {group.DisplayNumber} · {group.Name} · {mode}",
+            Frozen(new SolidColorBrush(Colors.White)), 10);
+        double cw = Math.Min(lbl.WidthIncludingTrailingWhitespace + 12,
+            Math.Max(30, box.Width));
+        lbl.MaxTextWidth = Math.Max(1, cw - 10);
+        lbl.MaxLineCount = 1;
+        lbl.Trimming = TextTrimming.CharacterEllipsis;
+        var chip = new Rect(box.X, box.Y, cw, 16);
+        return (lbl, chip, box, color);
+    }
+
+    /// <summary>Marco + asa del grupo, por encima de los bloques.</summary>
+    private void DrawSpanFrame(DrawingContext dc, Span span, double lh, double w)
+    {
+        var (lbl, chip, box, color) = SpanGeometry(span, lh);
+        if (box.Right < 0 || box.Left > w)
+            return;
+
         Pen border;
-        if (group.Id == _selectedId)
+        if (span.Group.Id == _selectedId)
         {
             border = SelectedPen;
         }
         else
         {
             border = new Pen(new SolidColorBrush(
-                Color.FromArgb(160, color.R, color.G, color.B)), 1.2);
+                Color.FromArgb(200, color.R, color.G, color.B)), 1.6);
             border.Freeze();
         }
-        dc.DrawRoundedRectangle(fill, border, rect, 4, 4);
+        dc.DrawRoundedRectangle(null, border, box, 4, 4);
 
-        string mode = group.GroupMode.ToString().ToUpperInvariant();
-        var lbl = Label($"▸ {group.DisplayNumber} · {group.Name} · {mode}",
-            Frozen(new SolidColorBrush(Color.FromArgb(220, color.R, color.G, color.B))), 9);
-        lbl.MaxTextWidth = Math.Max(1, rect.Width - 8);
-        lbl.MaxLineCount = 1;
-        lbl.Trimming = TextTrimming.CharacterEllipsis;
-        dc.DrawText(lbl, new Point(rect.X + 4, rect.Y + 1));
+        // Asa: chip sólido con el nombre — de aquí se arrastra el grupo entero
+        var chipFill = new SolidColorBrush(Color.FromArgb(235, color.R, color.G, color.B));
+        chipFill.Freeze();
+        dc.DrawRoundedRectangle(chipFill, null, chip, 3, 3);
+        dc.DrawText(lbl, new Point(chip.X + 5, chip.Y + 1));
+    }
+
+    /// <summary>Asa de grupo bajo el punto (la del grupo más interno).</summary>
+    private Span? HitSpanChip(Point p)
+    {
+        double lh = LayerH;
+        Span? best = null;
+        foreach (var s in _spans)
+        {
+            var (_, chip, _, _) = SpanGeometry(s, lh);
+            if (!chip.Contains(p))
+                continue;
+            if (best is null || s.End - s.Start < best.End - best.Start)
+                best = s;
+        }
+        return best;
     }
 
     private void DrawBlock(DrawingContext dc, Block b, double lh)
@@ -787,16 +833,27 @@ public sealed class TimelineCanvas : FrameworkElement
         if (e.ChangedButton != MouseButton.Left || _model is null)
             return;
         var p = e.GetPosition(this);
-        var block = HitBlock(p);
-        Cue? cue = block?.Cue;
-        bool isGroup = false;
-        if (cue is null)
+        // Prioridad: asa del grupo → bloque → cuerpo del recuadro
+        Cue? cue;
+        bool isGroup;
+        if (HitSpanChip(p) is Span chipSpan)
         {
-            var span = HitSpan(p);
-            if (span is null)
-                return;
-            cue = span.Group;
+            cue = chipSpan.Group;
             isGroup = true;
+        }
+        else if (HitBlock(p) is Block block)
+        {
+            cue = block.Cue;
+            isGroup = false;
+        }
+        else if (HitSpan(p) is Span bodySpan)
+        {
+            cue = bodySpan.Group;
+            isGroup = true;
+        }
+        else
+        {
+            return;
         }
 
         _selectedId = cue.Id;
@@ -819,7 +876,8 @@ public sealed class TimelineCanvas : FrameworkElement
         var p = e.GetPosition(this);
         if (_dragCue is null)
         {
-            Cursor = HitBlock(p) is not null || HitSpan(p) is not null
+            Cursor = HitSpanChip(p) is not null || HitBlock(p) is not null
+                || HitSpan(p) is not null
                 ? Cursors.SizeAll : Cursors.Arrow;
             return;
         }

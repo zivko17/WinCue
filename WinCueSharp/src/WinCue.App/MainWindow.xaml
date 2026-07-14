@@ -258,15 +258,15 @@
             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                           Background="#333333" ResizeBehavior="PreviousAndNext"/>
 
-            <!-- Zona inferior: inspector y timeline comparten sitio.
-                 En modo SHOW se selecciona sola la pestaña del timeline. -->
+            <!-- Zona inferior: timeline (SIEMPRE primero) e inspector comparten
+                 sitio. En modo SHOW se fuerza la pestaña del timeline. -->
             <TabControl x:Name="BottomTabs" Grid.Row="2"
                         Background="#252526" BorderThickness="0" Padding="0">
-                <TabItem Header="🛠 Inspector">
-                    <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
-                </TabItem>
                 <TabItem Header="⏱ Timeline">
                     <local:TimelinePanel x:Name="Timeline"/>
+                </TabItem>
+                <TabItem Header="🛠 Inspector">
+                    <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
                 </TabItem>
             </TabControl>
         </Grid>
