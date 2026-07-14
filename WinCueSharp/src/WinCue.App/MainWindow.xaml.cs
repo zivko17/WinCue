@@ -31,6 +31,12 @@ public partial class MainWindow : Window, IShowView
     private readonly LiveMonitorControl _pgm = new("PGM", Color.FromRgb(0xc0, 0x39, 0x2b));
     private DispatcherTimer? _pgmTimer;
 
+    // VU estéreo junto a cada monitor: PGM = programa, PVW = audición local
+    private readonly VuMeterControl _pgmVuL = new(vertical: true) { Width = 6 };
+    private readonly VuMeterControl _pgmVuR = new(vertical: true) { Width = 6 };
+    private readonly VuMeterControl _pvwVuL = new(vertical: true) { Width = 6 };
+    private readonly VuMeterControl _pvwVuR = new(vertical: true) { Width = 6 };
+
     // Atajos configurables (Interfaz → Atajos de teclado)
     private Key _keyGo = Key.Space;
     private Key _keyStop = Key.S;
@@ -82,11 +88,10 @@ public partial class MainWindow : Window, IShowView
         Inspector.AuditionRequested += () =>
             _controller.AuditionToggle(CueGrid.SelectedIndex);
 
-        // Mini-monitores PVW (siguiente, en bucle) y PGM (programa EN VIVO,
-        // re-sincronizado con el reloj del motor cada 500 ms)
-        MonitorHost.Children.Add(_pvw);
-        _pvw.Margin = new Thickness(0, 0, 0, 6);
-        MonitorHost.Children.Add(_pgm);
+        // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
+        // PVW abajo (con VU estéreo de la AUDICIÓN local)
+        MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR));
+        MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR));
         _pvw.Clear("—");
         _pgm.Clear("NEGRO");
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -308,19 +313,63 @@ public partial class MainWindow : Window, IShowView
             vm.SetProgress(byId.GetValueOrDefault(vm.CueId));
     }
 
-    public void UpdateVuMeter(float rms) => VuBar.SetLevel(rms);
+    /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
+    private static DockPanel MonitorRow(LiveMonitorControl monitor,
+        VuMeterControl left, VuMeterControl right)
+    {
+        var vu = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(3, 0, 0, 0),
+        };
+        left.Height = double.NaN;    // estirar a la altura del monitor
+        right.Height = double.NaN;
+        right.Margin = new Thickness(1, 0, 0, 0);
+        vu.Children.Add(left);
+        vu.Children.Add(right);
 
-    public void UpdateCueVuMeter(int cueId, float rms) =>
-        Inspector.UpdateCueLevel(cueId, rms);
+        var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        DockPanel.SetDock(vu, Dock.Right);
+        row.Children.Add(vu);
+        row.Children.Add(monitor);
+        return row;
+    }
+
+    public void UpdateVuMeter(float left, float right)
+    {
+        _pgmVuL.SetLevel(left);
+        _pgmVuR.SetLevel(right);
+    }
+
+    public void UpdateCueVuMeter(int cueId, float left, float right)
+    {
+        if (cueId == MainController.AuditionCueId)
+        {
+            // La audición local es el "preview" de audio → VU del PVW
+            _pvwVuL.SetLevel(left);
+            _pvwVuR.SetLevel(right);
+            return;
+        }
+        Inspector.UpdateCueLevel(cueId, Math.Max(left, right));
+    }
 
     public nint GetVideoOutputHandle()
     {
         bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
-        _videoOutput ??= new VideoOutputWindow { Owner = this };
-        nint handle = _videoOutput.EnsureVisibleHandle();
+        EnsureVideoOutputWindow();
+        nint handle = _videoOutput!.EnsureVisibleHandle();
         if (firstOpen)
             PlaceVideoOutput();
         return handle;
+    }
+
+    private void EnsureVideoOutputWindow()
+    {
+        if (_videoOutput is not null)
+            return;
+        _videoOutput = new VideoOutputWindow { Owner = this };
+        // El botón refleja si la salida está activa (verde) o no (rojo)
+        _videoOutput.IsVisibleChanged += (_, _) => UpdateVideoOutButton();
     }
 
     /// <summary>Coloca la salida en la pantalla configurada (Settings → Vídeo).</summary>
@@ -415,13 +464,26 @@ public partial class MainWindow : Window, IShowView
     private void OnShowMode(object sender, RoutedEventArgs e)
     {
         ModeToggle.Content = "Modo: SHOW";
+        ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x7e, 0x34));
+        ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
     }
 
     private void OnEditMode(object sender, RoutedEventArgs e)
     {
         ModeToggle.Content = "Modo: EDIT";
+        ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
+        ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
+    }
+
+    /// <summary>Botón de salida: rojo sin salida activa, verde con ella.</summary>
+    private void UpdateVideoOutButton()
+    {
+        bool active = _videoOutput is { IsVisible: true };
+        VideoOutButton.Background = new SolidColorBrush(active
+            ? Color.FromRgb(0x1e, 0x7e, 0x34)
+            : Color.FromRgb(0x7e, 0x1e, 0x1e));
     }
 
     private void SetEditingEnabled(bool enabled)
@@ -443,8 +505,8 @@ public partial class MainWindow : Window, IShowView
 
     private void OnVideoOutputClick(object sender, RoutedEventArgs e)
     {
-        _videoOutput ??= new VideoOutputWindow { Owner = this };
-        if (_videoOutput.IsVisible)
+        EnsureVideoOutputWindow();
+        if (_videoOutput!.IsVisible)
         {
             _videoOutput.Hide();
         }

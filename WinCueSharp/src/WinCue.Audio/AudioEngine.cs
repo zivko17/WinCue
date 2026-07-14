@@ -42,12 +42,12 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public event Action<int, MediaCueState>? StateChanged;   // (cueId, newState)
     public event Action<int, double>? LatencyReport;          // (cueId, ms)
     public event Action<int, string>? ErrorOccurred;          // (cueId, message)
-    /// <summary>Nivel RMS instantáneo (0.0–1.0) de un stream cualquiera; el VU
-    /// aplica peak-hold, así que con varios streams muestra el más alto.</summary>
-    public event Action<float>? LevelReport;
+    /// <summary>RMS estéreo (L, R) de un stream cualquiera; el VU aplica
+    /// peak-hold, así que con varios streams muestra el más alto.</summary>
+    public event Action<float, float>? LevelReport;
 
-    /// <summary>Nivel RMS de UN cue concreto (VU por cue del inspector).</summary>
-    public event Action<int, float>? CueLevelReport;
+    /// <summary>RMS estéreo (L, R) de UN cue concreto (inspector/audición).</summary>
+    public event Action<int, float, float>? CueLevelReport;
 
     // ------------------------------------------------------------------
     // Estado interno
@@ -400,10 +400,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             playCount: p.PlayCount);
         provider.SetMaster(_master);
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
-        provider.LevelReport += rms => Post(() =>
+        provider.LevelReport += (l, r) => Post(() =>
         {
-            LevelReport?.Invoke(rms);
-            CueLevelReport?.Invoke(cueId, rms);
+            LevelReport?.Invoke(l, r);
+            CueLevelReport?.Invoke(cueId, l, r);
         });
 
         var input = AdaptToMixerFormat(provider);

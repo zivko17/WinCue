@@ -41,10 +41,11 @@ public interface IShowView
     void UpdateTransport(bool paused);
     void UpdateCountdown(double? secondsRemaining);
     void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows);
-    void UpdateVuMeter(float rms);
+    /// <summary>RMS estéreo del programa (VU junto al monitor PGM).</summary>
+    void UpdateVuMeter(float left, float right);
 
-    /// <summary>Nivel RMS de un cue concreto (VU por cue del inspector).</summary>
-    void UpdateCueVuMeter(int cueId, float rms);
+    /// <summary>RMS estéreo de un cue concreto (inspector; audición → VU del PVW).</summary>
+    void UpdateCueVuMeter(int cueId, float left, float right);
 
     // ── Salida de vídeo ────────────────────────────────────────────────
     /// <summary>HWND del destino de vídeo actual (ventana de salida o testigo).

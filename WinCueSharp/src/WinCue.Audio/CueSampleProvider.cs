@@ -56,7 +56,8 @@ public sealed class CueSampleProvider : ISampleProvider
 
     // ── Callbacks hacia el engine (se invocan EN EL HILO RT) ───────────
     public event Action<double>? LatencyMeasured;   // ms desde Play al primer Read
-    public event Action<float>? LevelReport;        // RMS 0.0–1.0 (throttled ~20 Hz)
+    /// <summary>RMS estéreo (L, R) 0.0–1.0, throttled ~20 Hz. Mono → L=R.</summary>
+    public event Action<float, float>? LevelReport;
 
     public WaveFormat WaveFormat { get; }
 
@@ -288,20 +289,26 @@ public sealed class CueSampleProvider : ISampleProvider
 
         int samplesWritten = framesWritten * channels;
 
-        // ── RMS para VU (throttle: 1 de cada 4 lecturas ≈ 20 Hz) ────────
+        // ── RMS estéreo para VU (throttle: 1 de cada 4 lecturas ≈ 20 Hz) ─
         if (samplesWritten > 0)
         {
             _levelCounter++;
             if (_levelCounter >= 4)
             {
                 _levelCounter = 0;
-                double sum = 0.0;
-                for (int i = 0; i < samplesWritten; i++)
+                int ch = channels;
+                int framesW = samplesWritten / ch;
+                double sumL = 0.0, sumR = 0.0;
+                for (int f = 0; f < framesW; f++)
                 {
-                    float v = buffer[offset + i];
-                    sum += (double)v * v;
+                    float l = buffer[offset + f * ch];
+                    float r = ch > 1 ? buffer[offset + f * ch + 1] : l;
+                    sumL += (double)l * l;
+                    sumR += (double)r * r;
                 }
-                LevelReport?.Invoke((float)Math.Sqrt(sum / samplesWritten));
+                LevelReport?.Invoke(
+                    (float)Math.Sqrt(sumL / framesW),
+                    (float)Math.Sqrt(sumR / framesW));
             }
         }
 

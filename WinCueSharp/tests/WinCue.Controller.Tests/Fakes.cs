@@ -69,8 +69,8 @@ public sealed class FakeAudioEngine : IAudioEngine
     public event Action<int, MediaCueState>? StateChanged;
     public event Action<int, double>? LatencyReport;
     public event Action<int, string>? ErrorOccurred;
-    public event Action<float>? LevelReport;
-    public event Action<int, float>? CueLevelReport;
+    public event Action<float, float>? LevelReport;
+    public event Action<int, float, float>? CueLevelReport;
 
     public readonly List<(int CueId, string Path, AudioPlayParams P)> Plays = new();
     public readonly List<(int CueId, double Fade)> Stops = new();
@@ -136,8 +136,8 @@ public sealed class FakeAudioEngine : IAudioEngine
 
     public void RaiseLatency(int cueId, double ms) => LatencyReport?.Invoke(cueId, ms);
     public void RaiseError(int cueId, string msg) => ErrorOccurred?.Invoke(cueId, msg);
-    public void RaiseLevel(float rms) => LevelReport?.Invoke(rms);
-    public void RaiseCueLevel(int cueId, float rms) => CueLevelReport?.Invoke(cueId, rms);
+    public void RaiseLevel(float l, float r) => LevelReport?.Invoke(l, r);
+    public void RaiseCueLevel(int cueId, float l, float r) => CueLevelReport?.Invoke(cueId, l, r);
 }
 
 // ---------------------------------------------------------------------------
@@ -245,8 +245,9 @@ public sealed class FakeView : IShowView
     public void UpdateTransport(bool paused) => LastTransportPaused = paused;
     public void UpdateCountdown(double? secondsRemaining) => LastCountdown = secondsRemaining;
     public void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows) => LastActiveCues = rows;
-    public void UpdateVuMeter(float rms) => LastVu = rms;
-    public void UpdateCueVuMeter(int cueId, float rms) => CueVuLevels[cueId] = rms;
+    public void UpdateVuMeter(float left, float right) => LastVu = Math.Max(left, right);
+    public void UpdateCueVuMeter(int cueId, float left, float right) =>
+        CueVuLevels[cueId] = Math.Max(left, right);
     public readonly Dictionary<int, float> CueVuLevels = new();
     public nint GetVideoOutputHandle() => 0;
     public (double Width, double Height) SurfaceDimensions() => (1920.0, 1080.0);

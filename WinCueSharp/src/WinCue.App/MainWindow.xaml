@@ -52,12 +52,23 @@
                     </StackPanel>
                 </StackPanel>
 
+                <!-- Botones al extremo derecho, con código de color -->
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Right"
                             VerticalAlignment="Center">
-                    <!-- Reloj del show: clic alterna restante/transcurrido,
-                         doble clic reinicia -->
+                    <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
+                                  Checked="OnShowMode" Unchecked="OnEditMode"
+                                  Background="#c9a227" Foreground="Black"
+                                  FontWeight="Bold" Content="Modo: EDIT"/>
+                    <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
+                            Background="#7e1e1e" Content="🖵 Salida vídeo"/>
+                    <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
+                </StackPanel>
+
+                <!-- Centro: reloj del show + countdown del cue -->
+                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
+                            VerticalAlignment="Center">
                     <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
-                            Padding="12,2" Margin="0,0,16,0" Cursor="Hand"
+                            Padding="12,2" Cursor="Hand"
                             MouseLeftButtonDown="OnShowClockClick"
                             ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
                         <StackPanel>
@@ -70,21 +81,10 @@
                                        HorizontalAlignment="Center"/>
                         </StackPanel>
                     </Border>
-
-                    <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
-                                  Checked="OnShowMode" Unchecked="OnEditMode"
-                                  Background="#3c3c3c" Foreground="{StaticResource Fg}"
-                                  Content="Modo: EDIT"/>
-                    <Button Click="OnVideoOutputClick" Height="44" Content="🖵 Salida vídeo"/>
-                    <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
-                    <Separator Width="14" Background="Transparent"/>
-                    <local:VuMeterControl x:Name="VuBar" Width="90" Height="14"
-                                          VerticalAlignment="Center"/>
+                    <TextBlock x:Name="CountdownLabel" Text="" FontSize="26"
+                               FontWeight="Bold" Foreground="{StaticResource Accent}"
+                               Margin="18,0,0,0" VerticalAlignment="Center"/>
                 </StackPanel>
-
-                <TextBlock x:Name="CountdownLabel" Text="" FontSize="26" FontWeight="Bold"
-                           Foreground="{StaticResource Accent}"
-                           HorizontalAlignment="Center" VerticalAlignment="Center"/>
             </DockPanel>
         </Border>
 

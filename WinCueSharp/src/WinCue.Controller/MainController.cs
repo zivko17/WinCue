@@ -114,8 +114,8 @@ public class MainController
         _audio.LatencyReport += OnLatencyReport;
         _audio.ErrorOccurred += OnAudioError;
         _audio.StateChanged += OnAudioStateChanged;
-        _audio.LevelReport += OnLevelReport;
-        _audio.CueLevelReport += (cueId, rms) => _view.UpdateCueVuMeter(cueId, rms);
+        _audio.LevelReport += (l, r) => _view.UpdateVuMeter(l, r);
+        _audio.CueLevelReport += (cueId, l, r) => _view.UpdateCueVuMeter(cueId, l, r);
 
         _video.LatencyReport += OnLatencyReport;
         _video.ErrorOccurred += OnVideoError;
@@ -784,7 +784,7 @@ public class MainController
         _view.UpdateTransport(false);
         _view.UpdateCountdown(null);
         _view.UpdateActiveCues(Array.Empty<ActiveCueInfo>());
-        _view.UpdateVuMeter(0.0f);
+        _view.UpdateVuMeter(0.0f, 0.0f);
         RefreshVideoTally();
     }
 
@@ -850,7 +850,6 @@ public class MainController
         _view.FlashStatus($"Vídeo: {message}");
     }
 
-    private void OnLevelReport(float rms) => _view.UpdateVuMeter(rms);
 
     // ==================================================================
     // TICK — panel de activos + countdown (la UI lo llama cada ~100 ms)

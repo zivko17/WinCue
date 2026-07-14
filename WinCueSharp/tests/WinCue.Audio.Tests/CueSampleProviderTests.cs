@@ -291,18 +291,39 @@ public class CueSampleProviderTests
     }
 
     [Fact]
-    public void LevelReport_FiresThrottled()
+    public void LevelReport_FiresThrottled_Stereo()
     {
         var p = new CueSampleProvider(1, OnesBuffer(10_000));
-        var levels = new List<float>();
-        p.LevelReport += levels.Add;
+        var levels = new List<(float L, float R)>();
+        p.LevelReport += (l, r) => levels.Add((l, r));
 
         var block = new float[64];
         for (int i = 0; i < 8; i++)
             p.Read(block, 0, 64);
         // 1 de cada 4 lecturas → 2 reports en 8 lecturas
         Assert.Equal(2, levels.Count);
-        // RMS de señal constante 1.0 = 1.0
-        Assert.All(levels, l => Assert.Equal(1.0f, l, precision: 3));
+        // RMS de señal constante 1.0 = 1.0; mono → L=R
+        Assert.All(levels, l => Assert.Equal(1.0f, l.L, precision: 3));
+        Assert.All(levels, l => Assert.Equal(1.0f, l.R, precision: 3));
+    }
+
+    [Fact]
+    public void LevelReport_Stereo_SeparatesChannels()
+    {
+        // L = 1.0, R = 0.5 → RMS L=1.0, R=0.5
+        var s = new float[2000];
+        for (int f = 0; f < 1000; f++) { s[f * 2] = 1.0f; s[f * 2 + 1] = 0.5f; }
+        var buf = new AudioBuffer { Samples = s, SampleRate = SR, Channels = 2 };
+        var p = new CueSampleProvider(1, buf);
+        (float L, float R)? report = null;
+        p.LevelReport += (l, r) => report = (l, r);
+
+        var block = new float[128];
+        for (int i = 0; i < 4; i++)
+            p.Read(block, 0, 128);
+
+        Assert.NotNull(report);
+        Assert.Equal(1.0f, report!.Value.L, 3);
+        Assert.Equal(0.5f, report.Value.R, 3);
     }
 }
