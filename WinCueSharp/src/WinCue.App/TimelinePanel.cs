@@ -59,6 +59,13 @@ public sealed class TimelinePanel : Border
         remove => _canvas.CueActivated -= value;
     }
 
+    /// <summary>Scrub del cursor de edición (cue de vídeo o null, posición s).</summary>
+    public event Action<Cue?, double>? EditScrubbed
+    {
+        add => _canvas.EditScrubbed += value;
+        remove => _canvas.EditScrubbed -= value;
+    }
+
     /// <summary>Menú contextual: disparar un cue por id.</summary>
     public Action<int>? TriggerRequested
     {
@@ -167,6 +174,8 @@ public sealed class TimelineCanvas : FrameworkElement
     private static readonly Pen TickPen = FrozenPen(Color.FromRgb(0x55, 0x55, 0x58), 1);
     private static readonly Pen TickMinorPen = FrozenPen(Color.FromRgb(0x30, 0x30, 0x33), 1);
     private static readonly Pen PlayheadPen = FrozenPen(Color.FromRgb(0xc0, 0x39, 0x2b), 2);
+    private static readonly Pen EditCursorPen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
+    private static readonly Brush EditCursorBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)));
     private static readonly Pen SelectedPen = FrozenPen(Color.FromRgb(0xff, 0xff, 0xff), 1.5);
     private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xee, 0xee, 0xee)));
     private static readonly Brush FadeBrush = Frozen(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)));
@@ -207,8 +216,16 @@ public sealed class TimelineCanvas : FrameworkElement
     /// <summary>Doble clic en un bloque: abrir ese cue en el inspector.</summary>
     public event Action<int>? CueActivated;
 
+    /// <summary>Scrub del cursor de edición: (cue de vídeo bajo el cursor o
+    /// null, posición dentro del media en s). La vista lo manda al PVW.</summary>
+    public event Action<Cue?, double>? EditScrubbed;
+
     private CueModel? _model;
     private int _selectedId = -1;
+
+    // Cursor de EDICIÓN (ámbar): se coloca/arrastra libremente en modo EDIT
+    private double? _editCursor;
+    private bool _dragCursor;
 
     private double _pxPerSec = 20;
     private double _scrollX;
@@ -678,6 +695,21 @@ public sealed class TimelineCanvas : FrameworkElement
                     new Point(x + 4, RulerH + 1));
             }
         }
+
+        // Cursor de EDICIÓN (ámbar, arrastrable): scrub del show
+        if (_editCursor is double ec)
+        {
+            double x = SecToX(ec);
+            if (x >= -10 && x <= w + 10)
+            {
+                dc.DrawLine(EditCursorPen, new Point(x, 0), new Point(x, h));
+                // Asa triangular en la regla
+                dc.DrawGeometry(EditCursorBrush, null, Triangle(
+                    new Point(x - 6, 0), new Point(x + 6, 0), new Point(x, 12)));
+                dc.DrawText(Label(FmtTime(ec), EditCursorBrush, 10),
+                    new Point(x + 5, 2));
+            }
+        }
     }
 
     /// <summary>Geometría del recuadro de un grupo: caja, asa (chip con el
@@ -928,6 +960,23 @@ public sealed class TimelineCanvas : FrameworkElement
         if (e.ChangedButton != MouseButton.Left || _model is null)
             return;
         var p = e.GetPosition(this);
+
+        // Cursor de EDICIÓN: clic en la regla lo coloca; cerca de su línea lo
+        // agarra. Solo en modo EDIT (en SHOW el timeline es de solo lectura).
+        if (IsEditAllowed?.Invoke() ?? true)
+        {
+            bool onRuler = p.Y < RulerH;
+            bool nearCursor = _editCursor is double c
+                && Math.Abs(SecToX(c) - p.X) <= 6;
+            if (onRuler || nearCursor)
+            {
+                _dragCursor = true;
+                CaptureMouse();
+                UpdateEditCursor(p.X);
+                return;
+            }
+        }
+
         // Prioridad: asa del grupo → bloque → cuerpo del recuadro
         Cue? cue;
         bool isGroup;
@@ -1016,6 +1065,11 @@ public sealed class TimelineCanvas : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var p = e.GetPosition(this);
+        if (_dragCursor)
+        {
+            UpdateEditCursor(p.X);
+            return;
+        }
         if (_dragCue is null)
         {
             var over = HitSpanChip(p) is null ? HitBlock(p) : null;
@@ -1079,6 +1133,12 @@ public sealed class TimelineCanvas : FrameworkElement
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
+        if (_dragCursor)
+        {
+            _dragCursor = false;
+            ReleaseMouseCapture();
+            return;
+        }
         if (_dragCue is null)
             return;
         var cue = _dragCue;
@@ -1137,6 +1197,31 @@ public sealed class TimelineCanvas : FrameworkElement
                 AutoCrossfadeAround(cue);
         }
         RefreshFromModel();
+    }
+
+    /// <summary>Mueve el cursor de edición y hace SCRUB: busca el vídeo de la
+    /// pista más alta bajo el cursor y emite su posición dentro del media
+    /// (la vista lo enseña pausado en el PVW, fotograma exacto).</summary>
+    private void UpdateEditCursor(double px)
+    {
+        double t = Math.Max(0, XToSec(px));
+        _editCursor = t;
+
+        Cue? video = null;
+        int bestLayer = int.MaxValue;
+        double mediaPos = 0;
+        foreach (var b in _blocks)
+        {
+            if (b.Cue.Type != CueType.Video || b.Dur <= 0)
+                continue;
+            if (t < b.Start || t > b.Start + b.Dur || b.Layer >= bestLayer)
+                continue;
+            bestLayer = b.Layer;
+            video = b.Cue;
+            mediaPos = b.Cue.TrimStart + (t - b.Start);
+        }
+        EditScrubbed?.Invoke(video, mediaPos);
+        InvalidateVisual();
     }
 
     /// <summary>Tras un arrastre, si el cue queda SOLAPADO con su hermano
@@ -1365,6 +1450,12 @@ public sealed class TimelineCanvas : FrameworkElement
             menu.Items.Add(MainWindow.Mi("Ajustar a la ventana", "", ZoomToFit));
             menu.Items.Add(MainWindow.Mi("Acercar", "Ctrl+rueda", () => ZoomStep(1.4)));
             menu.Items.Add(MainWindow.Mi("Alejar", "Ctrl+rueda", () => ZoomStep(1 / 1.4)));
+            if (_editCursor is not null)
+                menu.Items.Add(MainWindow.Mi("Quitar cursor de edición", "", () =>
+                {
+                    _editCursor = null;
+                    InvalidateVisual();
+                }));
         }
         menu.PlacementTarget = this;
         menu.IsOpen = true;

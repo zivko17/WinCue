@@ -112,6 +112,12 @@ public partial class MainWindow : Window, IShowView
             CueGrid.SelectedIndex = row;
             BottomTabs.SelectedIndex = 1;   // pestaña del inspector
         };
+        // Cursor de edición del timeline → scrub en el monitor PVW
+        Timeline.EditScrubbed += (videoCue, mediaSeconds) =>
+        {
+            if (videoCue is { FilePath.Length: > 0 })
+                _pvw.ShowPaused(videoCue.FilePath, mediaSeconds);
+        };
         Timeline.TriggerRequested = cueId => _controller.TriggerCueId(cueId);
         Timeline.StopRequested = cueId =>
         {
