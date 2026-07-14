@@ -1219,6 +1219,16 @@ public class MainController
         _playhead = count == 0 ? 0 : Math.Clamp(index, 0, count);  // count = "más allá del final"
         ActiveIndexChanged?.Invoke(_playhead);
         _view.SetPlayhead(_playhead);
+
+        // Precargar el media del standby: el GO no paga la verificación
+        var next = _model.GetCue(_playhead);
+        if (next is { FilePath.Length: > 0 })
+        {
+            if (next.Type == CueType.Video)
+                _video.PreloadNext(next.Id, next.FilePath);
+            else if (next.Type == CueType.Audio)
+                _audio.Preload(next.Id, next.FilePath);
+        }
     }
 
     private void ModelState(int index, CueState state)
@@ -1825,6 +1835,7 @@ public class MainController
         }
         try
         {
+            RotateBackups(path);
             File.WriteAllText(path, _model.ToJson());
             HasUnsavedChanges = false;
             Log($"Show guardado: {path}");
@@ -1839,6 +1850,26 @@ public class MainController
             foreach (var c in _model.Cues)
                 if (originals.TryGetValue(c.Id, out string? orig))
                     c.FilePath = orig;
+        }
+    }
+
+    /// <summary>Copias de seguridad rotadas al SOBRESCRIBIR un show:
+    /// show.json → show.json.bak1 → .bak2 → .bak3. Un guardado malo en
+    /// directo nunca es irreversible.</summary>
+    private static void RotateBackups(string path)
+    {
+        if (!File.Exists(path))
+            return;
+        try
+        {
+            for (int i = 2; i >= 1; i--)
+                if (File.Exists($"{path}.bak{i}"))
+                    File.Copy($"{path}.bak{i}", $"{path}.bak{i + 1}", overwrite: true);
+            File.Copy(path, $"{path}.bak1", overwrite: true);
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            // Sin backup no se bloquea el guardado principal
         }
     }
 

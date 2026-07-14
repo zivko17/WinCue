@@ -52,6 +52,23 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void SaveShow_RotatesBackupsOnOverwrite()
+    {
+        AddCue(CueType.Memo, "v1");
+        string path = Path.Combine(TempDir, "show.json");
+
+        Controller.SaveShow(path);
+        Assert.False(File.Exists($"{path}.bak1"));   // primera vez: sin backup
+
+        Controller.OnCueEditCommitted(0, new Dictionary<string, object?>
+        { ["name"] = "v2" });
+        Controller.SaveShow(path);
+        Assert.True(File.Exists($"{path}.bak1"));
+        Assert.Contains("v1", File.ReadAllText($"{path}.bak1"));
+        Assert.Contains("v2", File.ReadAllText(path));
+    }
+
+    [Fact]
     public void Undo_AfterLoadShow_RestoresPreviousShow()
     {
         AddCue(CueType.Memo, "antiguo");
