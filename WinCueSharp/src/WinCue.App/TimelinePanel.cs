@@ -105,8 +105,8 @@ public sealed class TimelinePanel : Border
 
         var hint = new TextBlock
         {
-            Text = "arrastrar: tiempo · vertical: fijar pista · recuadro = grupo · " +
-                   "Ctrl+rueda: zoom · ▸GO = disparo manual (tiempo estimado)",
+            Text = "arrastrar: tiempo · sobre el anterior = SOLAPAR (paralelo) · " +
+                   "vertical: pista · Ctrl+rueda: zoom · ▸GO = disparo manual",
             Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)),
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,
@@ -1030,7 +1030,9 @@ public sealed class TimelineCanvas : FrameworkElement
         switch (_dragMode)
         {
             case DragMode.Move:
-                _dragPreWait = Math.Max(0, _dragOrigPreWait + dSec);
+                // Se permite "negativo" en la vista previa: arrastrar sobre el
+                // cue anterior = solapar (al soltar se encadena en paralelo)
+                _dragPreWait = _dragOrigPreWait + dSec;
                 // Vertical: fijar la pista (los grupos solo se mueven en tiempo)
                 if (!_dragIsGroup && Math.Abs(p.Y - _dragStart.Y) > LayerH * 0.5)
                     _dragLayer = Math.Clamp(
@@ -1092,8 +1094,12 @@ public sealed class TimelineCanvas : FrameworkElement
                 case DragMode.Move:
                     if (!TryReorder(cue, preWait - _dragOrigPreWait))
                     {
-                        if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
-                            CommitField?.Invoke(cue.Id, "pre_wait", preWait);
+                        double committed = preWait < -1e-9
+                            ? LinkOverlapWithPrev(cue, preWait)
+                            : preWait;
+                        if (Math.Abs(committed - _dragOrigPreWait) > 1e-9)
+                            CommitField?.Invoke(cue.Id, "pre_wait",
+                                Math.Max(0, committed));
                         if (!isGroup && layer != _dragOrigLayer)
                             CommitField?.Invoke(cue.Id, "timeline_layer", layer);
                     }
@@ -1113,6 +1119,38 @@ public sealed class TimelineCanvas : FrameworkElement
             }
         }
         RefreshFromModel();
+    }
+
+    /// <summary>El bloque se soltó ANTES de su punto de disparo (montado sobre
+    /// el cue anterior): encadenarlos en PARALELO — el anterior pasa a
+    /// AUTO_CONTINUE y este cue recibe el pre_wait que lo deja exactamente
+    /// donde se soltó. Es lo que hace que "las capas se junten" en el timeline.
+    /// Dentro de un grupo TIMELINE los hijos ya son paralelos: ahí solo se
+    /// recorta el offset a 0 (encadenar duplicaría disparos).</summary>
+    private double LinkOverlapWithPrev(Cue cue, double draggedPre)
+    {
+        if (_model is null)
+            return 0;
+
+        // Hijo de grupo TIMELINE: el paralelismo ya existe vía pre_wait
+        if (cue.ParentId is int pid &&
+            _model.GetById(pid) is { Type: CueType.Group, GroupMode: GroupMode.Timeline })
+            return Math.Max(0, draggedPre);
+
+        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
+        int pos = siblings.FindIndex(c => c.Id == cue.Id);
+        if (pos <= 0
+            || !_startById.TryGetValue(cue.Id, out double cleanStart)
+            || !_startById.TryGetValue(siblings[pos - 1].Id, out double prevStart))
+            return 0;
+
+        var prev = siblings[pos - 1];
+        double desired = cleanStart + (draggedPre - _dragOrigPreWait);
+        double newTrigger = prevStart + prev.PostWait;   // disparo con AUTO_CONTINUE
+
+        if (prev.ContinueMode != ContinueMode.AutoContinue)
+            CommitField?.Invoke(prev.Id, "continue_mode", "AUTO_CONTINUE");
+        return Math.Max(0, desired - newTrigger);
     }
 
     /// <summary>Si el bloque (o grupo) se soltó más allá de su hermano
