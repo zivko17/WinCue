@@ -843,8 +843,12 @@ public partial class MainWindow : Window, IShowView
             menu.Items.Add(Mi("▶ Disparar (sin mover playhead)", "",
                 () => _controller.TriggerCueId(cue.Id)));
             if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
+            {
                 menu.Items.Add(Mi("🎧 Audición (cascos)", "",
                     () => _controller.AuditionToggle(row)));
+                menu.Items.Add(Mi("𝄞 Normalizar sonoridad (−16 LUFS)", "",
+                    () => NormalizeLoudness(selRows), edit));
+            }
             menu.Items.Add(Mi("⏸ Pausar / reanudar", "Ctrl+P",
                 () => _controller.OnPauseCueToggle(row), running && cue.IsMedia()));
             menu.Items.Add(Mi("■ Detener", "S",
@@ -957,6 +961,35 @@ public partial class MainWindow : Window, IShowView
         };
         item.Click += (_, _) => onClick();
         return item;
+    }
+
+    /// <summary>Analiza la sonoridad (LUFS) de los cues de audio seleccionados
+    /// en segundo plano y fija su gain_db para dejarlos a −16 LUFS.</summary>
+    private async void NormalizeLoudness(IReadOnlyList<int> rows)
+    {
+        const double target = -16.0;
+        var cues = rows.Select(r => _model.GetCue(r))
+            .Where(c => c is { Type: CueType.Audio, FilePath.Length: > 0 })
+            .Cast<Cue>().ToList();
+        if (cues.Count == 0)
+            return;
+        int done = 0;
+        foreach (var cue in cues)
+        {
+            FlashStatus($"𝄞 Midiendo sonoridad de «{cue.Name}»… ({++done}/{cues.Count})");
+            double? lufs = await System.Threading.Tasks.Task.Run(
+                () => MediaImporter.MeasureLufs(cue.FilePath));
+            if (lufs is null)
+            {
+                FlashStatus($"𝄞 «{cue.Name}»: no se pudo medir (¿ffmpeg en PATH?)");
+                continue;
+            }
+            double gain = Math.Clamp(Math.Round(target - lufs.Value, 1), -24.0, 12.0);
+            int row = _model.IndexOfId(cue.Id);
+            if (row >= 0)
+                CommitRowField(row, "gain_db", gain);
+            FlashStatus($"𝄞 «{cue.Name}»: {lufs:0.1} LUFS → ganancia {gain:+0.0;-0.0} dB");
+        }
     }
 
     private void CommitRowField(int row, string key, object? value)

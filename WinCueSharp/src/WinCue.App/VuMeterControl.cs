@@ -33,11 +33,14 @@ public sealed class VuMeterControl : FrameworkElement
             new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 1.0),
         }, 90));
 
+    private static readonly Brush ClipBrush = Make(new SolidColorBrush(Color.FromRgb(0xff, 0x20, 0x20)));
+
     private readonly bool _vertical;
     private double _level;          // 0..1
     private double _peak;           // 0..1 con hold
     private long _peakTicks;
     private long _lastUpdateTicks;
+    private long _clipTicks;        // clip-hold: enganchado 3 s tras saturar
     private readonly DispatcherTimer _decay;
 
     /// <summary>Constructor sin parámetros para XAML (horizontal).</summary>
@@ -77,6 +80,8 @@ public sealed class VuMeterControl : FrameworkElement
             _peak = norm;
             _peakTicks = now;
         }
+        if (rms >= 0.985f)   // ~0 dBFS: saturación → clip enganchado
+            _clipTicks = now;
         InvalidateVisual();
     }
 
@@ -112,6 +117,17 @@ public sealed class VuMeterControl : FrameworkElement
         double w = ActualWidth, h = ActualHeight;
         // Fondo + marco: el medidor se ve SIEMPRE, también en silencio
         dc.DrawRectangle(BgBrush, FramePen, new Rect(0.5, 0.5, w - 1, h - 1));
+
+        // Clip-hold: testigo ROJO enganchado 3 s tras tocar 0 dBFS
+        bool clipped = _clipTicks != 0 && System.Diagnostics.Stopwatch
+            .GetElapsedTime(_clipTicks).TotalMilliseconds < 3_000;
+        if (clipped)
+        {
+            var led = _vertical
+                ? new Rect(0.5, 0.5, w - 1, 5)
+                : new Rect(w - 5.5, 0.5, 5, h - 1);
+            dc.DrawRectangle(ClipBrush, null, led);
+        }
 
         if (_vertical)
         {

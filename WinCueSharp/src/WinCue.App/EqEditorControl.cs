@@ -37,6 +37,9 @@ public sealed class EqEditorControl : ContentControl
     private readonly TextBlock _gainLabel;
     private readonly CheckBox _eqOn, _hpfOn, _lpfOn;
     private readonly TextBox _hpfFreq, _lpfFreq;
+    private CheckBox _compOn = null!;
+    private TextBox _compThr = null!, _compRatio = null!, _compAtt = null!,
+        _compRel = null!, _compMakeup = null!;
     private readonly TextBlock _readout;
     private readonly TextBlock _noAudio;
     private readonly Grid _root;
@@ -150,6 +153,31 @@ public sealed class EqEditorControl : ContentControl
         left.Children.Add(rtaGain);
         left.Children.Add(rtaLabel);
         bottom.Children.Add(left);
+
+        // ── Fila 2: compresor por clip ─────────────────────────────────
+        var compRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            Margin = new Thickness(0, 3, 0, 0),
+        };
+        _compOn = MakeCheck("COMP", "comp_enabled");
+        compRow.Children.Add(_compOn);
+        compRow.Children.Add(FieldLabel("Umbral"));
+        _compThr = MakeNumBox("comp_threshold", -60, 0);
+        compRow.Children.Add(_compThr);
+        compRow.Children.Add(FieldLabel("dB · Ratio"));
+        _compRatio = MakeNumBox("comp_ratio", 1, 20);
+        compRow.Children.Add(_compRatio);
+        compRow.Children.Add(FieldLabel(":1 · Ataque"));
+        _compAtt = MakeNumBox("comp_attack", 0.1, 200);
+        compRow.Children.Add(_compAtt);
+        compRow.Children.Add(FieldLabel("ms · Rel"));
+        _compRel = MakeNumBox("comp_release", 5, 2000);
+        compRow.Children.Add(_compRel);
+        compRow.Children.Add(FieldLabel("ms · Makeup"));
+        _compMakeup = MakeNumBox("comp_makeup", 0, 24);
+        compRow.Children.Add(_compMakeup);
+        compRow.Children.Add(FieldLabel("dB"));
         _readout = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
@@ -160,9 +188,12 @@ public sealed class EqEditorControl : ContentControl
             Text = "arrastra un punto: frec/ganancia · rueda: Q",
         };
         bottom.Children.Add(_readout);
-        Grid.SetColumn(bottom, 1);
-        Grid.SetRow(bottom, 1);
-        _root.Children.Add(bottom);
+        var rows = new StackPanel();
+        rows.Children.Add(bottom);
+        rows.Children.Add(compRow);
+        Grid.SetColumn(rows, 1);
+        Grid.SetRow(rows, 1);
+        _root.Children.Add(rows);
 
         _noAudio = new TextBlock
         {
@@ -196,6 +227,37 @@ public sealed class EqEditorControl : ContentControl
         cb.Checked += (_, _) => { if (!_loading) Commit?.Invoke(key, true); _canvas.InvalidateVisual(); };
         cb.Unchecked += (_, _) => { if (!_loading) Commit?.Invoke(key, false); _canvas.InvalidateVisual(); };
         return cb;
+    }
+
+    private static TextBlock FieldLabel(string text) => new()
+    {
+        Text = text,
+        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(4, 0, 3, 0),
+        FontSize = 11,
+    };
+
+    private TextBox MakeNumBox(string key, double min, double max)
+    {
+        var box = new TextBox
+        {
+            Width = 44,
+            VerticalContentAlignment = VerticalAlignment.Center,
+            Background = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x1a)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+        };
+        void CommitBox()
+        {
+            if (_loading || !double.TryParse(box.Text.Replace(',', '.'),
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                return;
+            Commit?.Invoke(key, Math.Clamp(v, min, max));
+        }
+        box.LostFocus += (_, _) => CommitBox();
+        box.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitBox(); };
+        return box;
     }
 
     private TextBox MakeFreqBox(string key)
@@ -250,6 +312,12 @@ public sealed class EqEditorControl : ContentControl
             _lpfOn.IsChecked = cue.LpfOn;
             _hpfFreq.Text = cue.HpfFreq.ToString("0", CultureInfo.InvariantCulture);
             _lpfFreq.Text = cue.LpfFreq.ToString("0", CultureInfo.InvariantCulture);
+            _compOn.IsChecked = cue.CompEnabled;
+            _compThr.Text = cue.CompThreshold.ToString("0.#", CultureInfo.InvariantCulture);
+            _compRatio.Text = cue.CompRatio.ToString("0.#", CultureInfo.InvariantCulture);
+            _compAtt.Text = cue.CompAttack.ToString("0.#", CultureInfo.InvariantCulture);
+            _compRel.Text = cue.CompRelease.ToString("0", CultureInfo.InvariantCulture);
+            _compMakeup.Text = cue.CompMakeup.ToString("0.#", CultureInfo.InvariantCulture);
         }
         finally
         {

@@ -22,10 +22,20 @@ public sealed class EqChain
         public double[] Z2 = Array.Empty<double>();
     }
 
+    /// <summary>Compresor feed-forward (detector de pico, enlazado en estéreo).</summary>
+    private sealed class Comp
+    {
+        public double ThLin, InvRatioComp;   // (1 - 1/ratio)
+        public double AttCoef, RelCoef;      // suavizado exponencial
+        public double MakeupLin;
+        public double Env;                   // envolvente (estado del RT)
+    }
+
     private readonly int _sampleRate;
     private readonly int _channels;
     private Stage[] _stages = Array.Empty<Stage>();   // swap atómico de referencia
     private volatile float _gainLin = 1.0f;
+    private Comp? _comp;                              // swap atómico de referencia
 
     public EqChain(int sampleRate, int channels)
     {
@@ -40,9 +50,27 @@ public sealed class EqChain
         {
             _gainLin = 1.0f;
             _stages = Array.Empty<Stage>();
+            _comp = null;
             return;
         }
         _gainLin = (float)DbToLin(eq.GainDb);
+
+        if (eq.Comp is { Enabled: true } c)
+        {
+            _comp = new Comp
+            {
+                ThLin = DbToLin(c.ThresholdDb),
+                InvRatioComp = 1.0 - 1.0 / Math.Max(1.0, c.Ratio),
+                AttCoef = Math.Exp(-1.0 / (Math.Max(0.1, c.AttackMs) / 1000.0 * _sampleRate)),
+                RelCoef = Math.Exp(-1.0 / (Math.Max(5.0, c.ReleaseMs) / 1000.0 * _sampleRate)),
+                MakeupLin = DbToLin(c.MakeupDb),
+                Env = _comp?.Env ?? 0.0,   // continuidad al editar en vivo
+            };
+        }
+        else
+        {
+            _comp = null;
+        }
 
         var old = _stages;
         var list = new List<Stage>();
@@ -74,8 +102,6 @@ public sealed class EqChain
                 buffer[offset + i] *= g;
 
         var stages = _stages;
-        if (stages.Length == 0)
-            return;
         int ch = _channels;
         foreach (var s in stages)
         {
@@ -92,6 +118,33 @@ public sealed class EqChain
                 }
             }
         }
+
+        // Compresor (post-EQ), detector de pico enlazado entre canales
+        var comp = _comp;
+        if (comp is null)
+            return;
+        double env = comp.Env;
+        for (int i = 0; i + ch <= samples; i += ch)
+        {
+            double peak = 0;
+            for (int c = 0; c < ch; c++)
+            {
+                double a = Math.Abs(buffer[offset + i + c]);
+                if (a > peak) peak = a;
+            }
+            double coef = peak > env ? comp.AttCoef : comp.RelCoef;
+            env = coef * env + (1.0 - coef) * peak;
+
+            double gain = comp.MakeupLin;
+            if (env > comp.ThLin)
+            {
+                double overDb = 20.0 * Math.Log10(env / comp.ThLin);
+                gain *= Math.Pow(10.0, -overDb * comp.InvRatioComp / 20.0);
+            }
+            for (int c = 0; c < ch; c++)
+                buffer[offset + i + c] = (float)(buffer[offset + i + c] * gain);
+        }
+        comp.Env = env;
     }
 
     // ------------------------------------------------------------------

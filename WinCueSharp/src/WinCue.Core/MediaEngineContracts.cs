@@ -15,8 +15,17 @@ public enum MediaCueState { Idle, Loading, Loaded, Playing, Stopped, Error }
 /// <summary>Banda paramétrica de EQ (frecuencia central, ganancia y ancho).</summary>
 public sealed record EqBand(double Freq, double GainDb, double Q);
 
+/// <summary>Compresor por clip (post-EQ): umbral/ratio con ataque y release.</summary>
+public sealed record AudioCompParams(
+    bool Enabled = false,
+    double ThresholdDb = -18.0,
+    double Ratio = 3.0,
+    double AttackMs = 10.0,
+    double ReleaseMs = 120.0,
+    double MakeupDb = 0.0);
+
 /// <summary>Procesado de audio de un cue: ganancia de clip (dB, pre-EQ),
-/// HPF/LPF y hasta 4 bandas paramétricas. null = sin procesado.</summary>
+/// HPF/LPF, hasta 4 bandas paramétricas y compresor. null = sin procesado.</summary>
 public sealed record AudioEqParams(
     double GainDb = 0.0,
     bool EqEnabled = false,
@@ -24,7 +33,8 @@ public sealed record AudioEqParams(
     double HpfFreq = 80.0,
     bool LpfOn = false,
     double LpfFreq = 12000.0,
-    IReadOnlyList<EqBand>? Bands = null);
+    IReadOnlyList<EqBand>? Bands = null,
+    AudioCompParams? Comp = null);
 
 /// <summary>Parámetros de reproducción de un cue de audio.
 /// OutputDevice: nombre del dispositivo de salida ("" = el principal).</summary>
@@ -37,7 +47,8 @@ public sealed record AudioPlayParams(
     double TrimEnd = 0.0,
     int PlayCount = 1,
     string OutputDevice = "",
-    AudioEqParams? Eq = null);
+    AudioEqParams? Eq = null,
+    double Rate = 1.0);
 
 /// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
 public sealed record VideoGeometry(

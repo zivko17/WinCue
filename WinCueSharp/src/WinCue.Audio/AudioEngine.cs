@@ -417,7 +417,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             CueLevelReport?.Invoke(cueId, l, r);
         });
 
-        var input = AdaptToMixerFormat(provider);
+        var input = AdaptToMixerFormat(provider, p.Rate);
         _active[cueId] = new ActiveCue(provider, input, bus);
         mixer.AddMixerInput(input);
         SetState(cueId, MediaCueState.Playing);
@@ -425,8 +425,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
     /// <summary>Adapta canales y samplerate del cue al formato del mixer
     /// (estéreo, _mixSampleRate). El fade se calcula ANTES de resamplear,
-    /// en frames del archivo → sample-accurate respecto al material.</summary>
-    private ISampleProvider AdaptToMixerFormat(ISampleProvider source)
+    /// en frames del archivo → sample-accurate respecto al material.
+    /// rate ≠ 1 → VARISPEED (estilo cinta: la velocidad cambia el tono): se
+    /// resamplea a mixRate/rate y se declara mixRate, con lo que el mixer
+    /// consume el material rate× más rápido/lento.</summary>
+    private ISampleProvider AdaptToMixerFormat(ISampleProvider source, double rate = 1.0)
     {
         // Canales → estéreo
         if (source.WaveFormat.Channels == 1)
@@ -434,11 +437,36 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         else if (source.WaveFormat.Channels > 2)
             source = new TakeFirstChannelsProvider(source, 2);
 
-        // Samplerate → el del mixer
-        if (source.WaveFormat.SampleRate != _mixSampleRate)
-            source = new WdlResamplingSampleProvider(source, _mixSampleRate);
+        rate = Math.Clamp(rate, 0.25, 4.0);
+        int targetRate = Math.Abs(rate - 1.0) < 0.001
+            ? _mixSampleRate
+            : Math.Max(4000, (int)(_mixSampleRate / rate));
+
+        if (source.WaveFormat.SampleRate != targetRate)
+            source = new WdlResamplingSampleProvider(source, targetRate);
+
+        if (targetRate != _mixSampleRate)
+            source = new ClaimedFormatProvider(source,
+                WaveFormat.CreateIeeeFloatWaveFormat(_mixSampleRate, 2));
 
         return source;
+    }
+
+    /// <summary>Pasa el audio tal cual pero DECLARA otro formato (truco del
+    /// varispeed: el mixer consume samples "lentos" a su propia velocidad).</summary>
+    private sealed class ClaimedFormatProvider : ISampleProvider
+    {
+        private readonly ISampleProvider _inner;
+        public WaveFormat WaveFormat { get; }
+
+        public ClaimedFormatProvider(ISampleProvider inner, WaveFormat claimed)
+        {
+            _inner = inner;
+            WaveFormat = claimed;
+        }
+
+        public int Read(float[] buffer, int offset, int count) =>
+            _inner.Read(buffer, offset, count);
     }
 
     /// <summary>Devuelve (creando si hace falta) el mixer del bus dado.

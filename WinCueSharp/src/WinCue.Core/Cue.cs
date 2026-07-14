@@ -64,6 +64,14 @@ public class Cue
     [JsonPropertyName("eq4_gain")]   public double Eq4Gain   { get; set; }
     [JsonPropertyName("eq4_q")]      public double Eq4Q      { get; set; } = 1.0;
 
+    // ── Compresor por clip (post-EQ) — campos C#-only ──────────────────
+    [JsonPropertyName("comp_enabled")]   public bool   CompEnabled   { get; set; }
+    [JsonPropertyName("comp_threshold")] public double CompThreshold { get; set; } = -18.0; // dBFS
+    [JsonPropertyName("comp_ratio")]     public double CompRatio     { get; set; } = 3.0;
+    [JsonPropertyName("comp_attack")]    public double CompAttack    { get; set; } = 10.0;  // ms
+    [JsonPropertyName("comp_release")]   public double CompRelease   { get; set; } = 120.0; // ms
+    [JsonPropertyName("comp_makeup")]    public double CompMakeup    { get; set; }          // dB
+
     // ── Cues que apuntan a otro cue (FADE/START/STOP) ──────────────────
     [JsonPropertyName("target_id")]         public int? TargetId       { get; set; }
     [JsonPropertyName("fade_stop_on_done")] public bool FadeStopOnDone { get; set; } = true;
@@ -179,5 +187,10 @@ public class Cue
         Eq2Q = Math.Clamp(Eq2Q, 0.1, 12.0);
         Eq3Q = Math.Clamp(Eq3Q, 0.1, 12.0);
         Eq4Q = Math.Clamp(Eq4Q, 0.1, 12.0);
+        CompThreshold = Math.Clamp(CompThreshold, -60.0, 0.0);
+        CompRatio     = Math.Clamp(CompRatio, 1.0, 20.0);
+        CompAttack    = Math.Clamp(CompAttack, 0.1, 200.0);
+        CompRelease   = Math.Clamp(CompRelease, 5.0, 2000.0);
+        CompMakeup    = Math.Clamp(CompMakeup, 0.0, 24.0);
     }
 }

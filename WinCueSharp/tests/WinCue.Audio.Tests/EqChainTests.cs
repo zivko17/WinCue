@@ -126,6 +126,38 @@ public class EqChainTests
     }
 
     [Fact]
+    public void Compresor_ReduceLoQueSuperaElUmbral()
+    {
+        var chain = new EqChain(48000, 1);
+        chain.Configure(new AudioEqParams(Comp: new AudioCompParams(
+            Enabled: true, ThresholdDb: -20.0, Ratio: 4.0,
+            AttackMs: 1.0, ReleaseMs: 50.0)));
+        var buf = Sine(1000, 48000, 48000);   // 0 dBFS pico: 20 dB sobre umbral
+
+        chain.Process(buf, 0, buf.Length);
+
+        // 20 dB de exceso a ratio 4:1 → ~15 dB de reducción
+        double rms = Rms(buf, 9600);
+        Assert.True(rms < 0.71 * 0.35, $"RMS: {rms} (sin reducción sería 0.707)");
+    }
+
+    [Fact]
+    public void Compresor_NoTocaLoQueQuedaBajoElUmbral()
+    {
+        var chain = new EqChain(48000, 1);
+        chain.Configure(new AudioEqParams(Comp: new AudioCompParams(
+            Enabled: true, ThresholdDb: -6.0, Ratio: 8.0)));
+        var buf = Sine(1000, 48000, 24000);
+        for (int i = 0; i < buf.Length; i++)
+            buf[i] *= 0.1f;   // −20 dBFS, muy por debajo del umbral
+        double before = Rms(buf, 4800);
+
+        chain.Process(buf, 0, buf.Length);
+
+        Assert.Equal(before, Rms(buf, 4800), 3);
+    }
+
+    [Fact]
     public void Estereo_ProcesaLosDosCanalesIgual()
     {
         var chain = new EqChain(48000, 2);

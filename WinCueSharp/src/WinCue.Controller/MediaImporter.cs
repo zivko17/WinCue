@@ -90,6 +90,48 @@ public static class MediaImporter
         return (true, "");
     }
 
+    /// <summary>Sonoridad integrada (LUFS) del archivo vía ffmpeg loudnorm.
+    /// LENTO (decodifica el archivo entero): llamar en segundo plano.
+    /// null si ffmpeg no está disponible o el archivo no tiene audio.</summary>
+    public static double? MeasureLufs(string filePath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-hide_banner");
+            psi.ArgumentList.Add("-nostats");
+            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(filePath);
+            psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("0:a:0");
+            psi.ArgumentList.Add("-af");
+            psi.ArgumentList.Add("loudnorm=I=-16:TP=-1.5:LRA=11:print_format=json");
+            psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("null");
+            psi.ArgumentList.Add("-");
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null)
+                return null;
+            string stderr = proc.StandardError.ReadToEnd();
+            proc.WaitForExit(120_000);
+
+            // loudnorm imprime un JSON al final: buscar "input_i" : "-23.1"
+            var match = System.Text.RegularExpressions.Regex.Match(stderr,
+                "\"input_i\"\\s*:\\s*\"(?<v>-?[0-9.]+)\"");
+            if (!match.Success)
+                return null;
+            return double.Parse(match.Groups["v"].Value,
+                System.Globalization.CultureInfo.InvariantCulture);
+        }
+        catch (Exception)
+        {
+            return null;   // sin ffmpeg / archivo ilegible
+        }
+    }
+
     /// <summary>Duración del media en segundos vía ffprobe (0 si no disponible).
     /// Las imágenes no tienen duración → 0.</summary>
     public static double ProbeDurationSeconds(string filePath)

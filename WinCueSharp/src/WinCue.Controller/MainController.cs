@@ -217,7 +217,10 @@ public class MainController
             new EqBand(c.Eq2Freq, c.Eq2Gain, c.Eq2Q),
             new EqBand(c.Eq3Freq, c.Eq3Gain, c.Eq3Q),
             new EqBand(c.Eq4Freq, c.Eq4Gain, c.Eq4Q),
-        });
+        },
+        Comp: new AudioCompParams(
+            c.CompEnabled, c.CompThreshold, c.CompRatio,
+            c.CompAttack, c.CompRelease, c.CompMakeup));
 
     /// <summary>Espectro para el RTA del inspector: del cue sonando, o de su
     /// audición local si es lo que está sonando.</summary>
@@ -647,10 +650,11 @@ public class MainController
                     Volume: cue.Volume, FadeIn: cue.FadeIn, FadeOut: cue.FadeOut,
                     Loop: cue.Loop, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
                     PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
-                    Eq: EqFor(cue)));
+                    Eq: EqFor(cue), Rate: cue.Rate));
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(run.Duration * 1000), () => DurationElapsed(cue.Id));
+                    Schedule(run, (int)(run.Duration / RateOf(cue) * 1000),
+                        () => DurationElapsed(cue.Id));
                 PreloadUpcoming();
                 break;
 
@@ -679,7 +683,8 @@ public class MainController
                 }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(run.Duration * 1000), () => DurationElapsed(cue.Id));
+                    Schedule(run, (int)(run.Duration / RateOf(cue) * 1000),
+                        () => DurationElapsed(cue.Id));
                 break;
 
             case CueType.Wait:
@@ -722,6 +727,10 @@ public class MainController
                 break;
         }
     }
+
+    /// <summary>Velocidad de reproducción (el timer de fin corre en tiempo de
+    /// PARED: un media de 60 s a rate 0,5 tarda 120 s reales).</summary>
+    private static double RateOf(Cue c) => Math.Clamp(c.Rate, 0.25, 4.0);
 
     /// <summary>Duración efectiva de la ACCIÓN: en media, con el TRIM aplicado
     /// (el countdown y el timer de fin deben medir lo que va a sonar de
@@ -1731,7 +1740,8 @@ public class MainController
     private static bool IsEqKey(string key) =>
         key is "gain_db" or "eq_enabled" or "hpf_on" or "hpf_freq"
             or "lpf_on" or "lpf_freq"
-        || key.StartsWith("eq", StringComparison.Ordinal);
+        || key.StartsWith("eq", StringComparison.Ordinal)
+        || key.StartsWith("comp", StringComparison.Ordinal);
 
     // ------------------------------------------------------------------
     // Guardar / cargar show en JSON (la vista pone los diálogos)
