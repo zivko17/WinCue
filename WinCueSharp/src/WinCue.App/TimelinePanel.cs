@@ -242,8 +242,11 @@ public sealed class TimelineCanvas : FrameworkElement
     // Cues activos (cursor + progreso), del tick real del controlador
     private readonly Dictionary<int, double> _activeElapsed = new();
 
-    // Arrastre (bloque o recuadro de grupo)
+    // Arrastre (mover bloque/grupo, o redimensionar por los bordes)
+    private enum DragMode { Move, ResizeL, ResizeR }
+
     private Cue? _dragCue;
+    private DragMode _dragMode;
     private bool _dragIsGroup;
     private bool _dragMoved;
     private Point _dragStart;
@@ -251,6 +254,15 @@ public sealed class TimelineCanvas : FrameworkElement
     private int _dragOrigLayer;       // timeline_layer original (-1 = auto)
     private double _dragPreWait;
     private int _dragLayer;
+    // Redimensionado: borde izq = pre_wait+trim_start (deslizar punto de
+    // entrada), borde dcho = trim_end (media) o duration (wait/fade)
+    private double _dragOrigTrimStart, _dragOrigTrimEnd, _dragOrigDuration, _dragOrigEff;
+    private double _dragTrimStart, _dragTrimEnd, _dragDuration;
+
+    // Mini-onda de los bloques de audio (picos por archivo, calculados aparte)
+    private readonly Dictionary<string, (float[] Mins, float[] Maxs, double Dur)> _peaks = new();
+    private readonly HashSet<string> _peaksLoading = new();
+    private static readonly Pen WavePen = FrozenPen(Color.FromArgb(110, 0xff, 0xff, 0xff), 1);
 
     public TimelineCanvas()
     {
@@ -307,20 +319,35 @@ public sealed class TimelineCanvas : FrameworkElement
             ? _dragLayer
             : Math.Clamp(c.TimelineLayer, -1, MaxLayers - 1);
 
-    /// <summary>Duración de la acción del cue (0 = instantáneo).</summary>
-    private static double EffectiveDuration(Cue cue)
+    private bool IsDragging(Cue c, DragMode mode) =>
+        _dragCue is not null && c.Id == _dragCue.Id && _dragMode == mode;
+
+    private double DisplayTrimStart(Cue c) =>
+        IsDragging(c, DragMode.ResizeL) ? _dragTrimStart : c.TrimStart;
+
+    private double DisplayTrimEnd(Cue c) =>
+        IsDragging(c, DragMode.ResizeR) && c.IsMedia() ? _dragTrimEnd : c.TrimEnd;
+
+    private double DisplayDuration(Cue c) =>
+        IsDragging(c, DragMode.ResizeR) && !c.IsMedia() ? _dragDuration : c.Duration;
+
+    /// <summary>Duración de la acción del cue (0 = instantáneo), con los
+    /// overrides del redimensionado en curso.</summary>
+    private double EffectiveDuration(Cue cue)
     {
         switch (cue.Type)
         {
             case CueType.Audio:
             case CueType.Video:
-                double end = cue.TrimEnd > 0
-                    ? (cue.Duration > 0 ? Math.Min(cue.TrimEnd, cue.Duration) : cue.TrimEnd)
+                double ts = DisplayTrimStart(cue);
+                double te = DisplayTrimEnd(cue);
+                double end = te > 0
+                    ? (cue.Duration > 0 ? Math.Min(te, cue.Duration) : te)
                     : cue.Duration;
-                return Math.Max(0, end - cue.TrimStart);
+                return Math.Max(0, end - ts);
             case CueType.Wait:
             case CueType.Fade:
-                return Math.Max(0, cue.Duration);
+                return Math.Max(0, DisplayDuration(cue));
             default:
                 return 0;
         }
@@ -754,6 +781,32 @@ public sealed class TimelineCanvas : FrameworkElement
                     new Rect(x, y, pw, bh), 3, 3);
         }
 
+        // Mini-onda dentro de los bloques de audio (picos del archivo)
+        if (cue.Type == CueType.Audio && !instant && bw >= 40
+            && cue.FilePath.Length > 0)
+        {
+            if (_peaks.TryGetValue(cue.FilePath, out var pk)
+                && pk.Mins.Length > 0 && pk.Dur > 0)
+            {
+                double t0 = DisplayTrimStart(cue);
+                double mid = y + bh / 2, half = bh / 2 - 2;
+                int n = pk.Mins.Length;
+                double px0 = Math.Max(x, 0), px1 = Math.Min(x + bw, ActualWidth);
+                for (double px = px0; px < px1; px += 2)
+                {
+                    double sec = t0 + (px - x) / bw * b.Dur;
+                    int i = Math.Clamp((int)(sec / pk.Dur * n), 0, n - 1);
+                    dc.DrawLine(WavePen,
+                        new Point(px + 0.5, mid - pk.Maxs[i] * half),
+                        new Point(px + 0.5, mid - pk.Mins[i] * half));
+                }
+            }
+            else
+            {
+                EnsurePeaks(cue.FilePath);
+            }
+        }
+
         // Fades de media como triángulos (estilo Watchout)
         if (!instant && cue.IsMedia())
         {
@@ -870,6 +923,7 @@ public sealed class TimelineCanvas : FrameworkElement
         // Prioridad: asa del grupo → bloque → cuerpo del recuadro
         Cue? cue;
         bool isGroup;
+        Block? hitBlock = null;
         if (HitSpanChip(p) is Span chipSpan)
         {
             cue = chipSpan.Group;
@@ -879,6 +933,7 @@ public sealed class TimelineCanvas : FrameworkElement
         {
             cue = block.Cue;
             isGroup = false;
+            hitBlock = block;
         }
         else if (HitSpan(p) is Span bodySpan)
         {
@@ -915,8 +970,39 @@ public sealed class TimelineCanvas : FrameworkElement
         _dragOrigLayer = Math.Clamp(cue.TimelineLayer, -1, MaxLayers - 1);
         _dragPreWait = _dragOrigPreWait;
         _dragLayer = _dragOrigLayer;
+
+        // ¿Agarró un borde? → redimensionar en vez de mover
+        _dragMode = EdgeModeAt(hitBlock, p.X);
+        _dragOrigTrimStart = cue.TrimStart;
+        _dragOrigTrimEnd = cue.TrimEnd > 0 ? cue.TrimEnd : cue.Duration;
+        _dragOrigDuration = cue.Duration;
+        _dragOrigEff = hitBlock?.Dur ?? 0;
+        _dragTrimStart = _dragOrigTrimStart;
+        _dragTrimEnd = _dragOrigTrimEnd;
+        _dragDuration = _dragOrigDuration;
+
         CaptureMouse();
         InvalidateVisual();
+    }
+
+    /// <summary>Modo de arrastre según el punto: bordes (±5 px) = trim/duración.
+    /// Izquierdo solo para media (desliza el punto de entrada); derecho para
+    /// media (trim de salida) y WAIT/FADE (duración).</summary>
+    private DragMode EdgeModeAt(Block? b, double px)
+    {
+        if (b is null || b.Dur <= 0)
+            return DragMode.Move;
+        double x = SecToX(b.Start);
+        double bw = Math.Max(4, b.Dur * _pxPerSec);
+        if (bw < 18)
+            return DragMode.Move;
+        bool media = b.Cue.IsMedia();
+        bool durable = b.Cue.Type is CueType.Wait or CueType.Fade;
+        if (media && Math.Abs(px - x) <= 5)
+            return DragMode.ResizeL;
+        if ((media || durable) && Math.Abs(px - (x + bw)) <= 5)
+            return DragMode.ResizeR;
+        return DragMode.Move;
     }
 
     protected override void OnMouseMove(MouseEventArgs e)
@@ -924,9 +1010,13 @@ public sealed class TimelineCanvas : FrameworkElement
         var p = e.GetPosition(this);
         if (_dragCue is null)
         {
-            Cursor = HitSpanChip(p) is not null || HitBlock(p) is not null
-                || HitSpan(p) is not null
-                ? Cursors.SizeAll : Cursors.Arrow;
+            var over = HitSpanChip(p) is null ? HitBlock(p) : null;
+            if (over is not null && EdgeModeAt(over, p.X) != DragMode.Move)
+                Cursor = Cursors.SizeWE;
+            else
+                Cursor = HitSpanChip(p) is not null || over is not null
+                    || HitSpan(p) is not null
+                    ? Cursors.SizeAll : Cursors.Arrow;
             return;
         }
         if (!_dragMoved &&
@@ -934,13 +1024,43 @@ public sealed class TimelineCanvas : FrameworkElement
             return;
         _dragMoved = true;
 
-        double dSec = (p.X - _dragStart.X) / _pxPerSec;
-        _dragPreWait = Math.Max(0,
-            Math.Round((_dragOrigPreWait + dSec) / SnapSeconds) * SnapSeconds);
+        double dSec = Math.Round(
+            (p.X - _dragStart.X) / _pxPerSec / SnapSeconds) * SnapSeconds;
 
-        // Vertical: fijar la pista del bloque (los grupos solo se mueven en tiempo)
-        if (!_dragIsGroup && Math.Abs(p.Y - _dragStart.Y) > LayerH * 0.5)
-            _dragLayer = Math.Clamp((int)((p.Y - RulerH) / LayerH), 0, MaxLayers - 1);
+        switch (_dragMode)
+        {
+            case DragMode.Move:
+                _dragPreWait = Math.Max(0, _dragOrigPreWait + dSec);
+                // Vertical: fijar la pista (los grupos solo se mueven en tiempo)
+                if (!_dragIsGroup && Math.Abs(p.Y - _dragStart.Y) > LayerH * 0.5)
+                    _dragLayer = Math.Clamp(
+                        (int)((p.Y - RulerH) / LayerH), 0, MaxLayers - 1);
+                break;
+
+            case DragMode.ResizeL:
+                // Deslizar el punto de entrada: el borde derecho no se mueve
+                double dl = Math.Max(dSec,
+                    Math.Max(-_dragOrigTrimStart, -_dragOrigPreWait));
+                dl = Math.Min(dl, _dragOrigEff - 0.1);
+                _dragPreWait = _dragOrigPreWait + dl;
+                _dragTrimStart = _dragOrigTrimStart + dl;
+                break;
+
+            case DragMode.ResizeR:
+                if (_dragCue.IsMedia())
+                {
+                    double ne = _dragOrigTrimEnd + dSec;
+                    ne = Math.Max(ne, _dragTrimStart + 0.1);
+                    if (_dragOrigDuration > 0)
+                        ne = Math.Min(ne, _dragOrigDuration);
+                    _dragTrimEnd = ne;
+                }
+                else
+                {
+                    _dragDuration = Math.Max(0.1, _dragOrigDuration + dSec);
+                }
+                break;
+        }
 
         // Reproyección en vivo: el resto del show se desplaza con el arrastre
         RebuildLayout();
@@ -952,10 +1072,13 @@ public sealed class TimelineCanvas : FrameworkElement
         if (_dragCue is null)
             return;
         var cue = _dragCue;
+        var mode = _dragMode;
         bool isGroup = _dragIsGroup;
         bool moved = _dragMoved;
         double preWait = _dragPreWait;
         int layer = _dragLayer;
+        double trimStart = _dragTrimStart, trimEnd = _dragTrimEnd;
+        double duration = _dragDuration;
         _dragCue = null;
         ReleaseMouseCapture();
 
@@ -964,12 +1087,29 @@ public sealed class TimelineCanvas : FrameworkElement
 
         if (moved)
         {
-            if (!TryReorder(cue, preWait - _dragOrigPreWait))
+            switch (mode)
             {
-                if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
-                    CommitField?.Invoke(cue.Id, "pre_wait", preWait);
-                if (!isGroup && layer != _dragOrigLayer)
-                    CommitField?.Invoke(cue.Id, "timeline_layer", layer);
+                case DragMode.Move:
+                    if (!TryReorder(cue, preWait - _dragOrigPreWait))
+                    {
+                        if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
+                            CommitField?.Invoke(cue.Id, "pre_wait", preWait);
+                        if (!isGroup && layer != _dragOrigLayer)
+                            CommitField?.Invoke(cue.Id, "timeline_layer", layer);
+                    }
+                    break;
+                case DragMode.ResizeL:
+                    if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
+                        CommitField?.Invoke(cue.Id, "pre_wait", preWait);
+                    if (Math.Abs(trimStart - _dragOrigTrimStart) > 1e-9)
+                        CommitField?.Invoke(cue.Id, "trim_start", trimStart);
+                    break;
+                case DragMode.ResizeR:
+                    if (cue.IsMedia())
+                        CommitField?.Invoke(cue.Id, "trim_end", trimEnd);
+                    else
+                        CommitField?.Invoke(cue.Id, "duration", duration);
+                    break;
             }
         }
         RefreshFromModel();
@@ -1017,6 +1157,58 @@ public sealed class TimelineCanvas : FrameworkElement
             }
         }
         return false;
+    }
+
+    // ------------------------------------------------------------------
+    // Picos de audio para la mini-onda (decodificación en segundo plano)
+    // ------------------------------------------------------------------
+
+    private void EnsurePeaks(string path)
+    {
+        if (_peaks.ContainsKey(path) || !_peaksLoading.Add(path))
+            return;
+        Task.Run(() =>
+        {
+            (float[] Mins, float[] Maxs, double Dur) result;
+            try
+            {
+                var buf = WinCue.Audio.AudioDecoder.Decode(path);
+                const int buckets = 300;
+                int frames = buf.FrameCount, ch = buf.Channels;
+                int n = Math.Max(1, Math.Min(buckets, frames));
+                var mins = new float[n];
+                var maxs = new float[n];
+                for (int bkt = 0; bkt < n; bkt++)
+                {
+                    long f0 = (long)bkt * frames / n;
+                    long f1 = (long)(bkt + 1) * frames / n;
+                    float mn = 0, mx = 0;
+                    for (long f = f0; f < f1; f++)
+                    {
+                        float sum = 0;
+                        long idx = f * ch;
+                        for (int c = 0; c < ch; c++)
+                            sum += buf.Samples[idx + c];
+                        float v = sum / ch;
+                        if (v < mn) mn = v;
+                        if (v > mx) mx = v;
+                    }
+                    mins[bkt] = mn;
+                    maxs[bkt] = mx;
+                }
+                result = (mins, maxs, buf.DurationSeconds);
+            }
+            catch (Exception)
+            {
+                // Sin onda (archivo ilegible): marcar para no reintentar en bucle
+                result = (Array.Empty<float>(), Array.Empty<float>(), 0);
+            }
+            Dispatcher.BeginInvoke(() =>
+            {
+                _peaks[path] = result;
+                InvalidateVisual();
+            });
+        });
     }
 
     // ------------------------------------------------------------------
