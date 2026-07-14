@@ -32,10 +32,10 @@ public partial class MainWindow : Window, IShowView
     private DispatcherTimer? _pgmTimer;
 
     // VU estéreo junto a cada monitor: PGM = programa, PVW = audición local
-    private readonly VuMeterControl _pgmVuL = new(vertical: true) { Width = 6 };
-    private readonly VuMeterControl _pgmVuR = new(vertical: true) { Width = 6 };
-    private readonly VuMeterControl _pvwVuL = new(vertical: true) { Width = 6 };
-    private readonly VuMeterControl _pvwVuR = new(vertical: true) { Width = 6 };
+    private readonly VuMeterControl _pgmVuL = new(vertical: true) { Width = 9 };
+    private readonly VuMeterControl _pgmVuR = new(vertical: true) { Width = 9 };
+    private readonly VuMeterControl _pvwVuL = new(vertical: true) { Width = 9 };
+    private readonly VuMeterControl _pvwVuR = new(vertical: true) { Width = 9 };
 
     // Atajos configurables (Interfaz → Atajos de teclado)
     private Key _keyGo = Key.Space;
@@ -90,8 +90,11 @@ public partial class MainWindow : Window, IShowView
 
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
-        MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR));
-        MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR));
+        MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR,
+            "Nivel L/R del PROGRAMA (cues de AUDIO del mixer; el sonido de los " +
+            "vídeos sale por mpv y no es medible aquí)"));
+        MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
+            "Nivel L/R de la AUDICIÓN local (🎧)"));
         _pvw.Clear("—");
         _pgm.Clear("NEGRO");
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -286,10 +289,11 @@ public partial class MainWindow : Window, IShowView
     public void UpdateTransport(bool paused) =>
         PauseButton.Content = paused ? "▶ REANUDAR" : "⏸ PAUSA";
 
-    public void UpdateCountdown(double? secondsRemaining) =>
-        CountdownLabel.Text = secondsRemaining is double s
-            ? TimeSpan.FromSeconds(s).ToString(s >= 3600 ? @"h\:mm\:ss" : @"m\:ss\.f")
-            : "";
+    public void UpdateCountdown(double? secondsRemaining)
+    {
+        // El countdown por cue se muestra en las tarjetas de EN REPRODUCCIÓN
+        // y en el progreso de la fila; el centro es solo del reloj del show.
+    }
 
     public void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows)
     {
@@ -315,12 +319,14 @@ public partial class MainWindow : Window, IShowView
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
     private static DockPanel MonitorRow(LiveMonitorControl monitor,
-        VuMeterControl left, VuMeterControl right)
+        VuMeterControl left, VuMeterControl right, string tooltip)
     {
         var vu = new StackPanel
         {
             Orientation = Orientation.Horizontal,
             Margin = new Thickness(3, 0, 0, 0),
+            ToolTip = tooltip,
+            Background = System.Windows.Media.Brushes.Transparent,   // hover activo
         };
         left.Height = double.NaN;    // estirar a la altura del monitor
         right.Height = double.NaN;

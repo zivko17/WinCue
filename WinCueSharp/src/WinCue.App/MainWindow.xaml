@@ -64,27 +64,23 @@
                     <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
                 </StackPanel>
 
-                <!-- Centro: reloj del show + countdown del cue -->
-                <StackPanel Orientation="Horizontal" HorizontalAlignment="Center"
-                            VerticalAlignment="Center">
-                    <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
-                            Padding="12,2" Cursor="Hand"
-                            MouseLeftButtonDown="OnShowClockClick"
-                            ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
-                        <StackPanel>
-                            <TextBlock x:Name="ShowClockMode" Text="SHOW · RESTANTE ▾"
-                                       FontSize="9" Foreground="{StaticResource FgDim}"
-                                       HorizontalAlignment="Center"/>
-                            <TextBlock x:Name="ShowClockText" Text="0:00:00"
-                                       FontSize="26" FontWeight="Bold"
-                                       FontFamily="Consolas" Foreground="#e8c000"
-                                       HorizontalAlignment="Center"/>
-                        </StackPanel>
-                    </Border>
-                    <TextBlock x:Name="CountdownLabel" Text="" FontSize="26"
-                               FontWeight="Bold" Foreground="{StaticResource Accent}"
-                               Margin="18,0,0,0" VerticalAlignment="Center"/>
-                </StackPanel>
+                <!-- Centro: reloj del show (el countdown por cue vive en las
+                     tarjetas de EN REPRODUCCIÓN y en el progreso de la fila) -->
+                <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
+                        Padding="12,2" Cursor="Hand"
+                        HorizontalAlignment="Center" VerticalAlignment="Center"
+                        MouseLeftButtonDown="OnShowClockClick"
+                        ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
+                    <StackPanel>
+                        <TextBlock x:Name="ShowClockMode" Text="SHOW · RESTANTE ▾"
+                                   FontSize="9" Foreground="{StaticResource FgDim}"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="ShowClockText" Text="0:00:00"
+                                   FontSize="26" FontWeight="Bold"
+                                   FontFamily="Consolas" Foreground="#e8c000"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
             </DockPanel>
         </Border>
 

@@ -163,6 +163,32 @@ public class AudioEngineTests : IDisposable
     }
 
     [Fact]
+    public void LevelReport_EmitsStereoLevels_WhileAudioPlays()
+    {
+        if (!HasAudioDevice) return;
+
+        using var engine = new AudioEngine();
+        var levels = new List<(float L, float R)>();
+        var cueLevels = new List<(int Id, float L, float R)>();
+        engine.LevelReport += (l, r) => { lock (levels) levels.Add((l, r)); };
+        engine.CueLevelReport += (id, l, r) => { lock (cueLevels) cueLevels.Add((id, l, r)); };
+
+        engine.Play(7, MakeQuietWav(1.0));
+        Assert.True(WaitFor(() => engine.IsPlaying(7), 5_000));
+        Assert.True(WaitFor(() => { lock (levels) return levels.Count >= 3; }, 5_000),
+            "el motor no emitió niveles durante la reproducción");
+
+        lock (levels)
+            Assert.Contains(levels, v => v.L > 0.001f);   // señal real, no silencio
+        lock (cueLevels)
+        {
+            Assert.NotEmpty(cueLevels);
+            Assert.All(cueLevels, v => Assert.Equal(7, v.Id));
+        }
+        engine.StopAll();
+    }
+
+    [Fact]
     public void PlayMissingFile_EmitsError()
     {
         using var engine = new AudioEngine();
