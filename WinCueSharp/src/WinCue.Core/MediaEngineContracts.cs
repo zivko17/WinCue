@@ -61,12 +61,22 @@ public sealed record VideoGeometry(
     double SurfW = 1920.0,           // dimensiones del canvas de salida
     double SurfH = 1080.0);
 
+/// <summary>Recorte del CANVAS que muestra una salida (modo canvas, estilo
+/// Watchout): la salida Screen presenta el rectángulo (X, Y, W, H) del canvas
+/// en su monitor. Coordenadas en píxeles de canvas, origen arriba-izquierda.</summary>
+public sealed record CanvasView(int Screen, int X, int Y, int W, int H);
+
 /// <summary>Parámetros de reproducción de un cue de vídeo.
 /// Layer: pista de prioridad de la salida (0 = arriba del todo … 4 = fondo;
 /// 2 = por defecto). Vídeos en pistas distintas conviven — el de la pista
 /// superior tapa al de abajo; en la misma pista se sustituyen.
 /// Screen: salida de vídeo de destino (0 = principal … 3); cada salida tiene
-/// sus propias 5 pistas — la exclusividad de pista es POR SALIDA.</summary>
+/// sus propias 5 pistas — la exclusividad de pista es POR SALIDA.
+/// CanvasOutputs: MODO CANVAS (solo compositor GPU): el vídeo se coloca en el
+/// canvas global (Geometry.SurfW/SurfH = tamaño del canvas) y cada salida de
+/// la lista muestra su recorte — puede cruzar varias salidas con sync
+/// perfecta (un solo render). Con lista, la exclusividad de pista es GLOBAL
+/// (ignora Screen). null/vacía = modo clásico por salida.</summary>
 public sealed record VideoPlayParams(
     double Volume = 1.0,
     bool Loop = false,
@@ -78,7 +88,8 @@ public sealed record VideoPlayParams(
     bool PreservePitch = true,
     VideoGeometry? Geometry = null,
     int Layer = 2,
-    int Screen = 0);
+    int Screen = 0,
+    IReadOnlyList<CanvasView>? CanvasOutputs = null);
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine

@@ -723,21 +723,20 @@ public class MainController
                     PreservePitch: cue.PreservePitch,
                     Geometry: GeoFor(cue),
                     Layer: VideoLayerOf(cue),
-                    Screen: ScreenOf(cue)));
+                    Screen: ScreenOf(cue),
+                    CanvasOutputs: CanvasMode ? CanvasViews() : null));
                 RefreshVideoTally();
                 // Opacidad de la pista: con fade_in entra fundiendo desde 0
                 // (dos vídeos solapados con fades = crossfade real)
-                int vScreen = ScreenOf(cue);
-                int vLayer = VideoLayerOf(cue);
                 double targetOpacity = cue.Opacity / 100.0;
                 if (cue.FadeIn > 0.0)
                 {
-                    _view.SetVideoLayerOpacity(vScreen, vLayer, 0.0);
-                    _view.SetVideoLayerOpacity(vScreen, vLayer, targetOpacity, cue.FadeIn);
+                    SetCueLayerOpacity(cue, 0.0);
+                    SetCueLayerOpacity(cue, targetOpacity, cue.FadeIn);
                 }
                 else
                 {
-                    _view.SetVideoLayerOpacity(vScreen, vLayer, targetOpacity);
+                    SetCueLayerOpacity(cue, targetOpacity);
                 }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
@@ -812,6 +811,72 @@ public class MainController
     /// <summary>Salida de vídeo del cue (0 = Salida 1 … 3 = Salida 4).</summary>
     private static int ScreenOf(Cue c) => Math.Clamp(c.VideoOutput, 0, 3);
 
+    // ------------------------------------------------------------------
+    // MODO CANVAS (estilo Watchout): los cues se colocan en un canvas
+    // global y cada salida muestra su recorte. Solo con compositor GPU.
+    // ------------------------------------------------------------------
+
+    /// <summary>true si el show opera en modo canvas (Settings → Vídeo).</summary>
+    private bool CanvasMode =>
+        _settings.Get("video_canvas_mode", false) &&
+        _settings.Get("video_compositor", false);
+
+    /// <summary>Tamaño del canvas global (settings surface_*; 0 → FHD).</summary>
+    private (int W, int H) CanvasDims()
+    {
+        int w = _settings.Get("surface_width", 0);
+        int h = _settings.Get("surface_height", 0);
+        return (w > 0 ? w : 1920, h > 0 ? h : 1080);
+    }
+
+    /// <summary>Recortes de las salidas HABILITADAS (la 1 siempre lo está).
+    /// Región por salida en settings "x,y,w,h"; ausente → canvas completo.</summary>
+    private IReadOnlyList<CanvasView> CanvasViews()
+    {
+        var (cw, ch) = CanvasDims();
+        var list = new List<CanvasView>();
+        for (int s = 0; s < 4; s++)
+        {
+            if (s > 0 && !_settings.Get($"video_output_enabled{s + 1}", false))
+                continue;
+            string key = s == 0 ? "video_output_region" : $"video_output_region{s + 1}";
+            list.Add(ParseRegion(_settings.Get(key, ""), s, cw, ch));
+        }
+        return list;
+    }
+
+    /// <summary>Parsea "x,y,w,h" y lo recorta al canvas; inválido → completo.</summary>
+    public static CanvasView ParseRegion(string text, int screen, int cw, int ch)
+    {
+        var parts = (text ?? "").Split(',');
+        if (parts.Length == 4
+            && int.TryParse(parts[0].Trim(), out int x)
+            && int.TryParse(parts[1].Trim(), out int y)
+            && int.TryParse(parts[2].Trim(), out int w)
+            && int.TryParse(parts[3].Trim(), out int h)
+            && w > 0 && h > 0)
+        {
+            x = Math.Clamp(x, 0, Math.Max(0, cw - 16));
+            y = Math.Clamp(y, 0, Math.Max(0, ch - 16));
+            w = Math.Clamp(w, 16, cw - x);
+            h = Math.Clamp(h, 16, ch - y);
+            return new CanvasView(screen, x, y, w, h);
+        }
+        return new CanvasView(screen, 0, 0, cw, ch);
+    }
+
+    /// <summary>Opacidad de la pista del cue en TODAS sus salidas: en canvas,
+    /// todas las habilitadas (el vídeo vive en todas); en clásico, la suya.</summary>
+    private void SetCueLayerOpacity(Cue cue, double opacity, double fadeSeconds = 0.0)
+    {
+        int layer = VideoLayerOf(cue);
+        if (CanvasMode)
+            foreach (var v in CanvasViews())
+                _view.SetVideoLayerOpacity(v.Screen, layer, opacity, fadeSeconds);
+        else
+            _view.SetVideoLayerOpacity(ScreenOf(cue), layer, opacity, fadeSeconds);
+    }
+
     /// <summary>Al disparar un media, corta otros cues según el modo de GO.
     /// El vídeo es exclusivo POR PISTA: misma pista → sustituye; pistas
     /// distintas conviven (la superior tapa a la inferior).</summary>
@@ -823,11 +888,13 @@ public class MainController
         {
             if (otherId == cue.Id || !_running.TryGetValue(otherId, out var other))
                 continue;
+            // En modo canvas la pista es GLOBAL (el vídeo vive en todas las
+            // salidas); en clásico, exclusiva por (salida, pista).
             bool sameVideoLayer = cue.Type == CueType.Video
                 && other.Kind == CueType.Video
                 && _model.GetById(otherId) is Cue oc
                 && VideoLayerOf(oc) == VideoLayerOf(cue)
-                && ScreenOf(oc) == ScreenOf(cue);
+                && (CanvasMode || ScreenOf(oc) == ScreenOf(cue));
             if (stopAll || sameVideoLayer)
                 EndCue(otherId, markStopped: true, fade: 0.0);
         }
@@ -1001,7 +1068,7 @@ public class MainController
                 _video.FadeVolume(cueId, 0.0, fade, stopAfter: true);
                 // Fundido VISUAL a la par que el de audio (compositor)
                 if (_model.GetById(cueId) is Cue vc)
-                    _view.SetVideoLayerOpacity(ScreenOf(vc), VideoLayerOf(vc), 0.0, fade);
+                    SetCueLayerOpacity(vc, 0.0, fade);
             }
             else
             {
@@ -1283,14 +1350,23 @@ public class MainController
         // que limpien). (La opacidad NO se toca aquí: la fijan los fades de
         // StartAction y EndCue; pisarla cortaría los crossfades en curso.)
         var activeBy = new Dictionary<int, List<int>>();
+        bool canvasMode = CanvasMode;
+        var canvasScreens = canvasMode
+            ? CanvasViews().Select(v => v.Screen).ToHashSet()
+            : null;
         foreach (var (cid, r) in _running)
             if (r.Kind == CueType.Video && _video.IsPlaying(cid)
                 && _model.GetById(cid) is Cue c)
             {
-                int screen = ScreenOf(c);
-                if (!activeBy.TryGetValue(screen, out var list))
-                    activeBy[screen] = list = new List<int>();
-                list.Add(VideoLayerOf(c));
+                int layer = VideoLayerOf(c);
+                // Canvas: el vídeo vive en TODAS las salidas habilitadas
+                foreach (int screen in canvasMode
+                    ? canvasScreens! : (IEnumerable<int>)new[] { ScreenOf(c) })
+                {
+                    if (!activeBy.TryGetValue(screen, out var list))
+                        activeBy[screen] = list = new List<int>();
+                    list.Add(layer);
+                }
             }
         for (int screen = 0; screen < 4; screen++)
             _view.SetActiveVideoLayers(screen,
@@ -1307,7 +1383,19 @@ public class MainController
 
     private VideoGeometry GeoFor(Cue cue)
     {
-        var (sw, sh) = _view.SurfaceDimensions(ScreenOf(cue));
+        // En modo canvas la geometría es relativa al CANVAS global (el vídeo
+        // se coloca en el canvas y las salidas lo recortan); en clásico, a la
+        // superficie de la salida del cue.
+        double sw, sh;
+        if (CanvasMode)
+        {
+            var (cw, ch) = CanvasDims();
+            (sw, sh) = (cw, ch);
+        }
+        else
+        {
+            (sw, sh) = _view.SurfaceDimensions(ScreenOf(cue));
+        }
         return new VideoGeometry(
             Mode: cue.GeoMode == GeoMode.Custom ? "CUSTOM" : "FULL",
             PreserveAspect: cue.PreserveAspect,
@@ -1815,7 +1903,7 @@ public class MainController
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
             && fields.ContainsKey("opacity"))
         {
-            _view.SetVideoLayerOpacity(ScreenOf(cue), VideoLayerOf(cue), cue.Opacity / 100.0);
+            SetCueLayerOpacity(cue, cue.Opacity / 100.0);
         }
     }
 

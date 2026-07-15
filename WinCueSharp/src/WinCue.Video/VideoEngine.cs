@@ -77,7 +77,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     // Compositor GPU: renderer + superficie de la vista, por cue
     private Func<int, int, IVideoLayerSurface>? _gpuSurfaces;
     private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
-    private readonly Dictionary<int, (MpvGpuRenderer Renderer, IVideoLayerSurface Sink)>
+    private readonly Dictionary<int, (MpvGpuRenderer Renderer, List<IVideoLayerSurface> Sinks)>
         _renderers = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
@@ -460,8 +460,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         int layer = Math.Clamp(p.Layer, 0, 4);
-        int screen = Math.Clamp(p.Screen, 0, 3);
         bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
+        // MODO CANVAS: solo con compositor GPU (varias vistas de un render).
+        // Sin compositor, el cue cae al modo clásico sobre su salida Screen.
+        bool canvas = gpu && p.CanvasOutputs is { Count: > 0 };
+        // En canvas el cue ocupa su pista en TODAS las salidas → la clave de
+        // exclusividad usa la salida virtual -1 (global).
+        int screen = canvas ? -1 : Math.Clamp(p.Screen, 0, 3);
 
         // ── Validación del HWND (modo clásico; el compositor no usa wid) ─
         nint hwnd = 0;
@@ -541,22 +546,34 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (usedVo != "gpu" && _forcedVo is null && !gpu)
             ErrorOccurred?.Invoke(cueId, $"[AVISO] vo=gpu no disponible. Usando vo={usedVo}.");
 
-        // ── Compositor GPU: render context → superficie D3D de la pista ─
+        // ── Compositor GPU: render context → superficies D3D de la pista ─
         if (gpu)
         {
             try
             {
                 var geo = p.Geometry ?? new VideoGeometry();
+                // En modo canvas el FBO de mpv ES el canvas y cada salida
+                // recibe su recorte; en clásico, una única vista completa.
+                var views = canvas ? p.CanvasOutputs : null;
                 var renderer = new MpvGpuRenderer(player,
-                    (int)geo.SurfW, (int)geo.SurfH);
-                var sink = _gpuSurfaces!(screen, layer);
-                sink.SetSurface(renderer.Surface, renderer.Width, renderer.Height);
-                renderer.FrameRendered += sink.InvalidateFrame;
-                _renderers[cueId] = (renderer, sink);
+                    (int)geo.SurfW, (int)geo.SurfH, views);
+                var sinks = new List<IVideoLayerSurface>();
+                for (int i = 0; i < renderer.Views.Count; i++)
+                {
+                    var v = renderer.Views[i];
+                    int sinkScreen = canvas ? v.Screen : Math.Clamp(p.Screen, 0, 3);
+                    var sink = _gpuSurfaces!(sinkScreen, layer);
+                    sink.SetSurface(renderer.ViewSurface(i), v.W, v.H);
+                    renderer.FrameRendered += sink.InvalidateFrame;
+                    sinks.Add(sink);
+                }
+                _renderers[cueId] = (renderer, sinks);
                 // Confirmación visible del modo (barra de estado): sin esto es
                 // imposible saber desde fuera si el compositor está activo
-                ErrorOccurred?.Invoke(cueId,
-                    $"[AVISO] Compositor GPU activo — salida {screen + 1}, pista {layer + 1}.");
+                ErrorOccurred?.Invoke(cueId, canvas
+                    ? $"[AVISO] Compositor GPU activo — canvas {renderer.Width}×" +
+                      $"{renderer.Height}, {sinks.Count} salida(s), pista {layer + 1}."
+                    : $"[AVISO] Compositor GPU activo — salida {screen + 1}, pista {layer + 1}.");
             }
             catch (Exception exc)
             {
@@ -669,7 +686,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (_renderers.Remove(cueId, out var r))
         {
             r.Renderer.Dispose();
-            r.Sink.ClearSurface();
+            foreach (var sink in r.Sinks)
+                sink.ClearSurface();
         }
         if (_players.Remove(cueId, out var player))
             player.Dispose();

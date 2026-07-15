@@ -77,16 +77,14 @@ internal static class D3D9Minimal
             Method<ReleaseFn>(comObject, VtblRelease)(comObject);
     }
 
-    /// <summary>Crea dispositivo D3D9Ex + render target COMPARTIDA (w×h ARGB).
-    /// Devuelve (device, surface, sharedHandle). Lanza si algo falla.</summary>
-    internal static (nint Device, nint Surface, nint SharedHandle) CreateSharedSurface(
-        nint focusHwnd, int width, int height)
+    /// <summary>Crea el dispositivo D3D9Ex (uno por renderer; las render
+    /// targets compartidas se crean sobre él). Lanza si algo falla.</summary>
+    internal static nint CreateDevice(nint focusHwnd)
     {
         int hr = Direct3DCreate9Ex(D3D_SDK_VERSION, out nint d3d);
         if (hr < 0 || d3d == 0)
             throw new InvalidOperationException($"Direct3DCreate9Ex falló (0x{hr:X8}).");
 
-        nint device = 0, surface = 0;
         try
         {
             var pp = new D3DPRESENT_PARAMETERS
@@ -103,30 +101,30 @@ internal static class D3D9Minimal
                 d3d, 0 /*adapter*/, 1 /*D3DDEVTYPE_HAL*/, focusHwnd,
                 D3DCREATE_HARDWARE_VERTEXPROCESSING | D3DCREATE_MULTITHREADED
                     | D3DCREATE_FPU_PRESERVE,
-                ref pp, 0, out device);
+                ref pp, 0, out nint device);
             if (hr < 0)
                 throw new InvalidOperationException($"CreateDeviceEx falló (0x{hr:X8}).");
-
-            nint shared = 0;
-            hr = Method<CreateRenderTargetFn>(device, VtblCreateRenderTarget)(
-                device, (uint)width, (uint)height, D3DFMT_A8R8G8B8,
-                0 /*sin multisample*/, 0, 0 /*no lockable*/,
-                out surface, ref shared);
-            if (hr < 0)
-                throw new InvalidOperationException($"CreateRenderTarget falló (0x{hr:X8}).");
-
-            return (device, surface, shared);
-        }
-        catch
-        {
-            Release(surface);
-            Release(device);
-            throw;
+            return device;
         }
         finally
         {
             Release(d3d);   // el device retiene lo que necesita
         }
+    }
+
+    /// <summary>Render target COMPARTIDA (w×h ARGB) sobre un device existente.
+    /// Devuelve (surface, sharedHandle). Lanza si algo falla.</summary>
+    internal static (nint Surface, nint SharedHandle) CreateSharedRenderTarget(
+        nint device, int width, int height)
+    {
+        nint shared = 0;
+        int hr = Method<CreateRenderTargetFn>(device, VtblCreateRenderTarget)(
+            device, (uint)width, (uint)height, D3DFMT_A8R8G8B8,
+            0 /*sin multisample*/, 0, 0 /*no lockable*/,
+            out nint surface, ref shared);
+        if (hr < 0)
+            throw new InvalidOperationException($"CreateRenderTarget falló (0x{hr:X8}).");
+        return (surface, shared);
     }
 }
 
@@ -238,17 +236,27 @@ internal sealed class GlContext : IDisposable
     private readonly nint _opengl32 = GetModuleHandleW("opengl32.dll");
 
     private nint _interopDevice;
-    private nint _interopObject;
-    private uint _renderbuffer;
     private uint _privateRb;
-    private int _surfW, _surfH;
+    private int _canvasW, _canvasH;
 
-    /// <summary>FBO ligado a la superficie D3D compartida (destino del blit).</summary>
-    public uint Fbo { get; private set; }
+    /// <summary>Una VISTA de salida: FBO ligado a su superficie D3D compartida
+    /// (destino del blit) + el sub-rectángulo del canvas que muestra.</summary>
+    private sealed class View
+    {
+        public nint InteropObject;
+        public uint Renderbuffer;
+        public uint Fbo;
+        public int W, H;        // tamaño de la superficie de la vista
+        public int SrcX, SrcY;  // origen del recorte en el canvas (arriba-izq)
+    }
 
-    /// <summary>FBO PRIVADO donde renderiza mpv: la superficie compartida solo
-    /// recibe frames COMPLETOS vía blit (sin él, el DWM podía capturar el
-    /// lienzo recién limpiado por mpv → cortes a negro).</summary>
+    private readonly List<View> _views = new();
+    private nint[] _lockObjects = Array.Empty<nint>();   // cacheado para el lock
+
+    /// <summary>FBO PRIVADO (tamaño del canvas) donde renderiza mpv: las
+    /// superficies compartidas solo reciben frames COMPLETOS vía blit (sin
+    /// él, el DWM podía capturar el lienzo recién limpiado por mpv → cortes
+    /// a negro).</summary>
     public uint PrivateFbo { get; private set; }
 
     /// <summary>Crea ventana oculta + contexto GL y lo deja CURRENT en el
@@ -322,42 +330,15 @@ internal sealed class GlContext : IDisposable
         return p != 0 ? p : GetProcAddress(_opengl32, name);
     }
 
-    /// <summary>Registra la superficie D3D9 compartida como renderbuffer del
-    /// FBO. Debe llamarse con el contexto current (mismo hilo del ctor).</summary>
-    public void AttachD3DSurface(nint d3dDevice, nint d3dSurface, nint sharedHandle,
-        int width, int height)
+    /// <summary>Crea el FBO PRIVADO del tamaño del canvas donde renderiza mpv.
+    /// Llamar UNA vez, con el contexto current (mismo hilo del ctor).</summary>
+    public void CreatePrivateFbo(int canvasW, int canvasH)
     {
-        _surfW = width;
-        _surfH = height;
-        _interopDevice = _dxOpen(d3dDevice);
-        if (_interopDevice == 0)
-            throw new NotSupportedException(
-                "wglDXOpenDeviceNV falló: el driver no soporta interop GL↔D3D.");
-
-        if (sharedHandle != 0)
-            _dxSetShare(d3dSurface, sharedHandle);
-
-        _genRenderbuffers(1, out _renderbuffer);
-        _interopObject = _dxRegister(_interopDevice, d3dSurface, _renderbuffer,
-            GL_RENDERBUFFER, WGL_ACCESS_READ_WRITE_NV);
-        if (_interopObject == 0)
-            throw new NotSupportedException("wglDXRegisterObjectNV falló.");
-
-        _genFramebuffers(1, out uint fbo);
-        Fbo = fbo;
-        _bindFramebuffer(GL_FRAMEBUFFER, fbo);
-        Lock();
-        _fbRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, _renderbuffer);
-        uint status = _checkStatus(GL_FRAMEBUFFER);
-        Unlock();
-        _bindFramebuffer(GL_FRAMEBUFFER, 0);
-        if (status != GL_FRAMEBUFFER_COMPLETE)
-            throw new NotSupportedException($"FBO incompleto (0x{status:X}).");
-
-        // FBO privado (renderbuffer RGBA8 normal) donde renderiza mpv
+        _canvasW = canvasW;
+        _canvasH = canvasH;
         _genRenderbuffers(1, out _privateRb);
         _bindRenderbuffer(GL_RENDERBUFFER, _privateRb);
-        _renderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, width, height);
+        _renderbufferStorage(GL_RENDERBUFFER, GL_RGBA8, canvasW, canvasH);
         _genFramebuffers(1, out uint priv);
         PrivateFbo = priv;
         _bindFramebuffer(GL_FRAMEBUFFER, priv);
@@ -368,43 +349,94 @@ internal sealed class GlContext : IDisposable
             throw new NotSupportedException($"FBO privado incompleto (0x{privStatus:X}).");
     }
 
-    /// <summary>Copia el frame completo del FBO privado a la superficie D3D
-    /// (bajo el lock del interop). El DWM nunca ve un frame a medias.</summary>
+    /// <summary>Registra una superficie D3D9 compartida como VISTA: recibirá
+    /// por blit el recorte (srcX, srcY, w, h) del canvas (origen arriba-izq).
+    /// Devuelve el índice de la vista. Contexto current requerido.</summary>
+    public int AddView(nint d3dDevice, nint d3dSurface, nint sharedHandle,
+        int w, int h, int srcX, int srcY)
+    {
+        if (_interopDevice == 0)
+        {
+            _interopDevice = _dxOpen(d3dDevice);
+            if (_interopDevice == 0)
+                throw new NotSupportedException(
+                    "wglDXOpenDeviceNV falló: el driver no soporta interop GL↔D3D.");
+        }
+
+        if (sharedHandle != 0)
+            _dxSetShare(d3dSurface, sharedHandle);
+
+        var view = new View { W = w, H = h, SrcX = srcX, SrcY = srcY };
+        _genRenderbuffers(1, out view.Renderbuffer);
+        view.InteropObject = _dxRegister(_interopDevice, d3dSurface, view.Renderbuffer,
+            GL_RENDERBUFFER, WGL_ACCESS_READ_WRITE_NV);
+        if (view.InteropObject == 0)
+            throw new NotSupportedException("wglDXRegisterObjectNV falló.");
+
+        _genFramebuffers(1, out view.Fbo);
+        _bindFramebuffer(GL_FRAMEBUFFER, view.Fbo);
+        LockOne(view.InteropObject);
+        _fbRenderbuffer(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_RENDERBUFFER, view.Renderbuffer);
+        uint status = _checkStatus(GL_FRAMEBUFFER);
+        UnlockOne(view.InteropObject);
+        _bindFramebuffer(GL_FRAMEBUFFER, 0);
+        if (status != GL_FRAMEBUFFER_COMPLETE)
+            throw new NotSupportedException($"FBO de vista incompleto (0x{status:X}).");
+
+        _views.Add(view);
+        _lockObjects = _views.Select(v => v.InteropObject).ToArray();
+        return _views.Count - 1;
+    }
+
+    /// <summary>Copia el frame del FBO privado (canvas) a las superficies D3D
+    /// de todas las vistas, cada una con su recorte, bajo UN solo lock del
+    /// interop. El DWM nunca ve un frame a medias y las salidas presentan el
+    /// MISMO frame (sync perfecta entre monitores).</summary>
     public void PresentFrame()
     {
-        Lock();
+        if (_lockObjects.Length == 0)
+            return;
+        _dxLock(_interopDevice, _lockObjects.Length, _lockObjects);
         _bindFramebuffer(GL_READ_FRAMEBUFFER, PrivateFbo);
-        _bindFramebuffer(GL_DRAW_FRAMEBUFFER, Fbo);
-        _blitFramebuffer(0, 0, _surfW, _surfH, 0, 0, _surfW, _surfH,
-            GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        foreach (var v in _views)
+        {
+            // glBlitFramebuffer usa origen ABAJO-izquierda: la Y del recorte
+            // (canvas, arriba-izquierda) se convierte a Y de GL.
+            int srcY0 = _canvasH - v.SrcY - v.H;
+            _bindFramebuffer(GL_DRAW_FRAMEBUFFER, v.Fbo);
+            _blitFramebuffer(v.SrcX, srcY0, v.SrcX + v.W, srcY0 + v.H,
+                0, 0, v.W, v.H, GL_COLOR_BUFFER_BIT, GL_NEAREST);
+        }
         _bindFramebuffer(GL_READ_FRAMEBUFFER, 0);
         _bindFramebuffer(GL_DRAW_FRAMEBUFFER, 0);
         glFlush();
-        Unlock();
+        _dxUnlock(_interopDevice, _lockObjects.Length, _lockObjects);
     }
 
-    /// <summary>Toma posesión GL de la superficie (antes de renderizar).</summary>
-    public void Lock() => _dxLock(_interopDevice, 1, new[] { _interopObject });
-
-    /// <summary>Devuelve la superficie a D3D (tras renderizar + glFlush).</summary>
-    public void Unlock() => _dxUnlock(_interopDevice, 1, new[] { _interopObject });
+    private void LockOne(nint obj) => _dxLock(_interopDevice, 1, new[] { obj });
+    private void UnlockOne(nint obj) => _dxUnlock(_interopDevice, 1, new[] { obj });
 
     public void MakeCurrent() => wglMakeCurrent(_dc, _glCtx);
 
     public void Dispose()
     {
         MakeCurrent();
-        if (_interopObject != 0)
-            _dxUnregister(_interopDevice, _interopObject);
-        if (_renderbuffer != 0)
-            _delRenderbuffers(1, ref _renderbuffer);
+        foreach (var v in _views)
+        {
+            if (v.InteropObject != 0)
+                _dxUnregister(_interopDevice, v.InteropObject);
+            if (v.Renderbuffer != 0)
+                _delRenderbuffers(1, ref v.Renderbuffer);
+            if (v.Fbo != 0)
+            {
+                uint fbo = v.Fbo;
+                _delFramebuffers(1, ref fbo);
+            }
+        }
+        _views.Clear();
+        _lockObjects = Array.Empty<nint>();
         if (_privateRb != 0)
             _delRenderbuffers(1, ref _privateRb);
-        if (Fbo != 0)
-        {
-            uint fbo = Fbo;
-            _delFramebuffers(1, ref fbo);
-        }
         if (PrivateFbo != 0)
         {
             uint priv = PrivateFbo;

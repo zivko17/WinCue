@@ -13,6 +13,7 @@
 // =============================================================================
 
 using System.Runtime.InteropServices;
+using WinCue.Core;
 using static WinCue.Video.MpvRenderNative;
 
 namespace WinCue.Video;
@@ -20,7 +21,7 @@ namespace WinCue.Video;
 public sealed class MpvGpuRenderer : IDisposable
 {
     private readonly MpvPlayer _player;
-    private readonly int _width, _height;
+    private readonly int _width, _height;          // tamaño del canvas (FBO de mpv)
     private readonly Thread _thread;
     private readonly AutoResetEvent _wake = new(false);
     private readonly ManualResetEventSlim _ready = new(false);
@@ -29,26 +30,45 @@ public sealed class MpvGpuRenderer : IDisposable
 
     private GlContext? _gl;
     private nint _renderCtx;
-    private nint _d3dDevice, _d3dSurface;
+    private nint _d3dDevice;
+
+    // Vistas de salida: cada una es una superficie D3D compartida que recibe
+    // su recorte del canvas. Sin lista explícita: una vista = canvas completo.
+    private readonly IReadOnlyList<CanvasView> _viewSpecs;
+    private readonly nint[] _viewSurfaces;
 
     // Delegados nativos: deben permanecer vivos mientras mpv los use
     private readonly GetProcAddressFn _getProc;
     private readonly RenderUpdateFn _updateCb;
 
-    /// <summary>Nuevo frame en la superficie (¡llega en el hilo de render!).</summary>
+    /// <summary>Nuevo frame en las superficies (¡llega en el hilo de render!).</summary>
     public event Action? FrameRendered;
 
-    /// <summary>Puntero IDirect3DSurface9 para D3DImage.SetBackBuffer.</summary>
-    public nint Surface => _d3dSurface;
+    /// <summary>Puntero IDirect3DSurface9 de la PRIMERA vista (modo clásico
+    /// de una sola salida) para D3DImage.SetBackBuffer.</summary>
+    public nint Surface => _viewSurfaces[0];
+
+    /// <summary>Superficie D3D9 de la vista i (mismo orden que las vistas
+    /// pasadas al constructor).</summary>
+    public nint ViewSurface(int i) => _viewSurfaces[i];
+
+    public IReadOnlyList<CanvasView> Views => _viewSpecs;
 
     public int Width => _width;
     public int Height => _height;
 
-    public MpvGpuRenderer(MpvPlayer player, int width, int height)
+    /// <param name="views">Recortes del canvas por salida (modo canvas);
+    /// null = una única vista con el canvas completo (modo clásico).</param>
+    public MpvGpuRenderer(MpvPlayer player, int width, int height,
+        IReadOnlyList<CanvasView>? views = null)
     {
         _player = player;
         _width = Math.Max(16, width);
         _height = Math.Max(16, height);
+        _viewSpecs = views is { Count: > 0 }
+            ? views
+            : new[] { new CanvasView(0, 0, 0, _width, _height) };
+        _viewSurfaces = new nint[_viewSpecs.Count];
         _getProc = OnGetProcAddress;
         _updateCb = _ => _wake.Set();
 
@@ -88,9 +108,16 @@ public sealed class MpvGpuRenderer : IDisposable
         try
         {
             _gl = new GlContext();
-            (_d3dDevice, _d3dSurface, nint shared) =
-                D3D9Minimal.CreateSharedSurface(0, _width, _height);
-            _gl.AttachD3DSurface(_d3dDevice, _d3dSurface, shared, _width, _height);
+            _d3dDevice = D3D9Minimal.CreateDevice(0);
+            for (int i = 0; i < _viewSpecs.Count; i++)
+            {
+                var v = _viewSpecs[i];
+                var (surface, shared) =
+                    D3D9Minimal.CreateSharedRenderTarget(_d3dDevice, v.W, v.H);
+                _viewSurfaces[i] = surface;
+                _gl.AddView(_d3dDevice, surface, shared, v.W, v.H, v.X, v.Y);
+            }
+            _gl.CreatePrivateFbo(_width, _height);
             CreateMpvContext();
             _ready.Set();
         }
@@ -181,9 +208,12 @@ public sealed class MpvGpuRenderer : IDisposable
         }
         _gl?.Dispose();
         _gl = null;
-        D3D9Minimal.Release(_d3dSurface);
+        for (int i = 0; i < _viewSurfaces.Length; i++)
+        {
+            D3D9Minimal.Release(_viewSurfaces[i]);
+            _viewSurfaces[i] = 0;
+        }
         D3D9Minimal.Release(_d3dDevice);
-        _d3dSurface = 0;
         _d3dDevice = 0;
     }
 

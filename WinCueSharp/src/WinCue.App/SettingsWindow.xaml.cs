@@ -125,19 +125,39 @@ public partial class SettingsWindow : Window
         Note(scr, "Las pistas se funden según su Opacidad % (Geometry). Requiere " +
                   "driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.");
 
+        // ── CANVAS (estilo Watchout): recortes por salida ───────────────
+        var canvas = Group(root, "CANVAS (las salidas recortan un lienzo común)");
+        Check("video_canvas_mode", canvas,
+            "Modo canvas: los cues se colocan en el canvas y cada salida " +
+            "muestra su recorte");
+        Note(canvas, "Requiere el compositor GPU. Un vídeo puede cruzar varias " +
+                     "salidas con sincronía perfecta (un solo render). En este " +
+                     "modo la \"Salida\" del inspector se ignora: el vídeo vive " +
+                     "en el canvas.");
+        var editor = new CanvasEditorControl { Margin = new Thickness(0, 6, 0, 0) };
+        canvas.Children.Add(editor);
+        _fields["surface_width"] = (
+            () => editor.CanvasW,
+            v => editor.CanvasW = v is null ? 1920 : Convert.ToInt32(v));
+        _fields["surface_height"] = (
+            () => editor.CanvasH,
+            v => editor.CanvasH = v is null ? 1080 : Convert.ToInt32(v));
+        for (int s = 0; s < 4; s++)
+        {
+            int idx = s;
+            string regionKey = s == 0 ? "video_output_region" : $"video_output_region{s + 1}";
+            _fields[regionKey] = (
+                () => editor.GetRegion(idx),
+                v => editor.SetRegion(idx, v?.ToString()));
+            if (s > 0)
+                _fields[$"video_output_enabled{s + 1}"] = (
+                    () => editor.GetEnabled(idx),
+                    v => editor.SetEnabled(idx, AsBool(v)));
+        }
+
         var pb = Group(root, "REPRODUCCIÓN");
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
         Check("video_loop_default", pb, "Loop por defecto en cues nuevos");
-
-        var surf = Group(root, "SUPERFICIE (CANVAS)");
-        Combo("surface_preset", surf, "Preset:",
-            ("screen", "Resolución de la pantalla de salida"),
-            ("custom", "Personalizado"),
-            ("1920x1080", "1920 × 1080 (FHD)"),
-            ("1280x720", "1280 × 720 (HD)"),
-            ("3840x2160", "3840 × 2160 (4K)"));
-        Spin("surface_width", surf, "Ancho personalizado (px):", 0, 7680);
-        Spin("surface_height", surf, "Alto personalizado (px):", 0, 4320);
 
         return root;
     }

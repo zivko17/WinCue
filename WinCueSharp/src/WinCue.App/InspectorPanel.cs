@@ -570,7 +570,9 @@ public sealed class InspectorPanel : ContentControl
         controls.Children.Add(outRow);
         var outNote = new TextBlock
         {
-            Text = "El monitor de cada salida se asigna en Settings → Vídeo.",
+            Text = "El monitor de cada salida se asigna en Settings → Vídeo. " +
+                   "Con el MODO CANVAS activo esta selección se ignora: el cue " +
+                   "se coloca en el canvas y cada salida muestra su recorte.",
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
