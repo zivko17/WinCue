@@ -1372,6 +1372,23 @@ public class MainController
             _view.SetActiveVideoLayers(screen,
                 activeBy.GetValueOrDefault(screen) ?? (IReadOnlyCollection<int>)Array.Empty<int>());
         _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
+
+        // Desglose por salida para el tooltip del tally (qué hay en cada una)
+        var detail = new System.Text.StringBuilder(canvasMode ? "MODO CANVAS\n" : "");
+        for (int screen = 0; screen < 4; screen++)
+        {
+            var names = new List<string>();
+            foreach (var (cid, r) in _running)
+                if (r.Kind == CueType.Video && _video.IsPlaying(cid)
+                    && _model.GetById(cid) is Cue c
+                    && (canvasMode ? canvasScreens!.Contains(screen)
+                                   : ScreenOf(c) == screen))
+                    names.Add($"{c.Name} · pista {VideoLayerOf(c) + 1}");
+            if (screen == 0 || names.Count > 0)
+                detail.AppendLine($"S{screen + 1}: " +
+                    (names.Count > 0 ? string.Join(" | ", names) : "negro"));
+        }
+        _view.SetOutputDetails(detail.ToString().TrimEnd());
     }
 
     private void PreloadUpcoming()

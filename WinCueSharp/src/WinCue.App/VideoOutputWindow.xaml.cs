@@ -17,9 +17,15 @@ using System.Runtime.InteropServices;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Interop;
+using System.Windows.Media;
+using System.Windows.Shapes;
+using System.Windows.Threading;
 using WF = System.Windows.Forms;
 
 namespace WinCue.App;
+
+/// <summary>Patrón de test de una salida (alineado de proyectores).</summary>
+public enum TestPattern { None, Grid, Bars, Border }
 
 public partial class VideoOutputWindow : Window
 {
@@ -42,6 +48,19 @@ public partial class VideoOutputWindow : Window
     // MODO COMPOSITOR GPU: 5 D3DImage apiladas con opacidad real por capa
     private readonly CompositorLayerControl[] _gpuLayers = new CompositorLayerControl[5];
     private readonly Grid _gpuHost;
+
+    // Overlays de operación: patrón de test, identificación y blackout.
+    // OJO airspace de WPF: en modo clásico el host WinForms tapa cualquier
+    // overlay → el patrón OCULTA los hosts mientras está activo, y el
+    // blackout oculta el host clásico al completar el fundido.
+    private readonly Grid _patternHost;
+    private readonly Border _identifyOverlay;
+    private readonly TextBlock _identifyText;
+    private readonly Border _blackoutVeil;
+    private readonly DispatcherTimer _identifyTimer;
+    private TestPattern _pattern = TestPattern.None;
+    private bool _blackout;
+    private bool _hwndMode;   // último modo pedido por el motor
 
     public VideoOutputWindow()
     {
@@ -77,9 +96,43 @@ public partial class VideoOutputWindow : Window
             _gpuHost.Children.Add(_gpuLayers[i]);
         }
 
+        // Overlays (de abajo a arriba): patrón de test → identificar → blackout
+        _patternHost = new Grid { Visibility = Visibility.Collapsed };
+        _identifyText = new TextBlock
+        {
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+            FontSize = 120,
+            FontWeight = FontWeights.Bold,
+            Foreground = Brushes.White,
+        };
+        _identifyOverlay = new Border
+        {
+            Visibility = Visibility.Collapsed,
+            Background = new SolidColorBrush(Color.FromArgb(0xa0, 0, 0, 0)),
+            BorderThickness = new Thickness(14),
+            Child = _identifyText,
+        };
+        _identifyTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
+        _identifyTimer.Tick += (_, _) =>
+        {
+            _identifyTimer.Stop();
+            _identifyOverlay.Visibility = Visibility.Collapsed;
+        };
+        _blackoutVeil = new Border
+        {
+            Background = Brushes.Black,
+            Opacity = 0.0,
+            IsHitTestVisible = false,
+            Visibility = Visibility.Collapsed,
+        };
+
         var root = new Grid { Background = System.Windows.Media.Brushes.Black };
         root.Children.Add(_hwndHost);
         root.Children.Add(_gpuHost);
+        root.Children.Add(_patternHost);
+        root.Children.Add(_identifyOverlay);
+        root.Children.Add(_blackoutVeil);
         _gpuHost.Visibility = Visibility.Collapsed;
         Content = root;
     }
@@ -88,8 +141,159 @@ public partial class VideoOutputWindow : Window
     /// activa el modo clásico; pedir una superficie GPU, el compositor.</summary>
     private void ShowHwndMode(bool hwndMode)
     {
-        _hwndHost.Visibility = hwndMode ? Visibility.Visible : Visibility.Collapsed;
-        _gpuHost.Visibility = hwndMode ? Visibility.Collapsed : Visibility.Visible;
+        _hwndMode = hwndMode;
+        ApplyHostVisibility();
+    }
+
+    /// <summary>Visibilidad efectiva de los hosts de vídeo: el modo del motor
+    /// combinado con el patrón de test y el blackout (airspace del clásico).</summary>
+    private void ApplyHostVisibility()
+    {
+        bool videoVisible = _pattern == TestPattern.None && !_blackout;
+        _hwndHost.Visibility = _hwndMode && videoVisible
+            ? Visibility.Visible : Visibility.Collapsed;
+        _gpuHost.Visibility = !_hwndMode && (_pattern == TestPattern.None)
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    // ==================================================================
+    // Overlays: identificar, patrón de test, blackout
+    // ==================================================================
+
+    /// <summary>Muestra "SALIDA N" en grande con el color de la salida
+    /// durante unos segundos (para saber qué monitor es cuál).</summary>
+    public void ShowIdentify(int screenIndex, Color color)
+    {
+        if (!IsVisible)
+            Show();
+        _identifyText.Text = $"SALIDA {screenIndex + 1}";
+        _identifyText.Foreground = new SolidColorBrush(color);
+        _identifyOverlay.BorderBrush = new SolidColorBrush(color);
+        _identifyOverlay.Visibility = Visibility.Visible;
+        _identifyTimer.Stop();
+        _identifyTimer.Start();
+    }
+
+    public TestPattern Pattern => _pattern;
+
+    /// <summary>Activa un patrón de test (o lo quita con None). El patrón
+    /// SUSTITUYE al vídeo mientras está activo (evita el airspace WPF).</summary>
+    public void SetTestPattern(TestPattern pattern)
+    {
+        _pattern = pattern;
+        _patternHost.Children.Clear();
+        _patternHost.Visibility = pattern == TestPattern.None
+            ? Visibility.Collapsed : Visibility.Visible;
+        if (pattern != TestPattern.None)
+        {
+            if (!IsVisible)
+                Show();
+            _patternHost.Children.Add(BuildPattern(pattern));
+        }
+        ApplyHostVisibility();
+    }
+
+    private static UIElement BuildPattern(TestPattern pattern)
+    {
+        switch (pattern)
+        {
+            case TestPattern.Bars:
+            {
+                // Barras EBU de 8 columnas
+                var bars = new System.Windows.Controls.Primitives.UniformGrid
+                { Rows = 1, Columns = 8 };
+                foreach (var c in new[]
+                {
+                    Colors.White, Colors.Yellow, Colors.Cyan, Colors.Lime,
+                    Colors.Magenta, Colors.Red, Colors.Blue, Colors.Black,
+                })
+                    bars.Children.Add(new Rectangle { Fill = new SolidColorBrush(c) });
+                return bars;
+            }
+
+            case TestPattern.Border:
+            {
+                // Borde perimetral + diagonales + círculo central (geometría)
+                var grid = new Grid { Background = Brushes.Black };
+                grid.Children.Add(new Border
+                {
+                    BorderBrush = Brushes.Red,
+                    BorderThickness = new Thickness(6),
+                });
+                foreach (bool second in new[] { false, true })
+                    grid.Children.Add(new Line
+                    {
+                        X1 = 0, Y1 = second ? 1 : 0, X2 = 1, Y2 = second ? 0 : 1,
+                        Stretch = Stretch.Fill,
+                        Stroke = Brushes.White, StrokeThickness = 1,
+                    });
+                grid.Children.Add(new Ellipse
+                {
+                    Stroke = Brushes.White, StrokeThickness = 2,
+                    Width = 300, Height = 300,
+                    HorizontalAlignment = HorizontalAlignment.Center,
+                    VerticalAlignment = VerticalAlignment.Center,
+                });
+                return grid;
+            }
+
+            default:   // Grid
+            {
+                // Rejilla de 100 px reales + cruz central
+                var lines = new GeometryGroup();
+                lines.Children.Add(new LineGeometry(new Point(0, 0), new Point(100, 0)));
+                lines.Children.Add(new LineGeometry(new Point(0, 0), new Point(0, 100)));
+                var brush = new DrawingBrush(new GeometryDrawing(
+                    null, new Pen(Brushes.Gray, 1), lines))
+                {
+                    TileMode = TileMode.Tile,
+                    Viewport = new Rect(0, 0, 100, 100),
+                    ViewportUnits = BrushMappingMode.Absolute,
+                    Stretch = Stretch.None,
+                };
+                var grid = new Grid { Background = Brushes.Black };
+                grid.Children.Add(new Rectangle { Fill = brush });
+                foreach (bool vertical in new[] { false, true })
+                    grid.Children.Add(new Rectangle
+                    {
+                        Fill = Brushes.White,
+                        Width = vertical ? 2 : double.NaN,
+                        Height = vertical ? double.NaN : 2,
+                        HorizontalAlignment = vertical
+                            ? HorizontalAlignment.Center : HorizontalAlignment.Stretch,
+                        VerticalAlignment = vertical
+                            ? VerticalAlignment.Stretch : VerticalAlignment.Center,
+                    });
+                return grid;
+            }
+        }
+    }
+
+    public bool Blackout => _blackout;
+
+    /// <summary>Blackout de operador: funde un velo negro por ENCIMA de todo
+    /// sin tocar los cues. En modo clásico el velo no puede tapar al HWND
+    /// (airspace) → al completar el fundido se oculta el host.</summary>
+    public void SetBlackout(bool on, double fadeSeconds)
+    {
+        _blackout = on;
+        _blackoutVeil.Visibility = Visibility.Visible;
+        if (!on)
+            ApplyHostVisibility();   // re-mostrar el vídeo ANTES de fundir a la vista
+
+        var anim = new System.Windows.Media.Animation.DoubleAnimation(
+            on ? 1.0 : 0.0, TimeSpan.FromSeconds(Math.Max(0.0, fadeSeconds)))
+        {
+            FillBehavior = System.Windows.Media.Animation.FillBehavior.HoldEnd,
+        };
+        anim.Completed += (_, _) =>
+        {
+            if (_blackout == on)
+                ApplyHostVisibility();
+            if (!on && !_blackout)
+                _blackoutVeil.Visibility = Visibility.Collapsed;
+        };
+        _blackoutVeil.BeginAnimation(OpacityProperty, anim);
     }
 
     /// <summary>Superficie del compositor GPU para la pista dada.</summary>
@@ -157,8 +361,10 @@ public partial class VideoOutputWindow : Window
     }
 
     /// <summary>Coloca la ventana en el monitor indicado (índice de
-    /// Screen.AllScreens; fuera de rango → principal).</summary>
-    public void PlaceOnScreen(int screenIndex, bool fullscreen)
+    /// Screen.AllScreens; fuera de rango → principal). savedGeometry
+    /// ("x,y,w,h" en px físicos) restaura la posición de la sesión anterior
+    /// en modo ventana; se ignora si no cae dentro de ese monitor.</summary>
+    public void PlaceOnScreen(int screenIndex, bool fullscreen, string? savedGeometry = null)
     {
         var screens = System.Windows.Forms.Screen.AllScreens;
         if (screenIndex < 0 || screenIndex >= screens.Length)
@@ -173,6 +379,7 @@ public partial class VideoOutputWindow : Window
         {
             WindowStyle = WindowStyle.None;
             ResizeMode = ResizeMode.NoResize;
+            Cursor = System.Windows.Input.Cursors.None;   // sin flecha en el proyector
             SetWindowPos(hwnd, 0, b.X, b.Y, b.Width, b.Height,
                 SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
@@ -180,12 +387,52 @@ public partial class VideoOutputWindow : Window
         {
             WindowStyle = WindowStyle.SingleBorderWindow;
             ResizeMode = ResizeMode.CanResize;
+            Cursor = null;
+
+            // Geometría recordada de la sesión anterior (si sigue en el monitor)
+            if (ParseGeometry(savedGeometry) is var (gx, gy, gw, gh)
+                && gw >= 200 && gh >= 120
+                && gx >= b.X - 40 && gy >= b.Y - 40
+                && gx < b.X + b.Width && gy < b.Y + b.Height)
+            {
+                SetWindowPos(hwnd, 0, gx, gy, gw, gh,
+                    SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
+                return;
+            }
+
             // Ventana de 960×540 px físicos, algo separada del borde del monitor
             int w = Math.Min(960, b.Width - 120);
             int h = Math.Min(540, b.Height - 120);
             SetWindowPos(hwnd, 0, b.X + 60, b.Y + 60, w, h,
                 SWP_NOZORDER | SWP_FRAMECHANGED | SWP_SHOWWINDOW);
         }
+    }
+
+    private static (int X, int Y, int W, int H)? ParseGeometry(string? text)
+    {
+        var parts = (text ?? "").Split(',');
+        return parts.Length == 4
+            && int.TryParse(parts[0], out int x) && int.TryParse(parts[1], out int y)
+            && int.TryParse(parts[2], out int w) && int.TryParse(parts[3], out int h)
+            ? (x, y, w, h) : null;
+    }
+
+    [DllImport("user32.dll")]
+    private static extern bool GetWindowRect(nint hwnd, out RECT rect);
+
+    [StructLayout(LayoutKind.Sequential)]
+    private struct RECT { public int Left, Top, Right, Bottom; }
+
+    /// <summary>Geometría actual "x,y,w,h" en px FÍSICOS (para recordarla),
+    /// o null en fullscreen / sin ventana.</summary>
+    public string? CurrentGeometry()
+    {
+        if (WindowStyle == WindowStyle.None)
+            return null;   // fullscreen: no recordar
+        nint hwnd = new WindowInteropHelper(this).Handle;
+        if (hwnd == 0 || !GetWindowRect(hwnd, out var r))
+            return null;
+        return $"{r.Left},{r.Top},{r.Right - r.Left},{r.Bottom - r.Top}";
     }
 
     protected override void OnClosing(CancelEventArgs e)

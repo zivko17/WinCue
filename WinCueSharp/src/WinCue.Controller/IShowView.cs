@@ -76,4 +76,8 @@ public interface IShowView
 
     /// <summary>Testigo: nombre del vídeo en pantalla, o null = NEGRO.</summary>
     void SetOutputContent(string? videoName);
+
+    /// <summary>Desglose multilínea del contenido por salida ("S1: vídeo X ·
+    /// pista 3"). La vista lo muestra como tooltip del tally. Default: no-op.</summary>
+    void SetOutputDetails(string details) { }
 }

@@ -28,7 +28,9 @@ public sealed class CanvasEditorControl : StackPanel
     private const int MinSize = 16;          // px de canvas
     private const double SnapPx = 10;        // umbral de snap en px de PANTALLA
 
-    private static readonly Color[] OutColors =
+    /// <summary>Colores de identidad de las 4 salidas (compartidos con el
+    /// overlay "Identificar" y el menú del botón de salida).</summary>
+    internal static readonly Color[] OutColors =
     {
         Color.FromRgb(0x2e, 0xcc, 0x71),   // S1 verde
         Color.FromRgb(0x35, 0x98, 0xdb),   // S2 azul

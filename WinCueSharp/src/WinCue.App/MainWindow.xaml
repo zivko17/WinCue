@@ -60,7 +60,7 @@
                                   Background="#c9a227" Foreground="Black"
                                   FontWeight="Bold" Content="Modo: EDIT"/>
                     <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
-                            Background="#7e1e1e" Content="🖵 Salida vídeo"/>
+                            Background="#7e1e1e" Content="🖵 Salida vídeo ▾"/>
                     <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
                 </StackPanel>
 

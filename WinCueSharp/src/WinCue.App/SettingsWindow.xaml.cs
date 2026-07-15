@@ -121,6 +121,7 @@ public partial class SettingsWindow : Window
                   "Las ventanas de salida se abren solas al usarlas un cue.");
         Check("video_fullscreen_output", scr, "Salidas a pantalla completa (blackout)");
         Note(scr, "Desmárcalo solo para probar en ventanas con bordes.");
+        Spin("blackout_fade", scr, "Fundido del blackout (s, tecla B):", 0, 30);
         Check("video_compositor", scr, "Compositor GPU (opacidad real entre capas)");
         Note(scr, "Las pistas se funden según su Opacidad % (Geometry). Requiere " +
                   "driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.");

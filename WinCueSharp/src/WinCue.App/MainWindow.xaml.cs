@@ -470,8 +470,14 @@ public partial class MainWindow : Window, IShowView
             return;
         var w = new VideoOutputWindow { Owner = this };
         w.Title = $"WinCue — Salida de vídeo {screen + 1}";
-        // El botón refleja si alguna salida está activa (verde) o no (rojo)
-        w.IsVisibleChanged += (_, _) => UpdateVideoOutButton();
+        // El botón refleja si alguna salida está activa (verde) o no (rojo);
+        // al ocultarse se recuerda su geometría para la próxima sesión.
+        w.IsVisibleChanged += (_, _) =>
+        {
+            UpdateVideoOutButton();
+            if (!w.IsVisible)
+                SaveOutputGeometry(screen);
+        };
         _videoOutputs[screen] = w;
     }
 
@@ -480,12 +486,23 @@ public partial class MainWindow : Window, IShowView
     private static string ScreenSettingKey(int screen) =>
         screen == 0 ? "video_output_screen" : $"video_output_screen{screen + 1}";
 
-    /// <summary>Coloca una salida en su pantalla configurada (Settings → Vídeo).</summary>
+    /// <summary>Coloca una salida en su pantalla configurada (Settings → Vídeo),
+    /// restaurando la geometría recordada en modo ventana.</summary>
     private void PlaceVideoOutput(int screen)
     {
         _videoOutputs[screen]?.PlaceOnScreen(
             _settings.Get(ScreenSettingKey(screen), 0),
-            _settings.Get("video_fullscreen_output", false));
+            _settings.Get("video_fullscreen_output", false),
+            _settings.Get($"video_output_geom{screen + 1}", ""));
+        // Una salida que aparece durante un blackout nace fundida a negro
+        if (_blackout)
+            _videoOutputs[screen]?.SetBlackout(true, 0.0);
+    }
+
+    private void SaveOutputGeometry(int screen)
+    {
+        if (_videoOutputs[screen]?.CurrentGeometry() is string geom)
+            _settings.Set($"video_output_geom{screen + 1}", geom);
     }
 
     public (double Width, double Height) SurfaceDimensions() => SurfaceDimensions(0);
@@ -500,6 +517,12 @@ public partial class MainWindow : Window, IShowView
 
     public void SetOutputContent(string? videoName) =>
         TallyLabel.Text = videoName is null ? "SALIDA: NEGRO" : $"SALIDA: ▣ {videoName}";
+
+    public void SetOutputDetails(string details)
+    {
+        TallyLabel.ToolTip = details.Length > 0 ? details : null;
+        VideoOutButton.ToolTip = details.Length > 0 ? details : null;
+    }
 
     // ==================================================================
     // Transport / toolbar
@@ -605,10 +628,20 @@ public partial class MainWindow : Window, IShowView
         SetEditingEnabled(true);
     }
 
-    /// <summary>Botón de salida: rojo sin salida activa, verde con alguna.</summary>
+    /// <summary>Botón de salida: rojo sin salida activa, verde con alguna,
+    /// negro parpadeante-mental en blackout (que se note desde lejos).</summary>
     private void UpdateVideoOutButton()
     {
         bool active = _videoOutputs.Any(w => w is { IsVisible: true });
+        if (_blackout)
+        {
+            VideoOutButton.Background = Brushes.Black;
+            VideoOutButton.Foreground = Brushes.Red;
+            VideoOutButton.Content = "⬛ BLACKOUT ▾";
+            return;
+        }
+        VideoOutButton.Foreground = Brushes.White;
+        VideoOutButton.Content = "🖵 Salida vídeo ▾";
         VideoOutButton.Background = new SolidColorBrush(active
             ? Color.FromRgb(0x1e, 0x7e, 0x34)
             : Color.FromRgb(0x7e, 0x1e, 0x1e));
@@ -631,20 +664,143 @@ public partial class MainWindow : Window, IShowView
                     b.IsEnabled = enabled;
     }
 
+    private bool _blackout;
+
+    /// <summary>Menú de control de salidas (mostrar/ocultar, identificar,
+    /// patrones de test y blackout) — control fino sin pasar por Settings.</summary>
     private void OnVideoOutputClick(object sender, RoutedEventArgs e)
     {
-        // Con alguna salida visible el botón las oculta TODAS (blackout de
-        // operador); sin ninguna, abre la principal (el resto aparecen solas
-        // cuando un cue las usa).
-        if (_videoOutputs.Any(w => w is { IsVisible: true }))
+        var menu = new ContextMenu();
+
+        for (int s = 0; s < _videoOutputs.Length; s++)
+        {
+            int idx = s;
+            var w = _videoOutputs[s];
+            var sub = new MenuItem
+            {
+                Header = $"Salida {s + 1}",
+                Foreground = new SolidColorBrush(CanvasEditorControl.OutColors[s]),
+                FontWeight = FontWeights.Bold,
+            };
+
+            var show = new MenuItem
+            {
+                Header = w is { IsVisible: true } ? "Ocultar" : "Mostrar",
+                Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+            };
+            show.Click += (_, _) =>
+            {
+                if (_videoOutputs[idx] is { IsVisible: true } vw)
+                {
+                    vw.Hide();
+                }
+                else
+                {
+                    EnsureVideoOutputWindow(idx);
+                    _videoOutputs[idx]!.Show();
+                    PlaceVideoOutput(idx);
+                }
+            };
+            sub.Items.Add(show);
+
+            var ident = new MenuItem
+            {
+                Header = "Identificar",
+                Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+            };
+            ident.Click += (_, _) => IdentifyOutput(idx);
+            sub.Items.Add(ident);
+
+            sub.Items.Add(new Separator());
+            foreach (var (pattern, label) in new[]
+            {
+                (TestPattern.None, "Sin patrón"),
+                (TestPattern.Grid, "Patrón: rejilla"),
+                (TestPattern.Bars, "Patrón: barras"),
+                (TestPattern.Border, "Patrón: borde"),
+            })
+            {
+                var item = new MenuItem
+                {
+                    Header = label,
+                    IsCheckable = true,
+                    IsChecked = (w?.Pattern ?? TestPattern.None) == pattern,
+                    Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                };
+                var p = pattern;
+                item.Click += (_, _) =>
+                {
+                    EnsureVideoOutputWindow(idx);
+                    _videoOutputs[idx]!.SetTestPattern(p);
+                    PlaceVideoOutput(idx);
+                };
+                sub.Items.Add(item);
+            }
+            menu.Items.Add(sub);
+        }
+
+        menu.Items.Add(new Separator());
+
+        var identAll = new MenuItem { Header = "Identificar salidas visibles" };
+        identAll.Click += (_, _) =>
+        {
+            for (int s = 0; s < _videoOutputs.Length; s++)
+                if (_videoOutputs[s] is { IsVisible: true })
+                    IdentifyOutput(s);
+        };
+        menu.Items.Add(identAll);
+
+        var clearPatterns = new MenuItem { Header = "Quitar todos los patrones" };
+        clearPatterns.Click += (_, _) =>
+        {
+            foreach (var w in _videoOutputs)
+                w?.SetTestPattern(TestPattern.None);
+        };
+        menu.Items.Add(clearPatterns);
+
+        var blackout = new MenuItem
+        {
+            Header = "Blackout (B)",
+            IsCheckable = true,
+            IsChecked = _blackout,
+        };
+        blackout.Click += (_, _) => ToggleBlackout();
+        menu.Items.Add(blackout);
+
+        menu.Items.Add(new Separator());
+        var hideAll = new MenuItem { Header = "Ocultar todas las salidas" };
+        hideAll.Click += (_, _) =>
         {
             foreach (var w in _videoOutputs)
                 w?.Hide();
-            return;
-        }
-        EnsureVideoOutputWindow(0);
-        _videoOutputs[0]!.Show();
-        PlaceVideoOutput(0);
+        };
+        menu.Items.Add(hideAll);
+
+        menu.PlacementTarget = (UIElement)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    private void IdentifyOutput(int screen)
+    {
+        EnsureVideoOutputWindow(screen);
+        _videoOutputs[screen]!.ShowIdentify(screen, CanvasEditorControl.OutColors[screen]);
+        PlaceVideoOutput(screen);
+    }
+
+    /// <summary>Blackout de operador (tecla B): funde TODAS las salidas a
+    /// negro sin parar los cues; otra pulsación lo levanta.</summary>
+    public void ToggleBlackout()
+    {
+        _blackout = !_blackout;
+        double fade = Math.Max(0.0, _settings.Get("blackout_fade", 1.0));
+        foreach (var w in _videoOutputs)
+            if (w is { IsVisible: true })
+                w.SetBlackout(_blackout, fade);
+        UpdateVideoOutButton();
+        FlashStatus(_blackout
+            ? "BLACKOUT — salidas fundidas a negro (B para levantar)."
+            : "Blackout levantado.");
     }
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
@@ -1112,6 +1268,13 @@ public partial class MainWindow : Window, IShowView
                 e.Handled = true;
                 return;
             }
+            // Blackout de vídeo (control de seguridad: gana a los hotkeys)
+            if (e.Key == Key.B)
+            {
+                ToggleBlackout();
+                e.Handled = true;
+                return;
+            }
             // Hotkey por cue (dispara sin mover el playhead)
             if (_cueHotkeys.TryGetValue(e.Key, out int hotCueId))
             {
@@ -1281,8 +1444,12 @@ public partial class MainWindow : Window, IShowView
         _pvw.Shutdown();
         _pgm.Shutdown();
         Inspector.ShutdownPreview();
-        foreach (var w in _videoOutputs)
-            w?.CloseForShutdown();
+        for (int s = 0; s < _videoOutputs.Length; s++)
+        {
+            if (_videoOutputs[s] is { IsVisible: true })
+                SaveOutputGeometry(s);
+            _videoOutputs[s]?.CloseForShutdown();
+        }
         base.OnClosed(e);
     }
 
