@@ -51,8 +51,13 @@ public class SettingsManager
         ["video_loop_default"]      = false,
         ["video_fade_frames"]       = 0,
         ["surface_preset"]          = "screen",  // "screen" | "custom" | "WxH"
-        ["surface_width"]           = 0,
-        ["surface_height"]          = 0,
+        ["surface_width"]           = 0,         // tamaño del CANVAS (0 = 1920)
+        ["surface_height"]          = 0,         // tamaño del CANVAS (0 = 1080)
+        ["blackout_fade"]           = 1,         // s del fundido del blackout (tecla B)
+        // Monitores de las salidas 2-4 (C#-only; la 1 usa video_output_screen)
+        ["video_output_screen2"]    = 0,
+        ["video_output_screen3"]    = 0,
+        ["video_output_screen4"]    = 0,
 
         // ── Red / Control externo ────────────────────────────────────
         ["osc_enabled"]       = false,
@@ -79,6 +84,7 @@ public class SettingsManager
         ["keyboard_stop"]       = "S",
         ["keyboard_prev"]       = "Left",
         ["theme"]               = "dark",
+        ["ui_font_scale"]       = 100,   // % de la tabla/tarjetas (FOH a oscuras)
 
         // ── Rutas ────────────────────────────────────────────────────
         ["default_show_path"]  = "",

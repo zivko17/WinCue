@@ -217,6 +217,9 @@ public partial class SettingsWindow : Window
         Check("show_latency_column", ui, "Mostrar columna de latencia");
         Check("show_next_cue_label", ui, "Mostrar etiqueta del siguiente cue");
         Check("confirm_last_cue", ui, "Confirmar al llegar al último cue");
+        Spin("ui_font_scale", ui, "Escala de fuente de la lista (%):", 80, 200);
+        Note(ui, "Agranda la tabla de cues y las tarjetas EN REPRODUCCIÓN " +
+                 "(FOH a oscuras). Se aplica al guardar.");
 
         var kb = Group(root, "ATAJOS DE TECLADO");
         Text("keyboard_go", kb, "GO:");

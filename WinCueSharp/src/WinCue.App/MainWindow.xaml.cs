@@ -165,6 +165,13 @@ public partial class MainWindow : Window, IShowView
             ? Visibility.Visible : Visibility.Collapsed;
         NextCueLabel.Visibility = _settings.Get("show_next_cue_label", true)
             ? Visibility.Visible : Visibility.Collapsed;
+
+        // Escala de fuente para FOH a oscuras (Settings → Interfaz)
+        double scale = Math.Clamp(_settings.Get("ui_font_scale", 100), 80, 200) / 100.0;
+        CueGrid.FontSize = 13.0 * scale;
+        CueGrid.RowHeight = 30.0 * scale;
+        ActiveList.FontSize = 12.0 * scale;
+        NextCueLabel.FontSize = 14.0 * scale;
     }
 
     private void UpdateNextCueLabel()
@@ -1053,6 +1060,37 @@ public partial class MainWindow : Window, IShowView
         var cue = row >= 0 ? _model.GetCue(row) : null;
         if (cue?.Type == CueType.Group)
             _controller.OnToggleCollapse(row);
+    }
+
+    private ScrollViewer? _gridScroll;
+
+    /// <summary>Auto-scroll durante un arrastre: acercarse al borde superior o
+    /// inferior de la tabla desplaza la lista (shows largos). WPF dispara
+    /// DragOver de forma continua durante el drag, no solo al mover.</summary>
+    private void OnGridDragOver(object sender, DragEventArgs e)
+    {
+        _gridScroll ??= FindDescendant<ScrollViewer>(CueGrid);
+        if (_gridScroll is null)
+            return;
+        const double zone = 28;
+        double y = e.GetPosition(CueGrid).Y;
+        if (y < zone)
+            _gridScroll.ScrollToVerticalOffset(_gridScroll.VerticalOffset - 0.35);
+        else if (y > CueGrid.ActualHeight - zone)
+            _gridScroll.ScrollToVerticalOffset(_gridScroll.VerticalOffset + 0.35);
+    }
+
+    private static T? FindDescendant<T>(DependencyObject root) where T : DependencyObject
+    {
+        for (int i = 0; i < System.Windows.Media.VisualTreeHelper.GetChildrenCount(root); i++)
+        {
+            var child = System.Windows.Media.VisualTreeHelper.GetChild(root, i);
+            if (child is T hit)
+                return hit;
+            if (FindDescendant<T>(child) is T deep)
+                return deep;
+        }
+        return null;
     }
 
     private void OnGridDrop(object sender, DragEventArgs e)

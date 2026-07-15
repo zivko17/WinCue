@@ -216,7 +216,7 @@
                   PreviewMouseLeftButtonDown="OnGridMouseDown"
                   PreviewMouseRightButtonDown="OnGridRightClick"
                   PreviewMouseMove="OnGridMouseMove"
-                  Drop="OnGridDrop" AllowDrop="True">
+                  Drop="OnGridDrop" DragOver="OnGridDragOver" AllowDrop="True">
             <DataGrid.ColumnHeaderStyle>
                 <Style TargetType="DataGridColumnHeader">
                     <Setter Property="Background" Value="#2d2d30"/>
