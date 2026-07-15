@@ -91,6 +91,10 @@
                 <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
                         ToolTip="Shows recientes"/>
                 <Button Click="OnSaveShow" Content="💾 Guardar"/>
+                <Button x:Name="RelocateButton" Click="OnRelocateMedia" Content="🔗 Relocalizar"
+                        Visibility="Collapsed"
+                        Background="#7e5a1e"
+                        ToolTip="Hay cues con archivos NO encontrados: buscar los medios en otra carpeta"/>
                 <Separator Width="14" Background="Transparent"/>
                 <TextBlock Text="Añadir:" VerticalAlignment="Center" Margin="0,0,4,0"
                            Foreground="{StaticResource FgDim}"/>
@@ -123,6 +127,11 @@
             <DockPanel>
                 <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right" Text="SALIDA: NEGRO"
                            Foreground="{StaticResource FgDim}"/>
+                <Button x:Name="LogButton" DockPanel.Dock="Left" Content="🕮"
+                        Click="OnShowStatusLog" Padding="4,0" Margin="0,0,8,0"
+                        Background="Transparent" BorderThickness="0"
+                        Foreground="{StaticResource FgDim}"
+                        ToolTip="Historial de avisos y mensajes de estado"/>
                 <TextBlock x:Name="StatusLabel" Text="Listo."/>
             </DockPanel>
         </Border>

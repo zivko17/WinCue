@@ -270,11 +270,63 @@ public partial class MainWindow : Window, IShowView
     // IShowView
     // ==================================================================
 
+    // Historial de mensajes de estado (panel de avisos del botón 🕮)
+    private readonly List<string> _statusHistory = new();
+    private bool _statusHasWarnings;
+
     public void FlashStatus(string message)
     {
         StatusLabel.Text = message;
         _statusTimer.Stop();
         _statusTimer.Start();
+
+        // Los avisos pasan fugaces por la barra: quedan en el historial
+        _statusHistory.Add($"[{DateTime.Now:HH:mm:ss}] {message}");
+        if (_statusHistory.Count > 300)
+            _statusHistory.RemoveAt(0);
+        if (message.Contains("[AVISO]") || message.Contains('⚠')
+            || message.Contains("Error", StringComparison.OrdinalIgnoreCase)
+            || message.Contains("falló", StringComparison.OrdinalIgnoreCase))
+        {
+            _statusHasWarnings = true;
+            LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
+        }
+    }
+
+    private void OnShowStatusLog(object sender, RoutedEventArgs e)
+    {
+        _statusHasWarnings = false;
+        LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0x9a, 0x9a, 0x9a));
+
+        var text = new TextBox
+        {
+            Text = _statusHistory.Count > 0
+                ? string.Join(Environment.NewLine, Enumerable.Reverse(_statusHistory))
+                : "(sin mensajes todavía)",
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(8),
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+        };
+        var popup = new System.Windows.Controls.Primitives.Popup
+        {
+            PlacementTarget = LogButton,
+            Placement = System.Windows.Controls.Primitives.PlacementMode.Top,
+            StaysOpen = false,
+            AllowsTransparency = true,
+            Child = new Border
+            {
+                Width = 560, Height = 320,
+                Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
+                BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                BorderThickness = new Thickness(1),
+                Child = text,
+            },
+        };
+        popup.IsOpen = true;
     }
 
     public void ShowError(string title, string message) =>
@@ -317,6 +369,28 @@ public partial class MainWindow : Window, IShowView
         Timeline.RefreshFromModel();
         UpdateTimelinePanel();
         RebuildHotkeys();
+        UpdateRelocateButton();
+    }
+
+    /// <summary>El botón "Relocalizar" solo aparece con medios faltantes.</summary>
+    private void UpdateRelocateButton()
+    {
+        int missing = _controller?.MissingMediaCount() ?? 0;
+        RelocateButton.Visibility = missing > 0 ? Visibility.Visible : Visibility.Collapsed;
+        if (missing > 0)
+            RelocateButton.Content = $"🔗 Relocalizar ({missing})";
+    }
+
+    private void OnRelocateMedia(object sender, RoutedEventArgs e)
+    {
+        var dlg = new Microsoft.Win32.OpenFolderDialog
+        {
+            Title = "Carpeta donde buscar los medios del show",
+        };
+        if (dlg.ShowDialog(this) != true)
+            return;
+        _controller.RelocateMedia(dlg.FolderName);
+        UpdateRelocateButton();
     }
 
     public void AppendCueRow(Cue cue) => _rows.Add(new CueRowViewModel(cue, _model));

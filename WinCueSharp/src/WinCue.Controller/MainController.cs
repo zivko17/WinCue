@@ -2061,6 +2061,70 @@ public class MainController
             : $"Show cargado: {Path.GetFileName(path)}");
     }
 
+    /// <summary>Cues de media/script cuyo archivo NO existe en disco.</summary>
+    public int MissingMediaCount()
+    {
+        int missing = 0;
+        foreach (var c in _model.Cues)
+            if ((c.IsMedia() || c.Type == CueType.Script)
+                && c.FilePath.Length > 0 && !File.Exists(c.FilePath))
+                missing++;
+        return missing;
+    }
+
+    /// <summary>Relocaliza los medios faltantes buscando POR NOMBRE DE
+    /// ARCHIVO (recursivo) en la carpeta dada — el caso "show movido de
+    /// máquina". Devuelve cuántos se recuperaron.</summary>
+    public int RelocateMedia(string folder)
+    {
+        if (!Directory.Exists(folder))
+            return 0;
+
+        // Índice nombre → primera ruta encontrada
+        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+        try
+        {
+            foreach (string f in Directory.EnumerateFiles(
+                folder, "*", SearchOption.AllDirectories))
+            {
+                string name = Path.GetFileName(f);
+                if (!index.ContainsKey(name))
+                    index[name] = f;
+            }
+        }
+        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+        {
+            // Carpeta parcialmente ilegible: se relocaliza lo que se pudo indexar
+        }
+
+        PushUndo();
+        int recovered = 0;
+        for (int i = 0; i < _model.Count; i++)
+        {
+            var c = _model.Cues[i];
+            if (!(c.IsMedia() || c.Type == CueType.Script)
+                || c.FilePath.Length == 0 || File.Exists(c.FilePath))
+                continue;
+            if (index.TryGetValue(Path.GetFileName(c.FilePath), out string? found))
+            {
+                c.FilePath = found;
+                c.LatencyMs = null;
+                _model.SetState(i, CueState.Idle);
+                _audio.InvalidateCache(c.Id);
+                recovered++;
+            }
+        }
+
+        if (recovered > 0)
+            _view.ReloadTable();
+        int stillMissing = MissingMediaCount();
+        Log($"Relocalización de medios: {recovered} recuperados, {stillMissing} pendientes ({folder})");
+        _view.FlashStatus(stillMissing > 0
+            ? $"Relocalizados {recovered} archivo(s) — ⚠ quedan {stillMissing} sin encontrar"
+            : $"Relocalizados {recovered} archivo(s). Todos los medios OK.");
+        return recovered;
+    }
+
     // ------------------------------------------------------------------
     // Cierre limpio
     // ------------------------------------------------------------------
