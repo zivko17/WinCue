@@ -31,6 +31,27 @@ namespace WinCue.App;
 public sealed class TimelinePanel : Border
 {
     private readonly TimelineCanvas _canvas = new();
+    private CheckBox _chkXfade = null!;
+    private bool _xfadeLoading;
+
+    /// <summary>Notifica el cambio del interruptor (para persistirlo).</summary>
+    public Action<bool>? AutoCrossfadeToggled;
+
+    /// <summary>Fija el estado del crossfade automático (desde settings).</summary>
+    public void SetAutoCrossfade(bool enabled)
+    {
+        _xfadeLoading = true;
+        _chkXfade.IsChecked = enabled;
+        _canvas.AutoCrossfade = enabled;
+        _xfadeLoading = false;
+    }
+
+    private void OnXfadeToggle(bool enabled)
+    {
+        _canvas.AutoCrossfade = enabled;
+        if (!_xfadeLoading)
+            AutoCrossfadeToggled?.Invoke(enabled);
+    }
 
     public Action<int, string, object?>? CommitField
     {
@@ -112,6 +133,22 @@ public sealed class TimelinePanel : Border
         header.Children.Add(title);
 
         var right = new StackPanel { Orientation = Orientation.Horizontal };
+        _chkXfade = new CheckBox
+        {
+            Content = "🔀 Crossfade al solapar",
+            IsChecked = true,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 10, 0),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            FontSize = 11,
+            ToolTip = "ACTIVADO: al solapar dos medias el solape se convierte en " +
+                      "crossfade (y al separarlos se quita).\n" +
+                      "DESACTIVADO: el timeline no toca los fades — capas libres " +
+                      "sin fundido (los fades se ponen a mano en el inspector).",
+        };
+        _chkXfade.Checked += (_, _) => OnXfadeToggle(true);
+        _chkXfade.Unchecked += (_, _) => OnXfadeToggle(false);
+        right.Children.Add(_chkXfade);
         right.Children.Add(HeaderButton("−", () => _canvas.ZoomStep(1 / 1.4)));
         right.Children.Add(HeaderButton("＋", () => _canvas.ZoomStep(1.4)));
         right.Children.Add(HeaderButton("Ajustar", () => _canvas.ZoomToFit()));
@@ -221,6 +258,11 @@ public sealed class TimelineCanvas : FrameworkElement
     public Action<int>? TriggerRequested;
     public Action<int>? StopRequested;
     public Action<IReadOnlyList<MainController.TimelinePlayItem>>? PlayFromRequested;
+
+    /// <summary>true → el timeline GESTIONA los fades al arrastrar (solape =
+    /// crossfade; separar = quitarlo). false → nunca toca los fades: capas
+    /// libres sin fundido (los fades se editan a mano en el inspector).</summary>
+    public bool AutoCrossfade = true;
     public Func<bool>? IsEditAllowed;
     public event Action<int>? CueSelected;
 
@@ -1287,10 +1329,13 @@ public sealed class TimelineCanvas : FrameworkElement
 
     /// <summary>Tras un arrastre, si el cue queda SOLAPADO con su hermano
     /// anterior/siguiente (ambos media), la duración del solape se convierte
-    /// en el crossfade: fade_out del que sale = fade_in del que entra.</summary>
+    /// en el crossfade: fade_out del que sale = fade_in del que entra.
+    /// Si el arrastre los SEPARA, el crossfade se retira (los fades gigantes
+    /// heredados de solapes viejos no tienen sentido). Con el interruptor
+    /// 🔀 apagado no se toca ningún fade.</summary>
     private void AutoCrossfadeAround(Cue cue)
     {
-        if (_model is null || !cue.IsMedia())
+        if (!AutoCrossfade || _model is null || !cue.IsMedia())
             return;
         RebuildLayout();   // proyección con los commits del arrastre aplicados
         var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
@@ -1312,8 +1357,18 @@ public sealed class TimelineCanvas : FrameworkElement
             return;
         double aDur = EffectiveDuration(outgoing);
         double overlap = aStart + aDur - bStart;
+
         if (overlap < 0.05 || aDur <= 0)
-            return;   // sin solape: no tocar los fades del usuario
+        {
+            // SIN solape: retirar el crossfade que el propio timeline hubiera
+            // escrito (bloques separados con fades de minutos = sinsentido)
+            if (outgoing.FadeOut > 0.01)
+                CommitField?.Invoke(outgoing.Id, "fade_out", 0.0);
+            if (incoming.FadeIn > 0.01)
+                CommitField?.Invoke(incoming.Id, "fade_in", 0.0);
+            return;
+        }
+
         overlap = Math.Round(Math.Min(overlap,
             Math.Min(aDur, Math.Max(0.1, EffectiveDuration(incoming)))), 1);
         if (Math.Abs(outgoing.FadeOut - overlap) > 0.01)
@@ -1501,6 +1556,13 @@ public sealed class TimelineCanvas : FrameworkElement
             if (cue.TimelineLayer >= 0)
                 menu.Items.Add(MainWindow.Mi("📌 Soltar a capa automática", "",
                     () => CommitField?.Invoke(cue.Id, "timeline_layer", -1), edit));
+            if (cue.IsMedia() && (cue.FadeIn > 0.01 || cue.FadeOut > 0.01))
+                menu.Items.Add(MainWindow.Mi("◢ Quitar fades (in/out) de este cue", "",
+                    () =>
+                    {
+                        CommitField?.Invoke(cue.Id, "fade_in", 0.0);
+                        CommitField?.Invoke(cue.Id, "fade_out", 0.0);
+                    }, edit));
             menu.Items.Add(MainWindow.ColorSubmenu(
                 color => CommitField?.Invoke(cue.Id, "color", color), edit));
             menu.Items.Add(MainWindow.Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",

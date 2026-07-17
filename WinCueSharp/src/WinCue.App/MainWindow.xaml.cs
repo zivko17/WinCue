@@ -122,6 +122,14 @@ public partial class MainWindow : Window, IShowView
         };
         Timeline.TriggerRequested = cueId => _controller.TriggerCueId(cueId);
         Timeline.PlayFromRequested = items => _controller.PlayFromTimeline(items);
+        Timeline.SetAutoCrossfade(_settings.Get("timeline_auto_crossfade", true));
+        Timeline.AutoCrossfadeToggled = on =>
+        {
+            _settings.Set("timeline_auto_crossfade", on);
+            FlashStatus(on
+                ? "Crossfade automático al solapar: ACTIVADO."
+                : "Crossfade automático: DESACTIVADO — el timeline no tocará los fades.");
+        };
         Timeline.StopRequested = cueId =>
         {
             // Un grupo no "suena" él mismo: detener sus descendientes activos

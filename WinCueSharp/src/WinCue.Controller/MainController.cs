@@ -760,9 +760,23 @@ public class MainController
                 }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
+                {
                     Schedule(run,
                         (int)(Math.Max(0.0, run.Duration - offset) / RateOf(cue) * 1000),
                         () => DurationElapsed(cue.Id));
+                    // El fade_out del VÍDEO vive DENTRO de sus últimos
+                    // fade_out segundos (como lo dibuja el timeline y como
+                    // hace el audio), no a partir del final del bloque.
+                    double fo = Math.Clamp(cue.FadeOut, 0.0, run.Duration);
+                    if (fo > 0.01)
+                    {
+                        double startIn = Math.Max(0.0, run.Duration - offset - fo);
+                        double wallFade = Math.Min(fo, run.Duration - offset)
+                            / RateOf(cue);
+                        Schedule(run, (int)(startIn / RateOf(cue) * 1000),
+                            () => BeginVideoFadeOut(cue.Id, wallFade));
+                    }
+                }
                 break;
 
             case CueType.Wait:
@@ -1025,7 +1039,22 @@ public class MainController
         EndCue(cueId, markStopped: true, fade: fade);
     }
 
-    /// <summary>La duración fijada expiró antes del fin natural: parar con fade_out.</summary>
+    /// <summary>Arranca el fundido de SALIDA de un vídeo (volumen + opacidad)
+    /// dentro de sus últimos fade_out segundos. No detiene el cue: el timer
+    /// de fin (DurationElapsed) llega justo cuando el fundido acaba.</summary>
+    private void BeginVideoFadeOut(int cueId, double wallSeconds)
+    {
+        if (!_running.TryGetValue(cueId, out var run) || run.ManualStop)
+            return;
+        if (!_video.IsPlaying(cueId) || _model.GetById(cueId) is not Cue cue)
+            return;
+        _video.FadeVolume(cueId, 0.0, wallSeconds, stopAfter: false);
+        SetCueLayerOpacity(cue, 0.0, wallSeconds);
+    }
+
+    /// <summary>La duración fijada expiró antes del fin natural: parar. El
+    /// AUDIO funde su cola (el motor la aplica sample-accurate); el VÍDEO ya
+    /// llegó fundido (BeginVideoFadeOut) → corte directo sin doble fade.</summary>
     private void DurationElapsed(int cueId)
     {
         var cue = _model.GetById(cueId);
@@ -1033,7 +1062,7 @@ public class MainController
             return;
         if (_running.TryGetValue(cueId, out var run))
             run.ManualStop = true;   // evita doble action-end desde el engine
-        double fade = cue.IsMedia() ? cue.FadeOut : 0.0;
+        double fade = cue.Type == CueType.Audio ? cue.FadeOut : 0.0;
         OnActionEnd(cueId, fade: fade);
     }
 
