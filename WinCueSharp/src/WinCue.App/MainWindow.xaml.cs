@@ -661,9 +661,14 @@ public partial class MainWindow : Window, IShowView
             double remaining = Math.Max(0.0, total - elapsed);
             ShowClockMode.Text = "SHOW · RESTANTE ▾";
             ShowClockText.Text = FormatClock(remaining);
+            // En modo SHOW el reloj va en el verde "armado" de la salida
+            // (mismo #1e7e34 aclarado para leerse sobre fondo oscuro);
+            // agotado sigue en rojo, y en EDIT queda el ámbar de trabajo.
             ShowClockText.Foreground = remaining <= 0.0 && _showStartTicks is not null
                 ? new SolidColorBrush(Color.FromRgb(0xc0, 0x39, 0x2b))
-                : new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
+                : ModeToggle.IsChecked == true
+                    ? new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71))
+                    : new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
         }
         else
         {
@@ -683,24 +688,7 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
         BottomTabs.SelectedIndex = 0;   // en SHOW, abajo SIEMPRE el timeline
-        ApplyModeChrome(show: true);
-    }
-
-    /// <summary>Marco de la ventana según el modo: en SHOW las franjas se
-    /// tiñen del MISMO verde que la salida activa — "todo armado" visible
-    /// desde la otra punta del FOH; en EDIT vuelve la paleta oscura.</summary>
-    private void ApplyModeChrome(bool show)
-    {
-        var showGreen = new SolidColorBrush(Color.FromRgb(0x1e, 0x7e, 0x34));
-        var showBgTint = new SolidColorBrush(Color.FromRgb(0x12, 0x2b, 0x19));
-        TopBar.Background = show ? showGreen
-            : (SolidColorBrush)FindResource("Panel");
-        StatusBar.Background = show ? showGreen
-            : (SolidColorBrush)FindResource("Panel");
-        ToolbarBar.Background = show ? showBgTint
-            : new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2b));
-        Background = show ? showBgTint
-            : (SolidColorBrush)FindResource("Bg");
+        UpdateShowClock();   // el reloj pasa a verde "armado"
     }
 
     private bool _modeReverting;
@@ -725,7 +713,7 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
         ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
-        ApplyModeChrome(show: false);
+        UpdateShowClock();   // el reloj vuelve al ámbar de edición
     }
 
     /// <summary>Botón de salida: rojo sin salida activa, verde con alguna,

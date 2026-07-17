@@ -40,6 +40,13 @@ public sealed class LiveMonitorControl : Border
         BorderBrush = new SolidColorBrush(badgeColor);
         BorderThickness = new Thickness(1);
         Height = 152;
+        // Alto elástico 16:9 respecto al ancho: al ensanchar el panel
+        // izquierdo (separador arrastrable) los monitores crecen con él
+        SizeChanged += (_, e) =>
+        {
+            if (e.WidthChanged && e.NewSize.Width > 0)
+                Height = Math.Max(120, e.NewSize.Width * 9.0 / 16.0 + 18.0);
+        };
 
         // Barra superior con el distintivo (fuera del HWND → sin airspace)
         var bar = new DockPanel { Background = new SolidColorBrush(badgeColor) };

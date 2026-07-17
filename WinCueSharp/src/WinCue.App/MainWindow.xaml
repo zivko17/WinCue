@@ -67,16 +67,16 @@
                 <!-- Centro: reloj del show (el countdown por cue vive en las
                      tarjetas de EN REPRODUCCIÓN y en el progreso de la fila) -->
                 <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
-                        Padding="12,2" Cursor="Hand"
+                        Padding="18,2" Cursor="Hand"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         MouseLeftButtonDown="OnShowClockClick"
                         ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
                     <StackPanel>
                         <TextBlock x:Name="ShowClockMode" Text="SHOW · RESTANTE ▾"
-                                   FontSize="9" Foreground="{StaticResource FgDim}"
+                                   FontSize="10" Foreground="{StaticResource FgDim}"
                                    HorizontalAlignment="Center"/>
                         <TextBlock x:Name="ShowClockText" Text="0:00:00"
-                                   FontSize="26" FontWeight="Bold"
+                                   FontSize="40" FontWeight="Bold"
                                    FontFamily="Consolas" Foreground="#e8c000"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
@@ -136,8 +136,16 @@
             </DockPanel>
         </Border>
 
-        <!-- ═══════════ PANEL IZQ: monitores + cues activos ═══════════ -->
-        <Border DockPanel.Dock="Left" Width="260" Background="{StaticResource Panel}"
+        <!-- ═══════════ PANEL IZQ (redimensionable) + CENTRO ═══════════ -->
+        <Grid>
+            <Grid.ColumnDefinitions>
+                <!-- Arrastrar el separador agranda monitores PGM/PVW (16:9) -->
+                <ColumnDefinition Width="260" MinWidth="200" MaxWidth="700"/>
+                <ColumnDefinition Width="Auto"/>
+                <ColumnDefinition Width="*" MinWidth="400"/>
+            </Grid.ColumnDefinitions>
+
+        <Border Grid.Column="0" Background="{StaticResource Panel}"
                 Padding="8">
             <DockPanel>
                 <!-- Mini-monitores PVW / PGM (se rellenan desde código) -->
@@ -195,8 +203,12 @@
             </DockPanel>
         </Border>
 
+        <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center"
+                      VerticalAlignment="Stretch" Background="#333333"
+                      ResizeBehavior="PreviousAndNext"/>
+
         <!-- ═══════════ CENTRO: tabla + (inspector | timeline) ═══════════ -->
-        <Grid>
+        <Grid Grid.Column="2">
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="120"/>
                 <RowDefinition Height="Auto"/>
@@ -299,6 +311,7 @@
                     <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
                 </TabItem>
             </TabControl>
+        </Grid>
         </Grid>
     </DockPanel>
 </Window>
