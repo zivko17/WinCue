@@ -62,13 +62,13 @@ public sealed class EqEditorControl : ContentControl
 
     public EqEditorControl()
     {
-        // Distribución pedida por Andrés: IZQUIERDA las gráficas (curva EQ
-        // arriba, transferencia del compresor + medidor GR debajo) y a la
-        // DERECHA todos los parámetros numéricos de EQ y compresor.
+        // Distribución: las DOS herramientas lado a lado — EQ (gráfica +
+        // sus parámetros debajo) y COMPRESOR (transferencia + GR + sus
+        // parámetros debajo). El fader de ganancia de clip, a la izquierda.
         _root = new Grid { Margin = new Thickness(10, 6, 10, 8) };
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
-        _root.ColumnDefinitions.Add(new ColumnDefinition());
-        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 300 });
         _root.RowDefinitions.Add(new RowDefinition());
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -114,25 +114,12 @@ public sealed class EqEditorControl : ContentControl
         Grid.SetRowSpan(gainPanel, 2);
         _root.Children.Add(gainPanel);
 
-        // ── Columna central: gráficas (EQ arriba, compresor debajo) ────
-        var graphics = new Grid();
-        graphics.RowDefinitions.Add(new RowDefinition());
-        graphics.RowDefinitions.Add(new RowDefinition { Height = new GridLength(110) });
-        Grid.SetRow(_canvas, 0);
-        graphics.Children.Add(_canvas);
-        _compCanvas.Margin = new Thickness(0, 4, 0, 0);
-        Grid.SetRow(_compCanvas, 1);
-        graphics.Children.Add(_compCanvas);
-        Grid.SetColumn(graphics, 1);
-        Grid.SetRow(graphics, 0);
-        _root.Children.Add(graphics);
         _canvas.Commit = (k, v) =>
         {
             if (_loading) return;
             Commit?.Invoke(k, v);
             RefreshParams();
         };
-        _canvas.ReadoutChanged += text => _readout!.Text = text;
         _compCanvas.Commit = (k, v) =>
         {
             if (_loading) return;
@@ -140,22 +127,42 @@ public sealed class EqEditorControl : ContentControl
             RefreshParams();
         };
 
-        // ── Fila inferior (bajo las gráficas): lectura + RTA de pantalla ─
-        var bottom = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        var left = new StackPanel { Orientation = Orientation.Horizontal };
-        left.Children.Add(new TextBlock
+        // ── HERRAMIENTA 1 (izquierda): ECUALIZADOR — gráfica + parámetros ─
+        _eqOn = MakeCheck("EQ activa", "eq_enabled");
+        _hpfOn = MakeCheck("HPF", "hpf_on");
+        _hpfFreq = MakeFreqBox("hpf_freq");
+        _lpfOn = MakeCheck("LPF", "lpf_on");
+        _lpfFreq = MakeFreqBox("lpf_freq");
+
+        Grid.SetColumn(_canvas, 1);
+        Grid.SetRow(_canvas, 0);
+        _root.Children.Add(_canvas);
+        _canvas.ReadoutChanged += text => _readout!.Text = text;
+
+        var eqPars = new StackPanel { Margin = new Thickness(0, 4, 8, 0) };
+        var eqRow1 = new StackPanel { Orientation = Orientation.Horizontal };
+        eqRow1.Children.Add(_eqOn);
+        eqRow1.Children.Add(_hpfOn);
+        eqRow1.Children.Add(_hpfFreq);
+        eqRow1.Children.Add(Hz());
+        eqRow1.Children.Add(_lpfOn);
+        eqRow1.Children.Add(_lpfFreq);
+        eqRow1.Children.Add(Hz());
+
+        // Ganancia de VISUALIZACIÓN del RTA (no toca el audio)
+        eqRow1.Children.Add(new TextBlock
         {
             Text = "RTA +",
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(0, 0, 3, 0),
+            Margin = new Thickness(8, 0, 3, 0),
         });
         var rtaGain = new Slider
         {
             Minimum = 0,
             Maximum = 48,
             Value = EqCurveCanvas.RtaGainDb,
-            Width = 90,
+            Width = 80,
             VerticalAlignment = VerticalAlignment.Center,
             ToolTip = "Ganancia de visualización del analizador (solo pantalla)",
         };
@@ -174,95 +181,99 @@ public sealed class EqEditorControl : ContentControl
             rtaLabel.Text = $"{rtaGain.Value:0} dB";
             _canvas.InvalidateVisual();
         };
-        left.Children.Add(rtaGain);
-        left.Children.Add(rtaLabel);
-        bottom.Children.Add(left);
-        _readout = new TextBlock
-        {
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
-            FontFamily = new FontFamily("Consolas"),
-            FontSize = 11,
-            VerticalAlignment = VerticalAlignment.Center,
-            HorizontalAlignment = HorizontalAlignment.Right,
-            Text = "curva: arrastrar punto = frec/gan · rueda = Q · comp: arrastrar = umbral · rueda = ratio",
-        };
-        bottom.Children.Add(_readout);
-        Grid.SetColumn(bottom, 1);
-        Grid.SetRow(bottom, 1);
-        _root.Children.Add(bottom);
+        eqRow1.Children.Add(rtaGain);
+        eqRow1.Children.Add(rtaLabel);
+        eqPars.Children.Add(eqRow1);
 
-        // ── Columna derecha: TODOS los parámetros numéricos ────────────
-        _eqOn = MakeCheck("EQ activa", "eq_enabled");
-        _hpfOn = MakeCheck("HPF", "hpf_on");
-        _hpfFreq = MakeFreqBox("hpf_freq");
-        _lpfOn = MakeCheck("LPF", "lpf_on");
-        _lpfFreq = MakeFreqBox("lpf_freq");
-
-        var pars = new StackPanel { Width = 252, Margin = new Thickness(10, 0, 0, 0) };
-        pars.Children.Add(SectionTitle("ECUALIZADOR"));
-        var eqHead = new StackPanel { Orientation = Orientation.Horizontal };
-        eqHead.Children.Add(_eqOn);
-        pars.Children.Add(eqHead);
-        var hpfRow = new StackPanel
-        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
-        hpfRow.Children.Add(_hpfOn);
-        hpfRow.Children.Add(_hpfFreq);
-        hpfRow.Children.Add(Hz());
-        hpfRow.Children.Add(_lpfOn);
-        hpfRow.Children.Add(_lpfFreq);
-        hpfRow.Children.Add(Hz());
-        pars.Children.Add(hpfRow);
-
+        // Las 4 bandas en una fila cada una (punto de color + F/G/Q)
+        var bandsGrid = new System.Windows.Controls.Primitives.UniformGrid
+        { Columns = 2, Margin = new Thickness(0, 2, 0, 0) };
         for (int i = 0; i < 4; i++)
         {
             var row = new StackPanel
-            { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-            var dot = new System.Windows.Shapes.Ellipse
+            { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 6, 0) };
+            row.Children.Add(new System.Windows.Shapes.Ellipse
             {
                 Width = 10, Height = 10,
                 Fill = new SolidColorBrush(BandUiColors[i]),
                 VerticalAlignment = VerticalAlignment.Center,
                 Margin = new Thickness(0, 0, 4, 0),
-            };
-            row.Children.Add(dot);
-            row.Children.Add(FieldLabel($"B{i + 1}"));
+            });
             _bFreq[i] = MakeNumBox($"eq{i + 1}_freq", 20, 20000);
-            _bFreq[i].Width = 52;
+            _bFreq[i].Width = 50;
             row.Children.Add(_bFreq[i]);
             row.Children.Add(FieldLabel("Hz"));
             _bGain[i] = MakeNumBox($"eq{i + 1}_gain", -18, 18);
+            _bGain[i].Width = 40;
             row.Children.Add(_bGain[i]);
             row.Children.Add(FieldLabel("dB"));
             _bQ[i] = MakeNumBox($"eq{i + 1}_q", 0.1, 12);
-            _bQ[i].Width = 38;
+            _bQ[i].Width = 36;
             row.Children.Add(_bQ[i]);
             row.Children.Add(FieldLabel("Q"));
-            pars.Children.Add(row);
+            bandsGrid.Children.Add(row);
         }
-
-        pars.Children.Add(SectionTitle("COMPRESOR"));
-        _compOn = MakeCheck("Compresor activo", "comp_enabled");
-        pars.Children.Add(_compOn);
-        _compThr = MakeNumBox("comp_threshold", -60, 0);
-        pars.Children.Add(ParamRow("Umbral", _compThr, "dB"));
-        _compRatio = MakeNumBox("comp_ratio", 1, 20);
-        pars.Children.Add(ParamRow("Ratio", _compRatio, ": 1"));
-        _compAtt = MakeNumBox("comp_attack", 0.1, 200);
-        pars.Children.Add(ParamRow("Ataque", _compAtt, "ms"));
-        _compRel = MakeNumBox("comp_release", 5, 2000);
-        pars.Children.Add(ParamRow("Release", _compRel, "ms"));
-        _compMakeup = MakeNumBox("comp_makeup", 0, 24);
-        pars.Children.Add(ParamRow("Makeup", _compMakeup, "dB"));
-
-        var parsScroll = new ScrollViewer
+        eqPars.Children.Add(bandsGrid);
+        _readout = new TextBlock
         {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = pars,
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 10,
+            Margin = new Thickness(0, 2, 0, 0),
+            Text = "curva: arrastrar punto = frec/gan · rueda = Q",
         };
-        Grid.SetColumn(parsScroll, 2);
-        Grid.SetRowSpan(parsScroll, 2);
-        _root.Children.Add(parsScroll);
+        eqPars.Children.Add(_readout);
+        Grid.SetColumn(eqPars, 1);
+        Grid.SetRow(eqPars, 1);
+        _root.Children.Add(eqPars);
+
+        // ── HERRAMIENTA 2 (derecha): COMPRESOR — gráfica + GR + parámetros ─
+        _compCanvas.Margin = new Thickness(8, 0, 0, 0);
+        Grid.SetColumn(_compCanvas, 2);
+        Grid.SetRow(_compCanvas, 0);
+        _root.Children.Add(_compCanvas);
+
+        var compPars = new StackPanel { Margin = new Thickness(8, 4, 0, 0) };
+        _compOn = MakeCheck("Compresor activo", "comp_enabled");
+        var compRow1 = new StackPanel { Orientation = Orientation.Horizontal };
+        compRow1.Children.Add(_compOn);
+        compRow1.Children.Add(FieldLabel("Umbral"));
+        _compThr = MakeNumBox("comp_threshold", -60, 0);
+        compRow1.Children.Add(_compThr);
+        compRow1.Children.Add(FieldLabel("dB"));
+        compRow1.Children.Add(FieldLabel("Ratio"));
+        _compRatio = MakeNumBox("comp_ratio", 1, 20);
+        _compRatio.Width = 38;
+        compRow1.Children.Add(_compRatio);
+        compRow1.Children.Add(FieldLabel(":1"));
+        compPars.Children.Add(compRow1);
+        var compRow2 = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        compRow2.Children.Add(FieldLabel("Ataque"));
+        _compAtt = MakeNumBox("comp_attack", 0.1, 200);
+        compRow2.Children.Add(_compAtt);
+        compRow2.Children.Add(FieldLabel("ms"));
+        compRow2.Children.Add(FieldLabel("Rel"));
+        _compRel = MakeNumBox("comp_release", 5, 2000);
+        compRow2.Children.Add(_compRel);
+        compRow2.Children.Add(FieldLabel("ms"));
+        compRow2.Children.Add(FieldLabel("Makeup"));
+        _compMakeup = MakeNumBox("comp_makeup", 0, 24);
+        _compMakeup.Width = 38;
+        compRow2.Children.Add(_compMakeup);
+        compRow2.Children.Add(FieldLabel("dB"));
+        compPars.Children.Add(compRow2);
+        compPars.Children.Add(new TextBlock
+        {
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 10,
+            Margin = new Thickness(0, 2, 0, 0),
+            Text = "gráfica: arrastrar = umbral · rueda = ratio · GR = reducción en vivo",
+        });
+        Grid.SetColumn(compPars, 2);
+        Grid.SetRow(compPars, 1);
+        _root.Children.Add(compPars);
 
         _noAudio = new TextBlock
         {
@@ -287,29 +298,6 @@ public sealed class EqEditorControl : ContentControl
         _rta.Start();
     }
 
-    private static TextBlock SectionTitle(string text) => new()
-    {
-        Text = text,
-        FontSize = 9,
-        FontWeight = FontWeights.Bold,
-        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
-        Margin = new Thickness(0, 8, 0, 3),
-    };
-
-    private static DockPanel ParamRow(string label, TextBox box, string unit)
-    {
-        var row = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
-        var lbl = FieldLabel(label);
-        lbl.Width = 52;
-        DockPanel.SetDock(lbl, Dock.Left);
-        row.Children.Add(lbl);
-        var unitLbl = FieldLabel(unit);
-        DockPanel.SetDock(unitLbl, Dock.Right);
-        row.Children.Add(unitLbl);
-        box.HorizontalAlignment = HorizontalAlignment.Left;
-        row.Children.Add(box);
-        return row;
-    }
 
     private CheckBox MakeCheck(string label, string key)
     {
