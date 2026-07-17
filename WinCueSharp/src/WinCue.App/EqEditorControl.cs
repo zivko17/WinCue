@@ -62,15 +62,17 @@ public sealed class EqEditorControl : ContentControl
 
     public EqEditorControl()
     {
-        // Distribución: las DOS herramientas lado a lado — EQ (gráfica +
-        // sus parámetros debajo) y COMPRESOR (transferencia + GR + sus
-        // parámetros debajo). El fader de ganancia de clip, a la izquierda.
+        // Distribución: las DOS herramientas lado a lado, cada una con SUS
+        // parámetros en columna a la IZQUIERDA de su gráfica — así las
+        // gráficas quedan a altura completa. Fader de clip al principio.
+        //   [GANANCIA] [params EQ][gráfica EQ] [params COMP][gráfica COMP]
         _root = new Grid { Margin = new Thickness(10, 6, 10, 8) };
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
-        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star) });
-        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star), MinWidth = 300 });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star), MinWidth = 180 });
         _root.RowDefinitions.Add(new RowDefinition());
-        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
         // ── Fader de ganancia del clip (dB) ────────────────────────────
         var gainPanel = new DockPanel { Margin = new Thickness(0, 0, 10, 0) };
@@ -127,35 +129,64 @@ public sealed class EqEditorControl : ContentControl
             RefreshParams();
         };
 
-        // ── HERRAMIENTA 1 (izquierda): ECUALIZADOR — gráfica + parámetros ─
+        // ── HERRAMIENTA 1: ECUALIZADOR — parámetros en columna + gráfica ─
         _eqOn = MakeCheck("EQ activa", "eq_enabled");
         _hpfOn = MakeCheck("HPF", "hpf_on");
         _hpfFreq = MakeFreqBox("hpf_freq");
         _lpfOn = MakeCheck("LPF", "lpf_on");
         _lpfFreq = MakeFreqBox("lpf_freq");
 
-        Grid.SetColumn(_canvas, 1);
-        Grid.SetRow(_canvas, 0);
-        _root.Children.Add(_canvas);
-        _canvas.ReadoutChanged += text => _readout!.Text = text;
+        var eqPars = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
+        eqPars.Children.Add(_eqOn);
+        var hpfRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        hpfRow.Children.Add(_hpfOn);
+        hpfRow.Children.Add(_hpfFreq);
+        hpfRow.Children.Add(Hz());
+        eqPars.Children.Add(hpfRow);
+        var lpfRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        lpfRow.Children.Add(_lpfOn);
+        lpfRow.Children.Add(_lpfFreq);
+        lpfRow.Children.Add(Hz());
+        eqPars.Children.Add(lpfRow);
 
-        var eqPars = new StackPanel { Margin = new Thickness(0, 4, 8, 0) };
-        var eqRow1 = new StackPanel { Orientation = Orientation.Horizontal };
-        eqRow1.Children.Add(_eqOn);
-        eqRow1.Children.Add(_hpfOn);
-        eqRow1.Children.Add(_hpfFreq);
-        eqRow1.Children.Add(Hz());
-        eqRow1.Children.Add(_lpfOn);
-        eqRow1.Children.Add(_lpfFreq);
-        eqRow1.Children.Add(Hz());
+        // Las 4 bandas, una fila por banda (punto de color + F/G/Q)
+        for (int i = 0; i < 4; i++)
+        {
+            var row = new StackPanel
+            { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+            row.Children.Add(new System.Windows.Shapes.Ellipse
+            {
+                Width = 10, Height = 10,
+                Fill = new SolidColorBrush(BandUiColors[i]),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0),
+            });
+            _bFreq[i] = MakeNumBox($"eq{i + 1}_freq", 20, 20000);
+            _bFreq[i].Width = 50;
+            row.Children.Add(_bFreq[i]);
+            row.Children.Add(FieldLabel("Hz"));
+            _bGain[i] = MakeNumBox($"eq{i + 1}_gain", -18, 18);
+            _bGain[i].Width = 40;
+            row.Children.Add(_bGain[i]);
+            row.Children.Add(FieldLabel("dB"));
+            _bQ[i] = MakeNumBox($"eq{i + 1}_q", 0.1, 12);
+            _bQ[i].Width = 36;
+            row.Children.Add(_bQ[i]);
+            row.Children.Add(FieldLabel("Q"));
+            eqPars.Children.Add(row);
+        }
 
         // Ganancia de VISUALIZACIÓN del RTA (no toca el audio)
-        eqRow1.Children.Add(new TextBlock
+        var rtaRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        rtaRow.Children.Add(new TextBlock
         {
             Text = "RTA +",
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 3, 0),
+            Margin = new Thickness(0, 0, 3, 0),
         });
         var rtaGain = new Slider
         {
@@ -181,99 +212,70 @@ public sealed class EqEditorControl : ContentControl
             rtaLabel.Text = $"{rtaGain.Value:0} dB";
             _canvas.InvalidateVisual();
         };
-        eqRow1.Children.Add(rtaGain);
-        eqRow1.Children.Add(rtaLabel);
-        eqPars.Children.Add(eqRow1);
+        rtaRow.Children.Add(rtaGain);
+        rtaRow.Children.Add(rtaLabel);
+        eqPars.Children.Add(rtaRow);
 
-        // Las 4 bandas en una fila cada una (punto de color + F/G/Q)
-        var bandsGrid = new System.Windows.Controls.Primitives.UniformGrid
-        { Columns = 2, Margin = new Thickness(0, 2, 0, 0) };
-        for (int i = 0; i < 4; i++)
-        {
-            var row = new StackPanel
-            { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 6, 0) };
-            row.Children.Add(new System.Windows.Shapes.Ellipse
-            {
-                Width = 10, Height = 10,
-                Fill = new SolidColorBrush(BandUiColors[i]),
-                VerticalAlignment = VerticalAlignment.Center,
-                Margin = new Thickness(0, 0, 4, 0),
-            });
-            _bFreq[i] = MakeNumBox($"eq{i + 1}_freq", 20, 20000);
-            _bFreq[i].Width = 50;
-            row.Children.Add(_bFreq[i]);
-            row.Children.Add(FieldLabel("Hz"));
-            _bGain[i] = MakeNumBox($"eq{i + 1}_gain", -18, 18);
-            _bGain[i].Width = 40;
-            row.Children.Add(_bGain[i]);
-            row.Children.Add(FieldLabel("dB"));
-            _bQ[i] = MakeNumBox($"eq{i + 1}_q", 0.1, 12);
-            _bQ[i].Width = 36;
-            row.Children.Add(_bQ[i]);
-            row.Children.Add(FieldLabel("Q"));
-            bandsGrid.Children.Add(row);
-        }
-        eqPars.Children.Add(bandsGrid);
         _readout = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 10,
-            Margin = new Thickness(0, 2, 0, 0),
-            Text = "curva: arrastrar punto = frec/gan · rueda = Q",
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 190,
+            Text = "arrastrar punto = frec/gan · rueda = Q",
         };
         eqPars.Children.Add(_readout);
-        Grid.SetColumn(eqPars, 1);
-        Grid.SetRow(eqPars, 1);
-        _root.Children.Add(eqPars);
 
-        // ── HERRAMIENTA 2 (derecha): COMPRESOR — gráfica + GR + parámetros ─
-        _compCanvas.Margin = new Thickness(8, 0, 0, 0);
-        Grid.SetColumn(_compCanvas, 2);
-        Grid.SetRow(_compCanvas, 0);
-        _root.Children.Add(_compCanvas);
+        var eqParsScroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = eqPars,
+        };
+        Grid.SetColumn(eqParsScroll, 1);
+        _root.Children.Add(eqParsScroll);
 
-        var compPars = new StackPanel { Margin = new Thickness(8, 4, 0, 0) };
-        _compOn = MakeCheck("Compresor activo", "comp_enabled");
-        var compRow1 = new StackPanel { Orientation = Orientation.Horizontal };
-        compRow1.Children.Add(_compOn);
-        compRow1.Children.Add(FieldLabel("Umbral"));
+        Grid.SetColumn(_canvas, 2);
+        _root.Children.Add(_canvas);
+        _canvas.ReadoutChanged += text => _readout!.Text = text;
+
+        // ── HERRAMIENTA 2: COMPRESOR — parámetros en columna + gráfica ──
+        var compPars = new StackPanel { Margin = new Thickness(14, 0, 8, 0) };
+        _compOn = MakeCheck("Compresor", "comp_enabled");
+        compPars.Children.Add(_compOn);
         _compThr = MakeNumBox("comp_threshold", -60, 0);
-        compRow1.Children.Add(_compThr);
-        compRow1.Children.Add(FieldLabel("dB"));
-        compRow1.Children.Add(FieldLabel("Ratio"));
+        compPars.Children.Add(CompRow("Umbral", _compThr, "dB"));
         _compRatio = MakeNumBox("comp_ratio", 1, 20);
-        _compRatio.Width = 38;
-        compRow1.Children.Add(_compRatio);
-        compRow1.Children.Add(FieldLabel(":1"));
-        compPars.Children.Add(compRow1);
-        var compRow2 = new StackPanel
-        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
-        compRow2.Children.Add(FieldLabel("Ataque"));
+        compPars.Children.Add(CompRow("Ratio", _compRatio, ":1"));
         _compAtt = MakeNumBox("comp_attack", 0.1, 200);
-        compRow2.Children.Add(_compAtt);
-        compRow2.Children.Add(FieldLabel("ms"));
-        compRow2.Children.Add(FieldLabel("Rel"));
+        compPars.Children.Add(CompRow("Ataque", _compAtt, "ms"));
         _compRel = MakeNumBox("comp_release", 5, 2000);
-        compRow2.Children.Add(_compRel);
-        compRow2.Children.Add(FieldLabel("ms"));
-        compRow2.Children.Add(FieldLabel("Makeup"));
+        compPars.Children.Add(CompRow("Release", _compRel, "ms"));
         _compMakeup = MakeNumBox("comp_makeup", 0, 24);
-        _compMakeup.Width = 38;
-        compRow2.Children.Add(_compMakeup);
-        compRow2.Children.Add(FieldLabel("dB"));
-        compPars.Children.Add(compRow2);
+        compPars.Children.Add(CompRow("Makeup", _compMakeup, "dB"));
         compPars.Children.Add(new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 10,
-            Margin = new Thickness(0, 2, 0, 0),
-            Text = "gráfica: arrastrar = umbral · rueda = ratio · GR = reducción en vivo",
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 130,
+            Text = "arrastrar = umbral · rueda = ratio · GR = reducción en vivo",
         });
-        Grid.SetColumn(compPars, 2);
-        Grid.SetRow(compPars, 1);
-        _root.Children.Add(compPars);
+        var compParsScroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = compPars,
+        };
+        Grid.SetColumn(compParsScroll, 3);
+        _root.Children.Add(compParsScroll);
+
+        Grid.SetColumn(_compCanvas, 4);
+        _root.Children.Add(_compCanvas);
 
         _noAudio = new TextBlock
         {
@@ -321,6 +323,18 @@ public sealed class EqEditorControl : ContentControl
             _compCanvas.InvalidateVisual();
         };
         return cb;
+    }
+
+    private static StackPanel CompRow(string label, TextBox box, string unit)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        var lbl = FieldLabel(label);
+        lbl.Width = 50;
+        row.Children.Add(lbl);
+        row.Children.Add(box);
+        row.Children.Add(FieldLabel(unit));
+        return row;
     }
 
     private static TextBlock FieldLabel(string text) => new()
