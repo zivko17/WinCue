@@ -518,23 +518,17 @@ public sealed class InspectorPanel : ContentControl
         btnRow.Children.Add(btnReset);
         _customPanel.Children.Add(btnRow);
 
-        Header(controls, "COMPOSITOR (fase 3b)");
+        // (El campo legacy "layer" top/bottom del Python se retiró de la UI:
+        // la capa REAL es timeline_layer/📌 — dos conceptos de capa a la
+        // vista solo provocaban errores. El JSON lo conserva por compat.)
+        Header(controls, "COMPOSITOR");
         var compRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         compRow.Children.Add(new TextBlock
         {
-            Text = "Layer:", VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
-            Margin = new Thickness(0, 0, 4, 0),
-        });
-        var layerBox = MakeTextBox(64);
-        WireTextCommit(layerBox, "layer", () => layerBox.Text);
-        compRow.Children.Add(layerBox);
-        compRow.Children.Add(new TextBlock
-        {
             Text = "Opacidad %:", VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
-            Margin = new Thickness(12, 0, 4, 0),
+            Margin = new Thickness(0, 0, 4, 0),
         });
         var opacityBox = MakeTextBox(48);
         WireTextCommit(opacityBox, "opacity", () =>
@@ -544,7 +538,6 @@ public sealed class InspectorPanel : ContentControl
                 ? ov : (object?)null);
         compRow.Children.Add(opacityBox);
         controls.Children.Add(compRow);
-        _loaders["layer"] = c => layerBox.Text = c.Layer;
         _loaders["opacity"] = c => opacityBox.Text = c.Opacity.ToString("0.#",
             System.Globalization.CultureInfo.InvariantCulture);
 
@@ -575,16 +568,33 @@ public sealed class InspectorPanel : ContentControl
         controls.Children.Add(outRow);
         var outNote = new TextBlock
         {
-            Text = "El monitor de cada salida se asigna en Settings → Vídeo. " +
-                   "Con el MODO CANVAS activo esta selección se ignora: el cue " +
-                   "se coloca en el canvas y cada salida muestra su recorte.",
+            Text = "El monitor de cada salida se asigna en Settings → Vídeo.",
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
         };
         controls.Children.Add(outNote);
+        var canvasNote = new TextBlock
+        {
+            Text = "MODO CANVAS activo: el cue se coloca en el canvas y cada " +
+                   "salida muestra su recorte (Settings → Vídeo).",
+            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
+        controls.Children.Add(canvasNote);
         _loaders["video_output"] = c =>
+        {
             screenCombo.SelectedIndex = Math.Clamp(c.VideoOutput, 0, 3);
+            // Con el modo canvas la selección de salida SE IGNORA: ocultarla
+            // (mostrar un control muerto invita a errores en directo)
+            bool canvasMode = SettingsManager.Instance.Get("video_canvas_mode", false)
+                && SettingsManager.Instance.Get("video_compositor", false);
+            outRow.Visibility = canvasMode ? Visibility.Collapsed : Visibility.Visible;
+            outNote.Visibility = canvasMode ? Visibility.Collapsed : Visibility.Visible;
+            canvasNote.Visibility = canvasMode ? Visibility.Visible : Visibility.Collapsed;
+        };
 
         // Sincroniza radios/paneles/lienzo al cargar un cue
         _loaders["__geo_sync"] = SyncGeometryUi;
