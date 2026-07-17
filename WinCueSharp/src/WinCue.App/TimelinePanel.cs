@@ -831,10 +831,12 @@ public sealed class TimelineCanvas : FrameworkElement
         }
 
         // Cursor: posición real más avanzada de los cues sonando (limitada al
-        // final de su bloque: con trim, el contador nunca debe salirse de él)
+        // final de su bloque: con trim, el contador nunca debe salirse de él).
+        // Los FANTASMAS de un START no cuentan: comparten id con su cue real
+        // y teletransportarían el cursor al final del show.
         double? cursor = null;
         foreach (var b in _blocks)
-            if (_activeElapsed.TryGetValue(b.Cue.Id, out double elapsed))
+            if (!b.Ghost && _activeElapsed.TryGetValue(b.Cue.Id, out double elapsed))
             {
                 double lim = b.Dur > 0 ? b.Dur : elapsed;
                 double pos = b.Start + Math.Min(Math.Max(0, elapsed), lim);

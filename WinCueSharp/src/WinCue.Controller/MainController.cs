@@ -1547,7 +1547,9 @@ public class MainController
         for (int screen = 0; screen < 4; screen++)
             _view.SetActiveVideoLayers(screen,
                 activeBy.GetValueOrDefault(screen) ?? (IReadOnlyCollection<int>)Array.Empty<int>());
-        _view.SetOutputContent(TopVideo(requirePlaying: false)?.Name);
+        // Tally: SOLO lo que está de verdad en pantalla — un cue en pre-wait
+        // aún no "es" la salida (anunciarlo confunde al operador)
+        _view.SetOutputContent(TopVideo(requirePlaying: true)?.Name);
 
         // Desglose por salida para el tooltip del tally (qué hay en cada una)
         var detail = new System.Text.StringBuilder(canvasMode ? "MODO CANVAS\n" : "");
