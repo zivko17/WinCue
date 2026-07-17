@@ -234,6 +234,16 @@ public sealed class TimelineCanvas : FrameworkElement
     private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Color.FromArgb(110, 0x2e, 0xcc, 0x71)));
     private static readonly Brush GoBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
     private static readonly Pen GoPen = MakeGoPen();
+    private static readonly Pen CutPen = FrozenPen(Color.FromRgb(0xc0, 0x39, 0x2b), 3);
+    private static readonly Pen GhostPen = MakeGhostPen();
+
+    private static Pen MakeGhostPen()
+    {
+        var p = new Pen(new SolidColorBrush(Color.FromArgb(200, 0xdd, 0xdd, 0xdd)), 1)
+        { DashStyle = new DashStyle(new double[] { 3, 2 }, 0) };
+        p.Freeze();
+        return p;
+    }
 
     private static Pen MakeGoPen()
     {
@@ -297,6 +307,13 @@ public sealed class TimelineCanvas : FrameworkElement
         public int Layer;             // asignada (manual o auto)
         public bool Dimmed;           // desarmado / rama que no se disparará
         public bool ManualLayer;      // timeline_layer >= 0 (colocado a mano)
+
+        // Efectos de los cues de control REFLEJADOS en la proyección:
+        public bool Ghost;            // instancia lanzada por un START (↗, no editable)
+        public double? CutAt;         // un STOP (o FADE y parar) lo corta aquí (abs)
+        public double RampStart = -1; // rampa de un FADE sobre este bloque (abs)
+        public double RampLen;
+        public bool RampToSilence;    // FADE a volumen 0 sin parar: resto en silencio
     }
 
     private sealed class Span
@@ -445,6 +462,7 @@ public sealed class TimelineCanvas : FrameworkElement
             return;
         var roots = _model.Cues.Where(c => c.ParentId is null).ToList();
         LayoutSequence(roots, 0.0, dimmed: false);
+        ApplyControlCueEffects();
         AssignLayers();
 
         // Los recuadros de grupo abrazan las capas de sus bloques
@@ -452,7 +470,7 @@ public sealed class TimelineCanvas : FrameworkElement
         {
             int min = MaxLayers - 1, max = 0;
             foreach (var b in _blocks)
-                if (_model.IsDescendant(b.Cue, span.Group.Id))
+                if (!b.Ghost && _model.IsDescendant(b.Cue, span.Group.Id))
                 {
                     min = Math.Min(min, b.Layer);
                     max = Math.Max(max, b.Layer);
@@ -550,6 +568,69 @@ public sealed class TimelineCanvas : FrameworkElement
             ManualLayer = raw >= 0,
         });
         return cue.Armed ? start + EffectiveDuration(cue) : start;
+    }
+
+    /// <summary>Los cues de CONTROL dejan su huella en la proyección: un STOP
+    /// corta el bloque de su objetivo; un FADE dibuja la rampa sobre él (y lo
+    /// corta si "parar al terminar"); un START añade un bloque FANTASMA del
+    /// objetivo en su instante (se ve lo que va a sonar, sin ser editable).</summary>
+    private void ApplyControlCueEffects()
+    {
+        if (_model is null)
+            return;
+        foreach (var ctl in _model.Cues)
+        {
+            if (ctl.TargetId is not int targetId
+                || !_startById.TryGetValue(ctl.Id, out double at)
+                || _model.GetById(targetId) is not Cue target)
+                continue;
+
+            switch (ctl.Type)
+            {
+                case CueType.Start:
+                {
+                    double dur = EffectiveDuration(target);
+                    int raw = Math.Clamp(target.TimelineLayer, -1, MaxLayers - 1);
+                    _blocks.Add(new Block
+                    {
+                        Cue = target,
+                        Start = at,
+                        Dur = dur,
+                        Layer = raw,
+                        ManualLayer = raw >= 0,
+                        Dimmed = !ctl.Armed || !target.Armed,
+                        Ghost = true,
+                    });
+                    break;
+                }
+
+                case CueType.Stop:
+                case CueType.Fade:
+                {
+                    var tb = _blocks.FirstOrDefault(b =>
+                        !b.Ghost && b.Cue.Id == targetId);
+                    if (tb is null || tb.Dur <= 0
+                        || at <= tb.Start + 0.05 || at >= tb.Start + tb.Dur)
+                        break;   // el objetivo no está sonando en ese punto
+                    if (ctl.Type == CueType.Stop)
+                    {
+                        tb.CutAt = Min(tb.CutAt, at);
+                    }
+                    else
+                    {
+                        tb.RampStart = at;
+                        tb.RampLen = Math.Max(0.1, ctl.Duration);
+                        if (ctl.FadeStopOnDone)
+                            tb.CutAt = Min(tb.CutAt, at + tb.RampLen);
+                        else if (ctl.Volume <= 0.01)
+                            tb.RampToSilence = true;
+                    }
+                    break;
+                }
+            }
+        }
+
+        static double Min(double? a, double b) => a is double v ? Math.Min(v, b) : b;
     }
 
     /// <summary>Capas: la fijada a mano se respeta; el resto se apila greedy
@@ -723,7 +804,7 @@ public sealed class TimelineCanvas : FrameworkElement
             DrawBlock(dc, b, lh);
         var dragBlock = _dragCue is null
             ? null
-            : _blocks.FirstOrDefault(b => b.Cue.Id == _dragCue.Id);
+            : _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _dragCue.Id);
         if (dragBlock is not null)
             DrawBlock(dc, dragBlock, lh);
 
@@ -732,6 +813,22 @@ public sealed class TimelineCanvas : FrameworkElement
         // de dónde agarrar el grupo)
         foreach (var span in _spans)
             DrawSpanFrame(dc, span, lh, w);
+
+        // Cue de control SELECCIONADO: línea hasta su objetivo (un START
+        // apunta a su instancia fantasma; STOP/FADE al bloque que afectan)
+        if (_selectedId >= 0 && _model?.GetById(_selectedId) is Cue selCtl
+            && selCtl.TargetsOther() && selCtl.TargetId is int selTid)
+        {
+            var src = _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _selectedId);
+            var dst = (selCtl.Type == CueType.Start
+                    ? _blocks.FirstOrDefault(b => b.Ghost && b.Cue.Id == selTid)
+                    : null)
+                ?? _blocks.FirstOrDefault(b => b.Cue.Id == selTid);
+            if (src is not null && dst is not null)
+                dc.DrawLine(GoPen,
+                    new Point(SecToX(src.Start) + 6, RulerH + src.Layer * lh + lh / 2),
+                    new Point(SecToX(dst.Start) + 6, RulerH + dst.Layer * lh + lh / 2));
+        }
 
         // Cursor: posición real más avanzada de los cues sonando (limitada al
         // final de su bloque: con trim, el contador nunca debe salirse de él)
@@ -847,11 +944,15 @@ public sealed class TimelineCanvas : FrameworkElement
     private void DrawBlock(DrawingContext dc, Block b, double lh)
     {
         var cue = b.Cue;
+        // Un STOP/FADE con parada TRUNCA el bloque: se dibuja hasta el corte
+        double dur = b.CutAt is double cutAbs
+            ? Math.Max(0.05, Math.Min(b.Dur, cutAbs - b.Start))
+            : b.Dur;
         double x = SecToX(b.Start);
         double y = RulerH + b.Layer * lh + 4;
         double bh = lh - 8;
         bool instant = b.Dur <= 0;
-        double bw = instant ? 12 : Math.Max(4, b.Dur * _pxPerSec);
+        double bw = instant ? 12 : Math.Max(4, dur * _pxPerSec);
 
         if (x + bw < 0 || x > ActualWidth)
             return;
@@ -864,7 +965,10 @@ public sealed class TimelineCanvas : FrameworkElement
         var fill = new LinearGradientBrush(baseColor, Darken(baseColor, 0.65), 90);
         fill.Freeze();
 
-        Pen? border = cue.Id == _selectedId ? SelectedPen : null;
+        if (b.Ghost)
+            dc.PushOpacity(0.45);   // instancia lanzada por un START
+
+        Pen? border = b.Ghost ? GhostPen : cue.Id == _selectedId ? SelectedPen : null;
         var rect = new Rect(x, y, bw, bh);
         dc.DrawRoundedRectangle(fill, border, rect, 3, 3);
 
@@ -874,7 +978,7 @@ public sealed class TimelineCanvas : FrameworkElement
         // Progreso real dentro del bloque mientras suena
         if (!instant && _activeElapsed.TryGetValue(cue.Id, out double elapsed))
         {
-            double pw = Math.Clamp(elapsed / Math.Max(0.001, b.Dur), 0, 1) * bw;
+            double pw = Math.Clamp(elapsed / Math.Max(0.001, dur), 0, 1) * bw;
             if (pw > 1)
                 dc.DrawRoundedRectangle(ProgressBrush, null,
                     new Rect(x, y, pw, bh), 3, 3);
@@ -893,7 +997,7 @@ public sealed class TimelineCanvas : FrameworkElement
                 double px0 = Math.Max(x, 0), px1 = Math.Min(x + bw, ActualWidth);
                 for (double px = px0; px < px1; px += 2)
                 {
-                    double sec = t0 + (px - x) / bw * b.Dur;
+                    double sec = t0 + (px - x) / bw * dur;
                     int i = Math.Clamp((int)(sec / pk.Dur * n), 0, n - 1);
                     dc.DrawLine(WavePen,
                         new Point(px + 0.5, mid - pk.Maxs[i] * half),
@@ -919,13 +1023,33 @@ public sealed class TimelineCanvas : FrameworkElement
                     new Point(x + bw, y), new Point(x + bw - fo, y), new Point(x + bw, y + bh)));
         }
 
+        // Rampa de un cue FADE que actúa sobre este bloque
+        if (!instant && b.RampStart >= 0)
+        {
+            double rx0 = x + Math.Clamp((b.RampStart - b.Start), 0, dur) * _pxPerSec;
+            double rx1 = x + Math.Clamp((b.RampStart - b.Start + b.RampLen), 0, dur) * _pxPerSec;
+            if (rx1 - rx0 > 2)
+                dc.DrawGeometry(FadeBrush, null, Triangle(
+                    new Point(rx1, y), new Point(rx0, y), new Point(rx1, y + bh)));
+            // FADE a volumen 0 sin parar: lo que sigue queda en silencio
+            if (b.RampToSilence && x + bw - rx1 > 2)
+                dc.DrawRectangle(FadeBrush, null,
+                    new Rect(rx1, y, x + bw - rx1, bh));
+        }
+
+        // Tope rojo del corte (STOP / FADE con parada)
+        if (b.CutAt is not null)
+            dc.DrawLine(CutPen, new Point(x + bw, y - 1), new Point(x + bw, y + bh + 1));
+
         if (bw > 30)
         {
             string text = $"{cue.DisplayNumber} · {cue.Name}";
+            if (b.Ghost)
+                text = "↗ " + text;
             if (cue.Loop || cue.PlayCount > 1)
                 text += cue.Loop ? " ∞" : $" ×{cue.PlayCount}";
             // 📌 = pista fijada a mano
-            if (b.ManualLayer)
+            if (b.ManualLayer && !b.Ghost)
                 text = "📌 " + text;
             var label = Label(text, LabelBrush, 11);
             label.MaxTextWidth = Math.Max(1, bw - 10);
@@ -933,6 +1057,9 @@ public sealed class TimelineCanvas : FrameworkElement
             label.Trimming = TextTrimming.CharacterEllipsis;
             dc.DrawText(label, new Point(x + 5, y + (bh - label.Height) / 2));
         }
+
+        if (b.Ghost)
+            dc.Pop();
     }
 
     private static Geometry Triangle(Point a, Point b, Point c)
@@ -984,7 +1111,7 @@ public sealed class TimelineCanvas : FrameworkElement
         for (int i = _blocks.Count - 1; i >= 0; i--)
         {
             var b = _blocks[i];
-            if (b.Layer != layer)
+            if (b.Layer != layer || b.Ghost)   // los fantasmas no se editan
                 continue;
             double wSec = Math.Max(b.Dur, 12 / _pxPerSec);
             if (sec >= b.Start && sec <= b.Start + wSec)
@@ -1330,7 +1457,7 @@ public sealed class TimelineCanvas : FrameworkElement
         double mediaPos = 0;
         foreach (var b in _blocks)
         {
-            if (b.Cue.Type != CueType.Video || b.Dur <= 0)
+            if (b.Cue.Type != CueType.Video || b.Dur <= 0 || b.Ghost)
                 continue;
             if (t < b.Start || t > b.Start + b.Dur || b.Layer >= bestLayer)
                 continue;
@@ -1361,7 +1488,8 @@ public sealed class TimelineCanvas : FrameworkElement
         var items = new List<MainController.TimelinePlayItem>();
         foreach (var b in _blocks)
         {
-            if (b.Dimmed || b.Cue.Type == CueType.Group)
+            // Ghost: lo dispara su cue START (incluirlo duplicaría)
+            if (b.Dimmed || b.Ghost || b.Cue.Type == CueType.Group)
                 continue;
             double end = b.Start + Math.Max(b.Dur, 0.0);
             if (end <= t + 1e-6 || b.Start >= limit - 1e-6)
@@ -1401,7 +1529,7 @@ public sealed class TimelineCanvas : FrameworkElement
         RebuildLayout();   // proyección con los commits del arrastre aplicados
 
         foreach (var layerGroup in _blocks
-                     .Where(b => b.Cue.IsMedia() && b.Dur > 0)
+                     .Where(b => b.Cue.IsMedia() && b.Dur > 0 && !b.Ghost)
                      .GroupBy(b => b.Layer))
         {
             var ordered = layerGroup.OrderBy(b => b.Start).ToList();
@@ -1472,7 +1600,8 @@ public sealed class TimelineCanvas : FrameworkElement
         // la baile después). Misma pista = sustitución a corte, por diseño.
         if (cue.IsMedia() && prev.IsMedia() && prev.TimelineLayer < 0)
         {
-            int prevShown = _blocks.FirstOrDefault(b => b.Cue.Id == prev.Id)?.Layer ?? 2;
+            int prevShown = _blocks.FirstOrDefault(
+                b => !b.Ghost && b.Cue.Id == prev.Id)?.Layer ?? 2;
             CommitField?.Invoke(prev.Id, "timeline_layer", prevShown);
         }
 
@@ -1617,13 +1746,13 @@ public sealed class TimelineCanvas : FrameworkElement
             // (el automático solo actúa dentro de la misma capa)
             if (cue.IsMedia())
             {
-                var mine = _blocks.FirstOrDefault(b => b.Cue.Id == cue.Id);
+                var mine = _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == cue.Id);
                 if (mine is { Dur: > 0 })
                 {
                     foreach (var other in _blocks)
                     {
                         if (other.Cue.Id == cue.Id || other.Layer == mine.Layer
-                            || !other.Cue.IsMedia() || other.Dur <= 0)
+                            || !other.Cue.IsMedia() || other.Dur <= 0 || other.Ghost)
                             continue;
                         var first = mine.Start <= other.Start ? mine : other;
                         var second = ReferenceEquals(first, mine) ? other : mine;
