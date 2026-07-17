@@ -53,7 +53,15 @@ public class MainController
         public bool AdvanceChain;
         public bool SelfPaused;              // pausa individual (no pause-all)
         public bool ActionStarted;           // false = aún en pre_wait
+        public double Offset;                // arranque con seek (play-desde-cursor)
+        public bool SuppressChain;           // la proyección ya trae la cadena resuelta
+        public double? PreWaitOverride;      // espera programada del timeline (≠ pre_wait)
     }
+
+    /// <summary>Elemento de "reproducir desde el cursor del timeline":
+    /// Offset &gt; 0 = el bloque cruza el cursor (arrancar YA con seek);
+    /// Delay &gt; 0 = el bloque empieza más tarde (programar su acción).</summary>
+    public sealed record TimelinePlayItem(int CueId, double Offset, double Delay);
 
     // ------------------------------------------------------------------
     // Estado
@@ -674,13 +682,19 @@ public class MainController
             StartAction(idx);
     }
 
-    private void StartAction(int idx)
+    /// <summary>Arranca la acción del cue. offset &gt; 0 = "reproducir desde
+    /// el cursor": el media hace seek a trim_start+offset y el timer de fin
+    /// cuenta solo lo que queda; los tiempos mostrados suman el offset.</summary>
+    private void StartAction(int idx, double offset = 0.0)
     {
         var cue = _model.GetCue(idx);
         if (cue is null)
             return;
         if (!_running.TryGetValue(cue.Id, out var run))
             return;
+        if (offset > 0.0)
+            offset = Math.Min(offset, Math.Max(0.0, ActionDuration(cue) - 0.05));
+        run.Offset = offset;
         run.ActionStarted = true;
         run.TStartTicks = Stopwatch.GetTimestamp();
 
@@ -703,13 +717,17 @@ public class MainController
             case CueType.Audio:
                 ModelState(idx, CueState.Playing);
                 _audio.Play(cue.Id, cue.FilePath, new AudioPlayParams(
-                    Volume: cue.Volume, FadeIn: cue.FadeIn, FadeOut: cue.FadeOut,
-                    Loop: cue.Loop, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
+                    Volume: cue.Volume,
+                    FadeIn: Math.Max(0.0, cue.FadeIn - offset),
+                    FadeOut: cue.FadeOut,
+                    Loop: cue.Loop,
+                    TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
                     PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
                     Eq: EqFor(cue), Rate: cue.Rate));
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(run.Duration / RateOf(cue) * 1000),
+                    Schedule(run,
+                        (int)(Math.Max(0.0, run.Duration - offset) / RateOf(cue) * 1000),
                         () => DurationElapsed(cue.Id));
                 PreloadUpcoming();
                 break;
@@ -718,7 +736,7 @@ public class MainController
                 ModelState(idx, CueState.Playing);
                 _video.Play(cue.Id, cue.FilePath, new VideoPlayParams(
                     Volume: cue.Volume, Loop: cue.Loop, Scale: cue.Scale,
-                    TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
+                    TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
                     Rate: cue.Rate, PlayCount: cue.PlayCount,
                     PreservePitch: cue.PreservePitch,
                     Geometry: GeoFor(cue),
@@ -727,12 +745,14 @@ public class MainController
                     CanvasOutputs: CanvasMode ? CanvasViews() : null));
                 RefreshVideoTally();
                 // Opacidad de la pista: con fade_in entra fundiendo desde 0
-                // (dos vídeos solapados con fades = crossfade real)
+                // (dos vídeos solapados con fades = crossfade real). Con
+                // offset, el fade que quede por cumplir.
                 double targetOpacity = cue.Opacity / 100.0;
-                if (cue.FadeIn > 0.0)
+                double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
+                if (fadeLeft > 0.0)
                 {
                     SetCueLayerOpacity(cue, 0.0);
-                    SetCueLayerOpacity(cue, targetOpacity, cue.FadeIn);
+                    SetCueLayerOpacity(cue, targetOpacity, fadeLeft);
                 }
                 else
                 {
@@ -740,14 +760,16 @@ public class MainController
                 }
                 run.Duration = ActionDuration(cue);
                 if (run.Duration > 0.0 && !cue.Loop)
-                    Schedule(run, (int)(run.Duration / RateOf(cue) * 1000),
+                    Schedule(run,
+                        (int)(Math.Max(0.0, run.Duration - offset) / RateOf(cue) * 1000),
                         () => DurationElapsed(cue.Id));
                 break;
 
             case CueType.Wait:
                 ModelState(idx, CueState.Playing);
                 run.Duration = Math.Max(0.0, cue.Duration);
-                Schedule(run, Math.Max(50, (int)(cue.Duration * 1000)),
+                Schedule(run,
+                    Math.Max(50, (int)(Math.Max(0.0, cue.Duration - offset) * 1000)),
                     () => OnActionEnd(cue.Id));
                 break;
 
@@ -920,6 +942,53 @@ public class MainController
         }
     }
 
+    /// <summary>Reproduce el show DESDE un punto del timeline (cursor de
+    /// edición): los bloques que cruzan ese instante arrancan YA con seek a
+    /// su offset, y los posteriores del mismo segmento (hasta el próximo GO
+    /// manual) se programan a su hora relativa. La proyección del timeline
+    /// ya trae las cadenas resueltas → los encadenados de cada cue se
+    /// suprimen para no duplicar disparos.</summary>
+    public void PlayFromTimeline(IReadOnlyList<TimelinePlayItem> items)
+    {
+        StopEverything(fade: 0.0);
+        int fired = 0;
+        foreach (var item in items)
+        {
+            int idx = _model.IndexOfId(item.CueId);
+            var cue = _model.GetCue(idx);
+            if (cue is null || !cue.Armed || cue.Type == CueType.Group)
+                continue;
+            var run = new RunningCue
+            {
+                CueId = cue.Id,
+                Index = idx,
+                Kind = cue.Type,
+                Name = cue.Name,
+                Number = cue.DisplayNumber,
+                Color = cue.Color,
+                AdvanceChain = false,
+                SuppressChain = true,
+                PreWaitOverride = item.Delay > 0.001 ? item.Delay : null,
+            };
+            // Reemplaza cualquier instancia previa (StopEverything ya limpió)
+            _running[cue.Id] = run;
+            if (item.Delay > 0.001)
+            {
+                int i = idx;
+                Schedule(run, (int)(item.Delay * 1000), () => StartAction(i));
+            }
+            else
+            {
+                StartAction(idx, Math.Max(0.0, item.Offset));
+            }
+            fired++;
+        }
+        Log($"Timeline: reproducir desde el cursor — {fired} cue(s) del segmento");
+        _view.FlashStatus(fired > 0
+            ? $"▶ Reproduciendo desde el cursor ({fired} cue(s))"
+            : "Nada que reproducir en ese punto del timeline.");
+    }
+
     /// <summary>Dispara un cue por id sin mover el playhead (hotkey/START externo).</summary>
     public void TriggerCueId(int cueId)
     {
@@ -947,7 +1016,10 @@ public class MainController
         int idx = _model.IndexOfId(cueId);
         var cue = _model.GetCue(idx);
 
-        if (cue is not null && cue.ContinueMode == ContinueMode.AutoFollow)
+        // SuppressChain: al reproducir desde el cursor, la proyección ya trae
+        // todos los bloques del segmento programados — encadenar duplicaría.
+        if (cue is not null && cue.ContinueMode == ContinueMode.AutoFollow
+            && !run.SuppressChain)
             ContinueNext(idx, run.AdvanceChain);
 
         EndCue(cueId, markStopped: true, fade: fade);
@@ -1256,6 +1328,9 @@ public class MainController
                 double e = _video.GetElapsed(run.CueId);
                 if (e > 0.0) elapsed = e;
             }
+            // Arranque con seek (play-desde-cursor): el motor cuenta desde su
+            // punto de entrada — los tiempos lógicos suman el offset
+            elapsed += run.Offset;
 
             double? remaining = null, fraction = null;
             if (run.Duration > 0.0)
@@ -1265,10 +1340,14 @@ public class MainController
             }
 
             // Fase de pre_wait: aún no hay acción; mostrar cuánto falta
+            // (PreWaitOverride = espera programada por el timeline)
             double? preWaitRemaining = null;
-            if (!run.ActionStarted && _model.GetById(run.CueId) is Cue rc
-                && rc.PreWait > 0.0)
-                preWaitRemaining = Math.Max(0.0, rc.PreWait - elapsed);
+            if (!run.ActionStarted && _model.GetById(run.CueId) is Cue rc)
+            {
+                double pw = run.PreWaitOverride ?? rc.PreWait;
+                if (pw > 0.0)
+                    preWaitRemaining = Math.Max(0.0, pw - elapsed);
+            }
 
             rows.Add(new ActiveCueInfo(
                 run.CueId, run.Number, run.Name, run.Kind, run.Color,
@@ -1317,7 +1396,10 @@ public class MainController
     public (string FilePath, double Elapsed)? GetProgramVideo()
     {
         var top = TopVideo(requirePlaying: true);
-        return top is null ? null : (top.FilePath, _video.GetElapsed(top.Id));
+        if (top is null)
+            return null;
+        double offset = _running.TryGetValue(top.Id, out var run) ? run.Offset : 0.0;
+        return (top.FilePath, _video.GetElapsed(top.Id) + offset);
     }
 
     /// <summary>Vídeo visible en la salida: el de la pista MÁS ALTA activa,

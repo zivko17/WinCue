@@ -73,6 +73,14 @@ public sealed class TimelinePanel : Border
         set => _canvas.TriggerRequested = value;
     }
 
+    /// <summary>Reproducir el show desde el cursor de edición (doble clic en
+    /// la regla / menú): lista de cues del segmento con su offset o espera.</summary>
+    public Action<IReadOnlyList<MainController.TimelinePlayItem>>? PlayFromRequested
+    {
+        get => _canvas.PlayFromRequested;
+        set => _canvas.PlayFromRequested = value;
+    }
+
     /// <summary>Menú contextual: detener un cue (o los hijos de un grupo).</summary>
     public Action<int>? StopRequested
     {
@@ -212,6 +220,7 @@ public sealed class TimelineCanvas : FrameworkElement
     public Action<int, int>? MoveCueRequested;
     public Action<int>? TriggerRequested;
     public Action<int>? StopRequested;
+    public Action<IReadOnlyList<MainController.TimelinePlayItem>>? PlayFromRequested;
     public Func<bool>? IsEditAllowed;
     public event Action<int>? CueSelected;
 
@@ -972,6 +981,13 @@ public sealed class TimelineCanvas : FrameworkElement
                 && Math.Abs(SecToX(c) - p.X) <= 6;
             if (onRuler || nearCursor)
             {
+                // Doble clic en la regla = REPRODUCIR desde ese punto
+                if (e.ClickCount == 2)
+                {
+                    UpdateEditCursor(p.X);
+                    PlayFromCursor();
+                    return;
+                }
                 _dragCursor = true;
                 CaptureMouse();
                 UpdateEditCursor(p.X);
@@ -1226,6 +1242,49 @@ public sealed class TimelineCanvas : FrameworkElement
         InvalidateVisual();
     }
 
+    /// <summary>REPRODUCIR desde el cursor de edición: los bloques que cruzan
+    /// ese instante arrancan con seek a su offset, y los que empiezan después
+    /// (dentro del mismo segmento, hasta el próximo ▸GO manual) se programan
+    /// a su hora. Los pre-wait ya están resueltos en la proyección — nada se
+    /// queda "esperando el vídeo entero".</summary>
+    private void PlayFromCursor()
+    {
+        if (_editCursor is not double t || _model is null)
+            return;
+
+        // Frontera del segmento: el primer salto manual posterior al cursor
+        double limit = double.PositiveInfinity;
+        foreach (double g in _goMarks)
+            if (g > t + 1e-6)
+                limit = Math.Min(limit, g);
+
+        var items = new List<MainController.TimelinePlayItem>();
+        foreach (var b in _blocks)
+        {
+            if (b.Dimmed || b.Cue.Type == CueType.Group)
+                continue;
+            double end = b.Start + Math.Max(b.Dur, 0.0);
+            if (end <= t + 1e-6 || b.Start >= limit - 1e-6)
+                continue;   // ya pasó · pertenece al siguiente segmento manual
+            if (b.Start <= t)
+            {
+                // Cruza el cursor: solo media arranca a mitad (un WAIT/FADE a
+                // medias no aporta — la cadena ya viene resuelta)
+                if (b.Cue.Type is CueType.Audio or CueType.Video && b.Dur > 0)
+                    items.Add(new MainController.TimelinePlayItem(
+                        b.Cue.Id, t - b.Start, 0.0));
+            }
+            else if (b.Cue.Type is CueType.Audio or CueType.Video
+                     or CueType.Fade or CueType.Start or CueType.Stop
+                     or CueType.Script)
+            {
+                items.Add(new MainController.TimelinePlayItem(
+                    b.Cue.Id, 0.0, b.Start - t));
+            }
+        }
+        PlayFromRequested?.Invoke(items);
+    }
+
     /// <summary>Tras un arrastre, si el cue queda SOLAPADO con su hermano
     /// anterior/siguiente (ambos media), la duración del solape se convierte
     /// en el crossfade: fade_out del que sale = fade_in del que entra.</summary>
@@ -1449,6 +1508,13 @@ public sealed class TimelineCanvas : FrameworkElement
         }
         else
         {
+            if (_editCursor is not null)
+            {
+                menu.Items.Add(MainWindow.Mi(
+                    "▶ Reproducir desde el cursor", "doble clic en la regla",
+                    PlayFromCursor));
+                menu.Items.Add(new Separator());
+            }
             menu.Items.Add(MainWindow.Mi("Ajustar a la ventana", "", ZoomToFit));
             menu.Items.Add(MainWindow.Mi("Acercar", "Ctrl+rueda", () => ZoomStep(1.4)));
             menu.Items.Add(MainWindow.Mi("Alejar", "Ctrl+rueda", () => ZoomStep(1 / 1.4)));

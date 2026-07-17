@@ -121,6 +121,7 @@ public partial class MainWindow : Window, IShowView
                 _pvw.ShowPaused(videoCue.FilePath, mediaSeconds);
         };
         Timeline.TriggerRequested = cueId => _controller.TriggerCueId(cueId);
+        Timeline.PlayFromRequested = items => _controller.PlayFromTimeline(items);
         Timeline.StopRequested = cueId =>
         {
             // Un grupo no "suena" él mismo: detener sus descendientes activos
