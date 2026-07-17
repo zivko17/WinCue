@@ -141,10 +141,13 @@ public sealed class TimelinePanel : Border
             Margin = new Thickness(0, 0, 10, 0),
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
             FontSize = 11,
-            ToolTip = "ACTIVADO: al solapar dos medias el solape se convierte en " +
-                      "crossfade (y al separarlos se quita).\n" +
-                      "DESACTIVADO: el timeline no toca los fades — capas libres " +
-                      "sin fundido (los fades se ponen a mano en el inspector).",
+            ToolTip = "ACTIVADO: dos AUDIOS consecutivos de la MISMA capa que se " +
+                      "solapan se cruzan (fade out/in = solape) y al separarlos " +
+                      "se quita. Las capas distintas son independientes: nunca " +
+                      "se funden solas — usa clic derecho → \"Crossfade con…\" " +
+                      "para linkarlas.\n" +
+                      "DESACTIVADO: el timeline no toca ningún fade (todo a mano " +
+                      "en el inspector).",
         };
         _chkXfade.Checked += (_, _) => OnXfadeToggle(true);
         _chkXfade.Unchecked += (_, _) => OnXfadeToggle(false);
@@ -1251,10 +1254,10 @@ public sealed class TimelineCanvas : FrameworkElement
                     break;
             }
 
-            // Solape entre media = CROSSFADE automático (curvas fade_out/
-            // fade_in escritas solas, sin pasar por el inspector)
+            // Fades gestionados POR CAPA: solape en la misma capa = crossfade
+            // (audio); separar = quitarlo. Entre capas, nada automático.
             if (!isGroup)
-                AutoCrossfadeAround(cue);
+                ReconcileSameLayerFades();
         }
         RefreshFromModel();
     }
@@ -1327,54 +1330,54 @@ public sealed class TimelineCanvas : FrameworkElement
         PlayFromRequested?.Invoke(items);
     }
 
-    /// <summary>Tras un arrastre, si el cue queda SOLAPADO con su hermano
-    /// anterior/siguiente (ambos media), la duración del solape se convierte
-    /// en el crossfade: fade_out del que sale = fade_in del que entra.
-    /// Si el arrastre los SEPARA, el crossfade se retira (los fades gigantes
-    /// heredados de solapes viejos no tienen sentido). Con el interruptor
-    /// 🔀 apagado no se toca ningún fade.</summary>
-    private void AutoCrossfadeAround(Cue cue)
+    /// <summary>Reconciliación de fades POR CAPA tras un arrastre (🔀 ON):
+    /// entre cada par de medias CONSECUTIVAS DE LA MISMA CAPA, el solape se
+    /// convierte en crossfade (solo AUDIO–AUDIO: dos vídeos en la misma capa
+    /// se sustituyen a corte por diseño del motor) y al separarse el
+    /// crossfade se retira. Las CAPAS DISTINTAS son independientes: nunca se
+    /// escriben fades entre ellas — para fundir entre capas está el menú
+    /// contextual "Crossfade con…". Los fades de bloques sin vecino en su
+    /// capa (primero/último/aislados) NO se tocan (manuales del usuario).</summary>
+    private void ReconcileSameLayerFades()
     {
-        if (!AutoCrossfade || _model is null || !cue.IsMedia())
+        if (!AutoCrossfade || _model is null)
             return;
         RebuildLayout();   // proyección con los commits del arrastre aplicados
-        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
-        int pos = siblings.FindIndex(c => c.Id == cue.Id);
-        if (pos < 0)
-            return;
-        if (pos > 0)
-            ApplyCrossfade(siblings[pos - 1], cue);
-        if (pos < siblings.Count - 1)
-            ApplyCrossfade(cue, siblings[pos + 1]);
+
+        foreach (var layerGroup in _blocks
+                     .Where(b => b.Cue.IsMedia() && b.Dur > 0)
+                     .GroupBy(b => b.Layer))
+        {
+            var ordered = layerGroup.OrderBy(b => b.Start).ToList();
+            for (int i = 0; i + 1 < ordered.Count; i++)
+            {
+                var a = ordered[i];
+                var b = ordered[i + 1];
+                double overlap = a.Start + a.Dur - b.Start;
+                bool bothAudio = a.Cue.Type == CueType.Audio
+                              && b.Cue.Type == CueType.Audio;
+                double xf = bothAudio && overlap > 0.05
+                    ? Math.Round(Math.Min(overlap,
+                        Math.Min(a.Dur, Math.Max(0.1, b.Dur))), 1)
+                    : 0.0;
+                if (Math.Abs(a.Cue.FadeOut - xf) > 0.01)
+                    CommitField?.Invoke(a.Cue.Id, "fade_out", xf);
+                if (Math.Abs(b.Cue.FadeIn - xf) > 0.01)
+                    CommitField?.Invoke(b.Cue.Id, "fade_in", xf);
+            }
+        }
     }
 
-    private void ApplyCrossfade(Cue outgoing, Cue incoming)
+    /// <summary>Crossfade EXPLÍCITO entre capas (menú contextual): el que
+    /// empieza antes funde su salida y el que entra funde su entrada, ambos
+    /// con la duración del solape. Es el "link" entre capas que el
+    /// automático nunca escribe solo.</summary>
+    private void ApplyCrossLayerFade(Cue first, Cue second, double overlap)
     {
-        if (!outgoing.IsMedia() || !incoming.IsMedia())
-            return;
-        if (!_startById.TryGetValue(outgoing.Id, out double aStart)
-            || !_startById.TryGetValue(incoming.Id, out double bStart))
-            return;
-        double aDur = EffectiveDuration(outgoing);
-        double overlap = aStart + aDur - bStart;
-
-        if (overlap < 0.05 || aDur <= 0)
-        {
-            // SIN solape: retirar el crossfade que el propio timeline hubiera
-            // escrito (bloques separados con fades de minutos = sinsentido)
-            if (outgoing.FadeOut > 0.01)
-                CommitField?.Invoke(outgoing.Id, "fade_out", 0.0);
-            if (incoming.FadeIn > 0.01)
-                CommitField?.Invoke(incoming.Id, "fade_in", 0.0);
-            return;
-        }
-
-        overlap = Math.Round(Math.Min(overlap,
-            Math.Min(aDur, Math.Max(0.1, EffectiveDuration(incoming)))), 1);
-        if (Math.Abs(outgoing.FadeOut - overlap) > 0.01)
-            CommitField?.Invoke(outgoing.Id, "fade_out", overlap);
-        if (Math.Abs(incoming.FadeIn - overlap) > 0.01)
-            CommitField?.Invoke(incoming.Id, "fade_in", overlap);
+        double xf = Math.Round(Math.Max(0.1, overlap), 1);
+        CommitField?.Invoke(first.Id, "fade_out", xf);
+        CommitField?.Invoke(second.Id, "fade_in", xf);
+        RefreshFromModel();
     }
 
     /// <summary>El bloque se soltó ANTES de su punto de disparo (montado sobre
@@ -1563,6 +1566,34 @@ public sealed class TimelineCanvas : FrameworkElement
                         CommitField?.Invoke(cue.Id, "fade_in", 0.0);
                         CommitField?.Invoke(cue.Id, "fade_out", 0.0);
                     }, edit));
+
+            // Crossfade EXPLÍCITO con los bloques solapados de OTRAS capas
+            // (el automático solo actúa dentro de la misma capa)
+            if (cue.IsMedia())
+            {
+                var mine = _blocks.FirstOrDefault(b => b.Cue.Id == cue.Id);
+                if (mine is { Dur: > 0 })
+                {
+                    foreach (var other in _blocks)
+                    {
+                        if (other.Cue.Id == cue.Id || other.Layer == mine.Layer
+                            || !other.Cue.IsMedia() || other.Dur <= 0)
+                            continue;
+                        var first = mine.Start <= other.Start ? mine : other;
+                        var second = ReferenceEquals(first, mine) ? other : mine;
+                        double overlap = first.Start + first.Dur - second.Start;
+                        if (overlap < 0.05)
+                            continue;
+                        overlap = Math.Min(overlap, Math.Min(first.Dur, second.Dur));
+                        double xf = Math.Round(overlap, 1);
+                        var f = first.Cue;
+                        var s = second.Cue;
+                        menu.Items.Add(MainWindow.Mi(
+                            $"🔀 Crossfade con «{other.Cue.Name}» ({xf:0.#} s, capa {other.Layer + 1})",
+                            "", () => ApplyCrossLayerFade(f, s, xf), edit));
+                    }
+                }
+            }
             menu.Items.Add(MainWindow.ColorSubmenu(
                 color => CommitField?.Invoke(cue.Id, "color", color), edit));
             menu.Items.Add(MainWindow.Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",
