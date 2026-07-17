@@ -29,7 +29,7 @@
 
     <DockPanel>
         <!-- ═══════════ TOP BAR: transport + master ═══════════ -->
-        <Border DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
+        <Border x:Name="TopBar" DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
@@ -85,7 +85,7 @@
         </Border>
 
         <!-- ═══════════ TOOLBAR: lista ═══════════ -->
-        <Border DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
+        <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
             <StackPanel Orientation="Horizontal">
                 <Button Click="OnOpenShow" Content="📂 Abrir"/>
                 <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
@@ -123,7 +123,7 @@
         </Border>
 
         <!-- ═══════════ STATUS BAR ═══════════ -->
-        <Border DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
+        <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
             <DockPanel>
                 <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right" Text="SALIDA: NEGRO"
                            Foreground="{StaticResource FgDim}"/>
