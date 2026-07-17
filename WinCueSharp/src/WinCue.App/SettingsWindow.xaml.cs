@@ -525,6 +525,9 @@ public partial class SettingsWindow : Window
         foreach (var (key, field) in _fields)
         {
             var node = _sm.GetAll()[key];
+            // OJO: GetValue<double>() LANZA si el JsonValue está respaldado por
+            // un int de C# (defaults aún no guardados en settings.json);
+            // Deserialize<> convierte con independencia del respaldo.
             object? value = node switch
             {
                 null => null,
@@ -532,8 +535,10 @@ public partial class SettingsWindow : Window
                 {
                     System.Text.Json.JsonValueKind.True => true,
                     System.Text.Json.JsonValueKind.False => false,
-                    System.Text.Json.JsonValueKind.Number => node.GetValue<double>() % 1 == 0
-                        ? (object)node.GetValue<int>() : node.GetValue<double>(),
+                    System.Text.Json.JsonValueKind.Number =>
+                        System.Text.Json.JsonSerializer.Deserialize<double>(node) is double d
+                            && d % 1 == 0
+                        ? (object)(int)d : System.Text.Json.JsonSerializer.Deserialize<double>(node),
                     _ => node.ToString(),
                 },
             };

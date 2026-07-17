@@ -35,6 +35,25 @@ public class SettingsManagerTests : IDisposable
     }
 
     [Fact]
+    public void GetAll_NumerosConvertibles_ConCualquierRespaldo()
+    {
+        // Regresión: con un settings.json ANTIGUO (sin las claves nuevas),
+        // los defaults ausentes del archivo quedan respaldados por int de C#
+        // y GetValue<double>() LANZA — el diálogo de configuración crasheaba
+        // al abrir. La conversión del diálogo usa Deserialize<>, que tolera
+        // ambos respaldos: esto lo pina para TODOS los defaults numéricos.
+        File.WriteAllText(SettingsPath, "{\"master_volume\": 80}");
+        var sm = new SettingsManager(SettingsPath);
+        foreach (var (key, node) in sm.GetAll())
+            if (node is not null &&
+                node.GetValueKind() == System.Text.Json.JsonValueKind.Number)
+            {
+                double d = System.Text.Json.JsonSerializer.Deserialize<double>(node);
+                Assert.False(double.IsNaN(d), $"clave {key}");
+            }
+    }
+
+    [Fact]
     public void SetAndReload_PersistsValues()
     {
         var sm = new SettingsManager(SettingsPath);
