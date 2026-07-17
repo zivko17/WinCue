@@ -325,6 +325,8 @@ public sealed class TimelineCanvas : FrameworkElement
     private Point _dragStart;
     private double _dragOrigPreWait;
     private int _dragOrigLayer;       // timeline_layer original (-1 = auto)
+    private bool _dragLayerTouched;   // el usuario movió el bloque en vertical
+    private Dictionary<int, double>? _dragAnchors;   // inicio pre-arrastre por cue
     private double _dragPreWait;
     private int _dragLayer;
     // Redimensionado: borde izq = pre_wait+trim_start (deslizar punto de
@@ -1089,7 +1091,14 @@ public sealed class TimelineCanvas : FrameworkElement
         _dragOrigPreWait = cue.PreWait;
         _dragOrigLayer = Math.Clamp(cue.TimelineLayer, -1, MaxLayers - 1);
         _dragPreWait = _dragOrigPreWait;
-        _dragLayer = _dragOrigLayer;
+        // La vista previa retiene el bloque en la fila donde SE VE ahora:
+        // sin gesto vertical del usuario no salta de pista (ni en el
+        // arrastre ni al soltar), aunque su capa sea "auto"
+        _dragLayer = hitBlock?.Layer ?? _dragOrigLayer;
+        _dragLayerTouched = false;
+        // Anclas: dónde empieza cada bloque ANTES del arrastre — al soltar,
+        // los no arrastrados se recolocan para quedarse donde estaban
+        _dragAnchors = new Dictionary<int, double>(_startById);
 
         // ¿Agarró un borde? → redimensionar en vez de mover
         _dragMode = EdgeModeAt(hitBlock, p.X);
@@ -1160,8 +1169,11 @@ public sealed class TimelineCanvas : FrameworkElement
                 _dragPreWait = _dragOrigPreWait + dSec;
                 // Vertical: fijar la pista (los grupos solo se mueven en tiempo)
                 if (!_dragIsGroup && Math.Abs(p.Y - _dragStart.Y) > LayerH * 0.5)
+                {
                     _dragLayer = Math.Clamp(
                         (int)((p.Y - RulerH) / LayerH), 0, MaxLayers - 1);
+                    _dragLayerTouched = true;   // gesto vertical del usuario
+                }
                 break;
 
             case DragMode.ResizeL:
@@ -1208,13 +1220,11 @@ public sealed class TimelineCanvas : FrameworkElement
         var mode = _dragMode;
         bool isGroup = _dragIsGroup;
         bool moved = _dragMoved;
+        bool layerTouched = _dragLayerTouched;
         double preWait = _dragPreWait;
         int layer = _dragLayer;
         double trimStart = _dragTrimStart, trimEnd = _dragTrimEnd;
         double duration = _dragDuration;
-        // Pista donde el usuario VE el bloque al soltar (incluye el apilado
-        // automático del layout del arrastre)
-        int shownLayer = _blocks.FirstOrDefault(b => b.Cue.Id == cue.Id)?.Layer ?? -1;
         _dragCue = null;
         ReleaseMouseCapture();
 
@@ -1223,21 +1233,30 @@ public sealed class TimelineCanvas : FrameworkElement
 
         if (moved)
         {
+            bool reordered = false;
             switch (mode)
             {
                 case DragMode.Move:
-                    if (!TryReorder(cue, preWait - _dragOrigPreWait))
+                    reordered = TryReorder(cue, preWait - _dragOrigPreWait);
+                    if (!reordered)
                     {
                         bool linked = false;
                         double committed = preWait < -1e-9
-                            ? LinkOverlapWithPrev(cue, preWait, shownLayer, out linked)
+                            ? LinkOverlapWithPrev(cue, preWait, out linked)
                             : preWait;
                         if (Math.Abs(committed - _dragOrigPreWait) > 1e-9)
                             CommitField?.Invoke(cue.Id, "pre_wait",
                                 Math.Max(0, committed));
-                        // Si el solape ya fijó las pistas, no pisarlas aquí
-                        if (!isGroup && !linked && layer != _dragOrigLayer)
-                            CommitField?.Invoke(cue.Id, "timeline_layer", layer);
+                        // Pista: SIEMPRE manda el gesto vertical del usuario.
+                        // Sin gesto, un solape recién creado congela el bloque
+                        // en la fila donde se veía (la fila "auto" bailaría).
+                        if (!isGroup)
+                        {
+                            if (layerTouched && layer != cue.TimelineLayer)
+                                CommitField?.Invoke(cue.Id, "timeline_layer", layer);
+                            else if (linked && cue.TimelineLayer < 0 && layer >= 0)
+                                CommitField?.Invoke(cue.Id, "timeline_layer", layer);
+                        }
                     }
                     break;
                 case DragMode.ResizeL:
@@ -1254,12 +1273,47 @@ public sealed class TimelineCanvas : FrameworkElement
                     break;
             }
 
+            // Los DEMÁS bloques se quedan donde estaban: mover/redimensionar
+            // uno no arrastra al resto del show (sus pre_wait se compensan)
+            if (!reordered)
+                AnchorOthers(cue);
+
             // Fades gestionados POR CAPA: solape en la misma capa = crossfade
             // (audio); separar = quitarlo. Entre capas, nada automático.
             if (!isGroup)
                 ReconcileSameLayerFades();
         }
+        _dragAnchors = null;
         RefreshFromModel();
+    }
+
+    /// <summary>Tras un arrastre, recoloca los bloques NO arrastrados en el
+    /// tiempo donde estaban antes (ancla): el modelo de datos es relativo
+    /// (cadenas de pre_wait), pero el timeline se edita en absoluto — mover
+    /// un bloque no debe desplazar a los demás. Si un pre_wait tendría que
+    /// ser negativo (el bloque anterior creció por encima), se queda en 0:
+    /// ese desplazamiento es físicamente inevitable.</summary>
+    private void AnchorOthers(Cue dragged)
+    {
+        if (_model is null || _dragAnchors is null)
+            return;
+        RebuildLayout();
+        foreach (var c in _model.Cues)   // orden de lista: aguas arriba primero
+        {
+            if (c.Id == dragged.Id
+                || !_dragAnchors.TryGetValue(c.Id, out double want)
+                || _model.IsDescendant(c, dragged.Id)
+                || !_startById.TryGetValue(c.Id, out double now))
+                continue;
+            double delta = want - now;
+            if (Math.Abs(delta) < 0.02)
+                continue;
+            double npw = Math.Max(0.0, c.PreWait + delta);
+            if (Math.Abs(npw - c.PreWait) < 1e-9)
+                continue;
+            CommitField?.Invoke(c.Id, "pre_wait", Math.Round(npw, 3));
+            RebuildLayout();   // el ajuste restaura también a sus dependientes
+        }
     }
 
     /// <summary>Mueve el cursor de edición y hace SCRUB: busca el vídeo de la
@@ -1386,8 +1440,7 @@ public sealed class TimelineCanvas : FrameworkElement
     /// donde se soltó. Es lo que hace que "las capas se junten" en el timeline.
     /// Dentro de un grupo TIMELINE los hijos ya son paralelos: ahí solo se
     /// recorta el offset a 0 (encadenar duplicaría disparos).</summary>
-    private double LinkOverlapWithPrev(Cue cue, double draggedPre, int shownLayer,
-        out bool linked)
+    private double LinkOverlapWithPrev(Cue cue, double draggedPre, out bool linked)
     {
         linked = false;
         if (_model is null)
@@ -1413,21 +1466,14 @@ public sealed class TimelineCanvas : FrameworkElement
             CommitField?.Invoke(prev.Id, "continue_mode", "AUTO_CONTINUE");
         linked = true;
 
-        // Dos VÍDEOS solapados: fijar AMBOS en las pistas donde se ven — si
-        // quedaran en pista "auto" irían los dos a la misma superficie y el
-        // segundo sustituiría al primero en vez de convivir/mezclarse.
-        if (cue.Type == CueType.Video && prev.Type == CueType.Video)
+        // La fila del bloque NUNCA se recoloca sola: la del arrastrado la
+        // decide el gesto del usuario (se fija fuera) y la del anterior solo
+        // se CONGELA donde se ve si estaba en "auto" (para que el apilado no
+        // la baile después). Misma pista = sustitución a corte, por diseño.
+        if (cue.IsMedia() && prev.IsMedia() && prev.TimelineLayer < 0)
         {
             int prevShown = _blocks.FirstOrDefault(b => b.Cue.Id == prev.Id)?.Layer ?? 2;
-            if (prev.TimelineLayer < 0)
-                CommitField?.Invoke(prev.Id, "timeline_layer", prevShown);
-            int prevEff = prev.TimelineLayer >= 0 ? prev.TimelineLayer : prevShown;
-            int mine = shownLayer >= 0 ? shownLayer : prevEff - 1;
-            if (mine == prevEff)
-                mine = prevEff > 0 ? prevEff - 1 : prevEff + 1;
-            mine = Math.Clamp(mine, 0, MaxLayers - 1);
-            if (cue.TimelineLayer != mine)
-                CommitField?.Invoke(cue.Id, "timeline_layer", mine);
+            CommitField?.Invoke(prev.Id, "timeline_layer", prevShown);
         }
 
         return Math.Max(0, desired - newTrigger);
