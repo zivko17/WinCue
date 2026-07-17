@@ -28,6 +28,9 @@ public sealed class InspectorPanel : ContentControl
     /// <summary>RTA de la pestaña EQ: espectro del cue dado (null = no suena).</summary>
     public Func<int, float[]?>? SpectrumProvider;
 
+    /// <summary>Medidor GR del compresor: reducción de ganancia (dB ≥ 0).</summary>
+    public Func<int, float>? GainReductionProvider;
+
     private readonly EqEditorControl _eqEditor = new();
 
     private readonly TabControl _tabs = new()
@@ -111,6 +114,8 @@ public sealed class InspectorPanel : ContentControl
         _eqEditor.Commit = (key, value) => Commit(key, value);
         _eqEditor.SpectrumProvider = () =>
             _cue is null ? null : SpectrumProvider?.Invoke(_cue.Id);
+        _eqEditor.GainReductionProvider = () =>
+            _cue is null ? 0f : GainReductionProvider?.Invoke(_cue.Id) ?? 0f;
         _tabs.Items.Add(Tab("EQ", _eqEditor));
 
         IsEnabled = false;   // sin cue seleccionado

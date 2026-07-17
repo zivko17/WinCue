@@ -29,10 +29,14 @@ public sealed class EqEditorControl : ContentControl
     /// <summary>RTA: espectro en dBFS del cue actual (null = no suena).</summary>
     public Func<float[]?>? SpectrumProvider;
 
+    /// <summary>Reducción de ganancia del compresor (dB ≥ 0) para el GR.</summary>
+    public Func<float>? GainReductionProvider;
+
     private Cue? _cue;
     private bool _loading;
 
     private readonly EqCurveCanvas _canvas = new();
+    private readonly CompCurveCanvas _compCanvas = new();
     private readonly Slider _gain;
     private readonly TextBlock _gainLabel;
     private readonly CheckBox _eqOn, _hpfOn, _lpfOn;
@@ -40,16 +44,31 @@ public sealed class EqEditorControl : ContentControl
     private CheckBox _compOn = null!;
     private TextBox _compThr = null!, _compRatio = null!, _compAtt = null!,
         _compRel = null!, _compMakeup = null!;
+    private readonly TextBox[] _bFreq = new TextBox[4];
+    private readonly TextBox[] _bGain = new TextBox[4];
+    private readonly TextBox[] _bQ = new TextBox[4];
     private readonly TextBlock _readout;
     private readonly TextBlock _noAudio;
     private readonly Grid _root;
     private readonly DispatcherTimer _rta;
 
+    private static readonly Color[] BandUiColors =
+    {
+        Color.FromRgb(0xc0, 0x39, 0x2b),
+        Color.FromRgb(0xe8, 0xa2, 0x00),
+        Color.FromRgb(0x2e, 0xcc, 0x71),
+        Color.FromRgb(0x2a, 0x6f, 0xb0),
+    };
+
     public EqEditorControl()
     {
+        // Distribución pedida por Andrés: IZQUIERDA las gráficas (curva EQ
+        // arriba, transferencia del compresor + medidor GR debajo) y a la
+        // DERECHA todos los parámetros numéricos de EQ y compresor.
         _root = new Grid { Margin = new Thickness(10, 6, 10, 8) };
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
         _root.ColumnDefinitions.Add(new ColumnDefinition());
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _root.RowDefinitions.Add(new RowDefinition());
         _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
@@ -95,36 +114,41 @@ public sealed class EqEditorControl : ContentControl
         Grid.SetRowSpan(gainPanel, 2);
         _root.Children.Add(gainPanel);
 
-        // ── Curva + RTA ────────────────────────────────────────────────
-        Grid.SetColumn(_canvas, 1);
+        // ── Columna central: gráficas (EQ arriba, compresor debajo) ────
+        var graphics = new Grid();
+        graphics.RowDefinitions.Add(new RowDefinition());
+        graphics.RowDefinitions.Add(new RowDefinition { Height = new GridLength(110) });
         Grid.SetRow(_canvas, 0);
-        _root.Children.Add(_canvas);
-        _canvas.Commit = (k, v) => { if (!_loading) Commit?.Invoke(k, v); };
+        graphics.Children.Add(_canvas);
+        _compCanvas.Margin = new Thickness(0, 4, 0, 0);
+        Grid.SetRow(_compCanvas, 1);
+        graphics.Children.Add(_compCanvas);
+        Grid.SetColumn(graphics, 1);
+        Grid.SetRow(graphics, 0);
+        _root.Children.Add(graphics);
+        _canvas.Commit = (k, v) =>
+        {
+            if (_loading) return;
+            Commit?.Invoke(k, v);
+            RefreshParams();
+        };
         _canvas.ReadoutChanged += text => _readout!.Text = text;
+        _compCanvas.Commit = (k, v) =>
+        {
+            if (_loading) return;
+            Commit?.Invoke(k, v);
+            RefreshParams();
+        };
 
-        // ── Fila inferior: toggles + frecuencias + lectura de banda ────
+        // ── Fila inferior (bajo las gráficas): lectura + RTA de pantalla ─
         var bottom = new DockPanel { Margin = new Thickness(0, 4, 0, 0) };
-        _eqOn = MakeCheck("EQ", "eq_enabled");
-        _hpfOn = MakeCheck("HPF", "hpf_on");
-        _hpfFreq = MakeFreqBox("hpf_freq");
-        _lpfOn = MakeCheck("LPF", "lpf_on");
-        _lpfFreq = MakeFreqBox("lpf_freq");
         var left = new StackPanel { Orientation = Orientation.Horizontal };
-        left.Children.Add(_eqOn);
-        left.Children.Add(_hpfOn);
-        left.Children.Add(_hpfFreq);
-        left.Children.Add(Hz());
-        left.Children.Add(_lpfOn);
-        left.Children.Add(_lpfFreq);
-        left.Children.Add(Hz());
-
-        // Ganancia de VISUALIZACIÓN del RTA (no toca el audio)
         left.Children.Add(new TextBlock
         {
             Text = "RTA +",
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             VerticalAlignment = VerticalAlignment.Center,
-            Margin = new Thickness(8, 0, 3, 0),
+            Margin = new Thickness(0, 0, 3, 0),
         });
         var rtaGain = new Slider
         {
@@ -153,31 +177,6 @@ public sealed class EqEditorControl : ContentControl
         left.Children.Add(rtaGain);
         left.Children.Add(rtaLabel);
         bottom.Children.Add(left);
-
-        // ── Fila 2: compresor por clip ─────────────────────────────────
-        var compRow = new StackPanel
-        {
-            Orientation = Orientation.Horizontal,
-            Margin = new Thickness(0, 3, 0, 0),
-        };
-        _compOn = MakeCheck("COMP", "comp_enabled");
-        compRow.Children.Add(_compOn);
-        compRow.Children.Add(FieldLabel("Umbral"));
-        _compThr = MakeNumBox("comp_threshold", -60, 0);
-        compRow.Children.Add(_compThr);
-        compRow.Children.Add(FieldLabel("dB · Ratio"));
-        _compRatio = MakeNumBox("comp_ratio", 1, 20);
-        compRow.Children.Add(_compRatio);
-        compRow.Children.Add(FieldLabel(":1 · Ataque"));
-        _compAtt = MakeNumBox("comp_attack", 0.1, 200);
-        compRow.Children.Add(_compAtt);
-        compRow.Children.Add(FieldLabel("ms · Rel"));
-        _compRel = MakeNumBox("comp_release", 5, 2000);
-        compRow.Children.Add(_compRel);
-        compRow.Children.Add(FieldLabel("ms · Makeup"));
-        _compMakeup = MakeNumBox("comp_makeup", 0, 24);
-        compRow.Children.Add(_compMakeup);
-        compRow.Children.Add(FieldLabel("dB"));
         _readout = new TextBlock
         {
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
@@ -185,15 +184,85 @@ public sealed class EqEditorControl : ContentControl
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
-            Text = "arrastra un punto: frec/ganancia · rueda: Q",
+            Text = "curva: arrastrar punto = frec/gan · rueda = Q · comp: arrastrar = umbral · rueda = ratio",
         };
         bottom.Children.Add(_readout);
-        var rows = new StackPanel();
-        rows.Children.Add(bottom);
-        rows.Children.Add(compRow);
-        Grid.SetColumn(rows, 1);
-        Grid.SetRow(rows, 1);
-        _root.Children.Add(rows);
+        Grid.SetColumn(bottom, 1);
+        Grid.SetRow(bottom, 1);
+        _root.Children.Add(bottom);
+
+        // ── Columna derecha: TODOS los parámetros numéricos ────────────
+        _eqOn = MakeCheck("EQ activa", "eq_enabled");
+        _hpfOn = MakeCheck("HPF", "hpf_on");
+        _hpfFreq = MakeFreqBox("hpf_freq");
+        _lpfOn = MakeCheck("LPF", "lpf_on");
+        _lpfFreq = MakeFreqBox("lpf_freq");
+
+        var pars = new StackPanel { Width = 252, Margin = new Thickness(10, 0, 0, 0) };
+        pars.Children.Add(SectionTitle("ECUALIZADOR"));
+        var eqHead = new StackPanel { Orientation = Orientation.Horizontal };
+        eqHead.Children.Add(_eqOn);
+        pars.Children.Add(eqHead);
+        var hpfRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        hpfRow.Children.Add(_hpfOn);
+        hpfRow.Children.Add(_hpfFreq);
+        hpfRow.Children.Add(Hz());
+        hpfRow.Children.Add(_lpfOn);
+        hpfRow.Children.Add(_lpfFreq);
+        hpfRow.Children.Add(Hz());
+        pars.Children.Add(hpfRow);
+
+        for (int i = 0; i < 4; i++)
+        {
+            var row = new StackPanel
+            { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+            var dot = new System.Windows.Shapes.Ellipse
+            {
+                Width = 10, Height = 10,
+                Fill = new SolidColorBrush(BandUiColors[i]),
+                VerticalAlignment = VerticalAlignment.Center,
+                Margin = new Thickness(0, 0, 4, 0),
+            };
+            row.Children.Add(dot);
+            row.Children.Add(FieldLabel($"B{i + 1}"));
+            _bFreq[i] = MakeNumBox($"eq{i + 1}_freq", 20, 20000);
+            _bFreq[i].Width = 52;
+            row.Children.Add(_bFreq[i]);
+            row.Children.Add(FieldLabel("Hz"));
+            _bGain[i] = MakeNumBox($"eq{i + 1}_gain", -18, 18);
+            row.Children.Add(_bGain[i]);
+            row.Children.Add(FieldLabel("dB"));
+            _bQ[i] = MakeNumBox($"eq{i + 1}_q", 0.1, 12);
+            _bQ[i].Width = 38;
+            row.Children.Add(_bQ[i]);
+            row.Children.Add(FieldLabel("Q"));
+            pars.Children.Add(row);
+        }
+
+        pars.Children.Add(SectionTitle("COMPRESOR"));
+        _compOn = MakeCheck("Compresor activo", "comp_enabled");
+        pars.Children.Add(_compOn);
+        _compThr = MakeNumBox("comp_threshold", -60, 0);
+        pars.Children.Add(ParamRow("Umbral", _compThr, "dB"));
+        _compRatio = MakeNumBox("comp_ratio", 1, 20);
+        pars.Children.Add(ParamRow("Ratio", _compRatio, ": 1"));
+        _compAtt = MakeNumBox("comp_attack", 0.1, 200);
+        pars.Children.Add(ParamRow("Ataque", _compAtt, "ms"));
+        _compRel = MakeNumBox("comp_release", 5, 2000);
+        pars.Children.Add(ParamRow("Release", _compRel, "ms"));
+        _compMakeup = MakeNumBox("comp_makeup", 0, 24);
+        pars.Children.Add(ParamRow("Makeup", _compMakeup, "dB"));
+
+        var parsScroll = new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = pars,
+        };
+        Grid.SetColumn(parsScroll, 2);
+        Grid.SetRowSpan(parsScroll, 2);
+        _root.Children.Add(parsScroll);
 
         _noAudio = new TextBlock
         {
@@ -205,14 +274,41 @@ public sealed class EqEditorControl : ContentControl
 
         Content = _root;
 
-        // RTA ~12 Hz mientras la pestaña está visible
+        // RTA + medidor GR ~12 Hz mientras la pestaña está visible
         _rta = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
         _rta.Tick += (_, _) =>
         {
             if (IsVisible && _cue is { Type: CueType.Audio })
+            {
                 _canvas.SetSpectrum(SpectrumProvider?.Invoke());
+                _compCanvas.SetGainReduction(GainReductionProvider?.Invoke() ?? 0f);
+            }
         };
         _rta.Start();
+    }
+
+    private static TextBlock SectionTitle(string text) => new()
+    {
+        Text = text,
+        FontSize = 9,
+        FontWeight = FontWeights.Bold,
+        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+        Margin = new Thickness(0, 8, 0, 3),
+    };
+
+    private static DockPanel ParamRow(string label, TextBox box, string unit)
+    {
+        var row = new DockPanel { Margin = new Thickness(0, 2, 0, 0) };
+        var lbl = FieldLabel(label);
+        lbl.Width = 52;
+        DockPanel.SetDock(lbl, Dock.Left);
+        row.Children.Add(lbl);
+        var unitLbl = FieldLabel(unit);
+        DockPanel.SetDock(unitLbl, Dock.Right);
+        row.Children.Add(unitLbl);
+        box.HorizontalAlignment = HorizontalAlignment.Left;
+        row.Children.Add(box);
+        return row;
     }
 
     private CheckBox MakeCheck(string label, string key)
@@ -224,8 +320,18 @@ public sealed class EqEditorControl : ContentControl
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
         };
-        cb.Checked += (_, _) => { if (!_loading) Commit?.Invoke(key, true); _canvas.InvalidateVisual(); };
-        cb.Unchecked += (_, _) => { if (!_loading) Commit?.Invoke(key, false); _canvas.InvalidateVisual(); };
+        cb.Checked += (_, _) =>
+        {
+            if (!_loading) Commit?.Invoke(key, true);
+            _canvas.InvalidateVisual();
+            _compCanvas.InvalidateVisual();
+        };
+        cb.Unchecked += (_, _) =>
+        {
+            if (!_loading) Commit?.Invoke(key, false);
+            _canvas.InvalidateVisual();
+            _compCanvas.InvalidateVisual();
+        };
         return cb;
     }
 
@@ -254,6 +360,8 @@ public sealed class EqEditorControl : ContentControl
                     NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
                 return;
             Commit?.Invoke(key, Math.Clamp(v, min, max));
+            _canvas.InvalidateVisual();
+            _compCanvas.InvalidateVisual();
         }
         box.LostFocus += (_, _) => CommitBox();
         box.KeyDown += (_, e) => { if (e.Key == Key.Enter) CommitBox(); };
@@ -296,12 +404,22 @@ public sealed class EqEditorControl : ContentControl
     {
         _cue = cue;
         _canvas.SetCue(cue);
+        _compCanvas.SetCue(cue);
         if (cue is not { Type: CueType.Audio })
         {
             Content = _noAudio;
             return;
         }
         Content = _root;
+        RefreshParams();
+    }
+
+    /// <summary>Vuelca los valores del cue en TODAS las cajas numéricas (al
+    /// seleccionar y tras cada arrastre en las gráficas, que mutan el cue).</summary>
+    private void RefreshParams()
+    {
+        if (_cue is not { Type: CueType.Audio } cue)
+            return;
         _loading = true;
         try
         {
@@ -312,6 +430,19 @@ public sealed class EqEditorControl : ContentControl
             _lpfOn.IsChecked = cue.LpfOn;
             _hpfFreq.Text = cue.HpfFreq.ToString("0", CultureInfo.InvariantCulture);
             _lpfFreq.Text = cue.LpfFreq.ToString("0", CultureInfo.InvariantCulture);
+            for (int i = 0; i < 4; i++)
+            {
+                var (f, g, q) = (i switch
+                {
+                    0 => (cue.Eq1Freq, cue.Eq1Gain, cue.Eq1Q),
+                    1 => (cue.Eq2Freq, cue.Eq2Gain, cue.Eq2Q),
+                    2 => (cue.Eq3Freq, cue.Eq3Gain, cue.Eq3Q),
+                    _ => (cue.Eq4Freq, cue.Eq4Gain, cue.Eq4Q),
+                });
+                _bFreq[i].Text = f.ToString("0", CultureInfo.InvariantCulture);
+                _bGain[i].Text = g.ToString("0.#", CultureInfo.InvariantCulture);
+                _bQ[i].Text = q.ToString("0.##", CultureInfo.InvariantCulture);
+            }
             _compOn.IsChecked = cue.CompEnabled;
             _compThr.Text = cue.CompThreshold.ToString("0.#", CultureInfo.InvariantCulture);
             _compRatio.Text = cue.CompRatio.ToString("0.#", CultureInfo.InvariantCulture);
@@ -323,6 +454,7 @@ public sealed class EqEditorControl : ContentControl
         {
             _loading = false;
         }
+        _compCanvas.InvalidateVisual();
     }
 }
 
@@ -624,6 +756,199 @@ public sealed class EqCurveCanvas : FrameworkElement
         var (f, g, q) = Band(i);
         return $"Banda {i + 1}: {f:0} Hz · {g:+0.0;-0.0;0.0} dB · Q {q:0.00}";
     }
+
+    private static Brush Frozen(Brush b) { b.Freeze(); return b; }
+
+    private static Pen FrozenPen(Color c, double width)
+    {
+        var p = new Pen(new SolidColorBrush(c), width);
+        p.Freeze();
+        return p;
+    }
+}
+
+/// <summary>Gráfica del COMPRESOR: curva de transferencia entrada/salida en
+/// dB (−60..0) con el umbral arrastrable (rueda = ratio) y, a la derecha, el
+/// medidor GR en vivo (cuánta reducción está aplicando ahora mismo).</summary>
+public sealed class CompCurveCanvas : FrameworkElement
+{
+    private const double DbMin = -60.0;
+    private const double GrScaleDb = 24.0;   // fondo de escala del medidor
+    private const double MeterW = 16;
+
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x16)));
+    private static readonly Pen GridPen = FrozenPen(Color.FromRgb(0x2c, 0x2c, 0x30), 1);
+    private static readonly Pen UnityPen = MakeUnityPen();
+    private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xa2, 0x00), 2);
+    private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x6e, 0x58, 0x28), 1.5);
+    private static readonly Brush GridText = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
+    private static readonly Brush ThrBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)));
+    private static readonly Brush GrBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0x7a, 0x00)));
+    private static readonly Brush GrBg = Frozen(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x24)));
+
+    private static Pen MakeUnityPen()
+    {
+        var p = new Pen(new SolidColorBrush(Color.FromRgb(0x4a, 0x4a, 0x50)), 1)
+        { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
+        p.Freeze();
+        return p;
+    }
+
+    public Action<string, object?>? Commit;
+
+    private Cue? _cue;
+    private float _gr;
+    private bool _drag;
+
+    public CompCurveCanvas()
+    {
+        ClipToBounds = true;
+        MinHeight = 90;
+    }
+
+    public void SetCue(Cue? cue)
+    {
+        _cue = cue;
+        _gr = 0f;
+        InvalidateVisual();
+    }
+
+    /// <summary>Reducción de ganancia actual (dB ≥ 0) — solo repinta si cambia.</summary>
+    public void SetGainReduction(float grDb)
+    {
+        if (Math.Abs(grDb - _gr) < 0.15f)
+            return;
+        _gr = Math.Max(0f, grDb);
+        InvalidateVisual();
+    }
+
+    private double PlotW => Math.Max(1, ActualWidth - MeterW - 4);
+    private double XFromDb(double db) => (db - DbMin) / -DbMin * PlotW;
+    private double DbFromX(double x) => DbMin + Math.Clamp(x / PlotW, 0, 1) * -DbMin;
+    private double YFromDb(double db) => (db / DbMin) * ActualHeight;
+
+    /// <summary>Transferencia del compresor (entrada dB → salida dB).</summary>
+    private double OutDb(double inDb)
+    {
+        if (_cue is null)
+            return inDb;
+        double outDb = inDb <= _cue.CompThreshold
+            ? inDb
+            : _cue.CompThreshold + (inDb - _cue.CompThreshold) / Math.Max(1.0, _cue.CompRatio);
+        return outDb + _cue.CompMakeup;
+    }
+
+    protected override void OnRender(DrawingContext dc)
+    {
+        double w = ActualWidth, h = ActualHeight;
+        dc.DrawRectangle(BgBrush, null, new Rect(0, 0, w, h));
+        if (_cue is null || w < 60)
+            return;
+        double pw = PlotW;
+
+        // Rejilla cada 12 dB + diagonal 1:1 de referencia
+        foreach (double db in new[] { -48.0, -36, -24, -12 })
+        {
+            double x = XFromDb(db), y = YFromDb(db);
+            dc.DrawLine(GridPen, new Point(x, 0), new Point(x, h));
+            dc.DrawLine(GridPen, new Point(0, y), new Point(pw, y));
+        }
+        dc.DrawLine(UnityPen, new Point(XFromDb(DbMin), YFromDb(DbMin)),
+            new Point(XFromDb(0), YFromDb(0)));
+        dc.DrawText(Text("COMP  in→out dB", GridText, 8), new Point(4, 2));
+
+        // Curva de transferencia
+        var pen = _cue.CompEnabled ? CurvePen : CurveOffPen;
+        var geo = new StreamGeometry();
+        using (var ctx = geo.Open())
+        {
+            bool started = false;
+            for (int px = 0; px <= (int)pw; px += 2)
+            {
+                double outDb = Math.Clamp(OutDb(DbFromX(px)), DbMin, 6.0);
+                var pt = new Point(px, Math.Clamp(YFromDb(outDb), -10, h + 10));
+                if (!started) { ctx.BeginFigure(pt, false, false); started = true; }
+                else ctx.LineTo(pt, true, false);
+            }
+        }
+        geo.Freeze();
+        dc.DrawGeometry(null, pen, geo);
+
+        // Manejador del umbral (sobre la curva, arrastrable en X)
+        double tx = XFromDb(_cue.CompThreshold);
+        double ty = YFromDb(Math.Clamp(OutDb(_cue.CompThreshold), DbMin, 0));
+        dc.DrawEllipse(ThrBrush, null, new Point(tx, ty), _drag ? 6 : 5, _drag ? 6 : 5);
+        dc.DrawText(Text($"{_cue.CompThreshold:0} dB · {_cue.CompRatio:0.#}:1",
+            GridText, 8), new Point(Math.Min(tx + 6, pw - 70), Math.Max(2, ty - 14)));
+
+        // ── Medidor GR (derecha): cuánta reducción aplica AHORA ─────────
+        var meterRect = new Rect(pw + 4, 0, MeterW, h);
+        dc.DrawRectangle(GrBg, null, meterRect);
+        if (_cue.CompEnabled && _gr > 0.05f)
+        {
+            double frac = Math.Clamp(_gr / GrScaleDb, 0, 1);
+            dc.DrawRectangle(GrBrush, null,
+                new Rect(pw + 4, 0, MeterW, frac * h));   // crece de ARRIBA abajo
+        }
+        foreach (double mark in new[] { 6.0, 12, 18 })
+        {
+            double y = mark / GrScaleDb * h;
+            dc.DrawLine(GridPen, new Point(pw + 4, y), new Point(pw + 4 + MeterW, y));
+        }
+        dc.DrawText(Text("GR", GridText, 8), new Point(pw + 6, h - 12));
+        if (_cue.CompEnabled && _gr > 0.05f)
+            dc.DrawText(Text($"-{_gr:0.0}", Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00))), 8),
+                new Point(pw + 2, 2));
+    }
+
+    protected override void OnMouseDown(MouseButtonEventArgs e)
+    {
+        if (e.ChangedButton != MouseButton.Left || _cue is null)
+            return;
+        var p = e.GetPosition(this);
+        if (p.X > PlotW)
+            return;   // el medidor no se arrastra
+        _drag = true;
+        CaptureMouse();
+        Commit?.Invoke("comp_threshold",
+            Math.Round(Math.Clamp(DbFromX(p.X), -60.0, 0.0), 1));
+        InvalidateVisual();
+    }
+
+    protected override void OnMouseMove(MouseEventArgs e)
+    {
+        if (!_drag || _cue is null)
+            return;
+        Commit?.Invoke("comp_threshold",
+            Math.Round(Math.Clamp(DbFromX(e.GetPosition(this).X), -60.0, 0.0), 1));
+        InvalidateVisual();
+    }
+
+    protected override void OnMouseUp(MouseButtonEventArgs e)
+    {
+        if (_drag)
+        {
+            _drag = false;
+            ReleaseMouseCapture();
+            InvalidateVisual();
+        }
+    }
+
+    /// <summary>Rueda sobre la gráfica: ajustar el RATIO.</summary>
+    protected override void OnMouseWheel(MouseWheelEventArgs e)
+    {
+        if (_cue is null)
+            return;
+        double newRatio = Math.Round(Math.Clamp(
+            _cue.CompRatio * (e.Delta > 0 ? 1.15 : 1 / 1.15), 1.0, 20.0), 2);
+        Commit?.Invoke("comp_ratio", newRatio);
+        InvalidateVisual();
+        e.Handled = true;
+    }
+
+    private static FormattedText Text(string t, Brush b, double size) => new(
+        t, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+        new Typeface("Segoe UI"), size, b, 1.0);
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
 

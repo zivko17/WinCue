@@ -133,6 +133,10 @@ public interface IAudioEngine
     /// <summary>Espectro del cue sonando para el RTA: bandas log 20 Hz–20 kHz
     /// en dBFS, o null si no suena. Por defecto: null (motores falsos).</summary>
     float[]? GetSpectrum(int cueId) => null;
+
+    /// <summary>Reducción de ganancia actual del compresor del cue (dB ≥ 0)
+    /// para el medidor GR. Por defecto: 0 (motores falsos).</summary>
+    float GetGainReductionDb(int cueId) => 0f;
 }
 
 /// <summary>Superficie de una pista del COMPOSITOR GPU: recibe la render

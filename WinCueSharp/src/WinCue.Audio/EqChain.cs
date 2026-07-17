@@ -122,8 +122,12 @@ public sealed class EqChain
         // Compresor (post-EQ), detector de pico enlazado entre canales
         var comp = _comp;
         if (comp is null)
+        {
+            CurrentGainReductionDb = 0f;
             return;
+        }
         double env = comp.Env;
+        double maxRedDb = 0.0;   // GR máxima del buffer (medidor de la UI)
         for (int i = 0; i + ch <= samples; i += ch)
         {
             double peak = 0;
@@ -139,13 +143,22 @@ public sealed class EqChain
             if (env > comp.ThLin)
             {
                 double overDb = 20.0 * Math.Log10(env / comp.ThLin);
-                gain *= Math.Pow(10.0, -overDb * comp.InvRatioComp / 20.0);
+                double redDb = overDb * comp.InvRatioComp;
+                if (redDb > maxRedDb)
+                    maxRedDb = redDb;
+                gain *= Math.Pow(10.0, -redDb / 20.0);
             }
             for (int c = 0; c < ch; c++)
                 buffer[offset + i + c] = (float)(buffer[offset + i + c] * gain);
         }
         comp.Env = env;
+        CurrentGainReductionDb = (float)maxRedDb;
     }
+
+    /// <summary>Reducción de ganancia ACTUAL del compresor en dB (≥ 0; 0 =
+    /// sin comprimir). La escribe el hilo RT por buffer; la lee la UI para
+    /// el medidor GR. float: la lectura/escritura es atómica.</summary>
+    public float CurrentGainReductionDb { get; private set; }
 
     // ------------------------------------------------------------------
     // Coeficientes (RBJ cookbook) — compartidos con la curva de la UI

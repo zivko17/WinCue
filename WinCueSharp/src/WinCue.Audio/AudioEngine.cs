@@ -320,6 +320,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public float[]? GetSpectrum(int cueId) =>
         _active.TryGetValue(cueId, out var a) ? a.Provider.GetSpectrum() : null;
 
+    /// <summary>Reducción de ganancia del compresor (dB ≥ 0; 0 si no suena).</summary>
+    public float GetGainReductionDb(int cueId) =>
+        _active.TryGetValue(cueId, out var a) ? a.Provider.GetGainReductionDb() : 0f;
+
     /// <summary>Duración del audio en s (de la sesión activa —con trim— o del buffer).</summary>
     public double GetDuration(int cueId)
     {

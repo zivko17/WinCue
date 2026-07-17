@@ -243,6 +243,16 @@ public class MainController
         return s;
     }
 
+    /// <summary>Reducción de ganancia del compresor (dB ≥ 0) para el medidor
+    /// GR del inspector: del cue sonando, o de su audición local.</summary>
+    public float GetAudioGainReduction(int cueId)
+    {
+        float gr = _audio.GetGainReductionDb(cueId);
+        if (gr <= 0f && cueId == _auditionSourceCueId)
+            gr = _audio.GetGainReductionDb(AuditionCueId);
+        return gr;
+    }
+
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
     public void StopCueById(int cueId)
     {

@@ -197,6 +197,10 @@ public sealed class CueSampleProvider : ISampleProvider
     /// <summary>Reconfigura la EQ del clip en vivo (main thread).</summary>
     public void SetEq(WinCue.Core.AudioEqParams? eq) => _eq.Configure(eq);
 
+    /// <summary>Reducción de ganancia actual del compresor (dB ≥ 0) para el
+    /// medidor GR del inspector.</summary>
+    public float GetGainReductionDb() => _eq.CurrentGainReductionDb;
+
     /// <summary>Espectro post-EQ para el RTA: bandas log 20 Hz–20 kHz en dBFS
     /// (−90..0), o null si aún no hay datos. La primera llamada activa el
     /// análisis (los cues sin RTA visible no pagan la FFT).</summary>
