@@ -75,8 +75,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly Dictionary<int, (int Screen, int Layer)> _playerSlots = new();
 
     // Compositor GPU: renderer + superficie de la vista, por cue
-    private Func<int, int, IVideoLayerSurface>? _gpuSurfaces;
+    private Func<int, int, int, IVideoLayerSurface>? _gpuSurfaces;
     private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
+    // Red de seguridad del crossfade en la misma pista: si el saliente no
+    // tiene fin propio (loop), se termina al acabar el fundido
+    private readonly Dictionary<int, System.Threading.Timer> _handoverTimers = new();
     private readonly Dictionary<int, (MpvGpuRenderer Renderer, List<IVideoLayerSurface> Sinks)>
         _renderers = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
@@ -120,8 +123,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         _getLayerHandle = provider;
 
     /// <summary>Activa el COMPOSITOR GPU (render API → superficies D3D con
-    /// opacidad real entre capas). null = volver al modo clásico HWND.</summary>
-    public void SetGpuLayerSurfaceProvider(Func<int, int, IVideoLayerSurface>? provider)
+    /// opacidad real; una superficie POR CUE, entregada por (salida, pista,
+    /// cueId)). null = volver al modo clásico HWND.</summary>
+    public void SetGpuLayerSurfaceProvider(Func<int, int, int, IVideoLayerSurface>? provider)
     {
         _gpuSurfaces = provider;
         _gpuFailed = false;
@@ -486,10 +490,19 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // MISMA pista de la MISMA salida. Pistas distintas (o salidas
         // distintas) conviven. El huérfano pasa a STOPPED (mejora sobre
         // Python, que dejaba su estado en PLAYING y any_playing() mentía).
+        // EXCEPCIÓN — CROSSFADE en la misma pista (compositor GPU): con
+        // HandoverSeconds el saliente sigue vivo durante el fundido (su
+        // propio fin/fade_out lo retira; timer de seguridad por si no).
+        bool handover = gpu && p.HandoverSeconds > 0.0;
         foreach (int otherId in _players.Keys.ToList())
         {
             if (otherId == cueId) continue;
             if (_playerSlots.GetValueOrDefault(otherId, (0, 2)) != (screen, layer)) continue;
+            if (handover)
+            {
+                ScheduleHandoverKill(otherId, p.HandoverSeconds + 0.25);
+                continue;
+            }
             CancelFade(otherId);
             SetState(otherId, MediaCueState.Stopped);
             TerminatePlayer(otherId);
@@ -562,7 +575,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 {
                     var v = renderer.Views[i];
                     int sinkScreen = canvas ? v.Screen : Math.Clamp(p.Screen, 0, 3);
-                    var sink = _gpuSurfaces!(sinkScreen, layer);
+                    var sink = _gpuSurfaces!(sinkScreen, layer, cueId);
                     sink.SetSurface(renderer.ViewSurface(i), v.W, v.H);
                     renderer.FrameRendered += sink.InvalidateFrame;
                     sinks.Add(sink);
@@ -679,9 +692,31 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         catch (Exception) { /* geometría es best-effort */ }
     }
 
+    /// <summary>Red de seguridad del crossfade: termina al saliente cuando el
+    /// fundido acaba, si nadie lo ha parado antes (p.ej. un vídeo en loop).</summary>
+    private void ScheduleHandoverKill(int cueId, double seconds)
+    {
+        if (_handoverTimers.Remove(cueId, out var prev))
+            prev.Dispose();
+        var timer = new System.Threading.Timer(_ => Post(() =>
+        {
+            if (_handoverTimers.Remove(cueId, out var t))
+                t.Dispose();
+            if (_players.ContainsKey(cueId) && GetState(cueId) == MediaCueState.Playing)
+            {
+                CancelFade(cueId);
+                SetState(cueId, MediaCueState.Stopped);
+                TerminatePlayer(cueId);
+            }
+        }), null, (int)(Math.Max(0.05, seconds) * 1000), System.Threading.Timeout.Infinite);
+        _handoverTimers[cueId] = timer;
+    }
+
     private void TerminatePlayer(int cueId)
     {
         _playerSlots.Remove(cueId);
+        if (_handoverTimers.Remove(cueId, out var handover))
+            handover.Dispose();
         // Regla de mpv: el render context se libera ANTES que el core
         if (_renderers.Remove(cueId, out var r))
         {

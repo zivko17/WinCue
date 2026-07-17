@@ -23,6 +23,10 @@ public sealed class CompositorLayerControl : Image, IVideoLayerSurface
     private int _width, _height;
     private int _framePending;   // 0/1 — coalescer de invalidaciones
 
+    /// <summary>El motor soltó la superficie (fin del cue): la ventana lo usa
+    /// para retirar el control del árbol (superficies POR CUE).</summary>
+    public Action? Cleared;
+
     public CompositorLayerControl()
     {
         Stretch = Stretch.Uniform;
@@ -76,5 +80,6 @@ public sealed class CompositorLayerControl : Image, IVideoLayerSurface
         }
         Source = null;
         Visibility = Visibility.Collapsed;
+        Cleared?.Invoke();
     }
 }

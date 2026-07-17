@@ -69,6 +69,40 @@ public class VideoFadeOutTests : ControllerTestBase
     }
 
     [Fact]
+    public void CrossfadeMismaPista_NoCortaAlSaliente()
+    {
+        // A sonando en la pista 2; B entra en la MISMA pista con fade_in:
+        // crossfade → A NO se corta al GO de B (lo retira su propio fin) y
+        // B lleva la señal de handover para el motor.
+        var a = AddCue(CueType.Video, "saliente", duration: 100.0,
+            setup: c => c.TimelineLayer = 2);
+        var b = AddCue(CueType.Video, "entrante", duration: 100.0,
+            setup: c => { c.TimelineLayer = 2; c.FadeIn = 4.0; });
+
+        Controller.OnGoPressed();
+        Controller.OnGoPressed();
+
+        Assert.True(Video.IsPlaying(a.Id));    // sigue vivo durante el fundido
+        Assert.True(Video.IsPlaying(b.Id));
+        Assert.Equal(4.0, Video.Plays.Single(p => p.CueId == b.Id).P.HandoverSeconds, 2);
+    }
+
+    [Fact]
+    public void MismaPistaSinFadeIn_SustituyeACorte()
+    {
+        var a = AddCue(CueType.Video, "viejo", duration: 100.0,
+            setup: c => c.TimelineLayer = 2);
+        var b = AddCue(CueType.Video, "nuevo", duration: 100.0,
+            setup: c => c.TimelineLayer = 2);
+
+        Controller.OnGoPressed();
+        Controller.OnGoPressed();
+
+        Assert.False(Video.IsPlaying(a.Id));   // corte: exclusividad de pista
+        Assert.True(Video.IsPlaying(b.Id));
+    }
+
+    [Fact]
     public void Audio_MantieneSuColaDeFade()
     {
         var a = AddCue(CueType.Audio, "tema", duration: 10.0,

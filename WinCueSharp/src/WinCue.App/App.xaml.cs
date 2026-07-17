@@ -65,7 +65,8 @@ public partial class App : Application
         {
             _video.SetGpuLayerSurfaceProvider(
                 settings.Get("video_compositor", false)
-                    ? (screen, layer) => window.GetCompositorSurface(screen, layer)
+                    ? (screen, layer, cueId) =>
+                        window.GetCompositorSurface(screen, layer, cueId)
                     : null);
         }
         ApplyCompositorMode();

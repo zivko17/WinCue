@@ -45,8 +45,10 @@ public partial class VideoOutputWindow : Window
     private readonly WF.Panel[] _layers = new WF.Panel[8];
     private readonly System.Windows.Forms.Integration.WindowsFormsHost _hwndHost;
 
-    // MODO COMPOSITOR GPU: 8 D3DImage apiladas con opacidad real por capa
-    private readonly CompositorLayerControl[] _gpuLayers = new CompositorLayerControl[8];
+    // MODO COMPOSITOR GPU: una superficie POR CUE, apiladas por pista (z) —
+    // dos cues pueden convivir en la misma pista durante un crossfade
+    private readonly Dictionary<int, CompositorLayerControl> _gpuByCue = new();
+    private int _gpuSeq;   // desempate de z dentro de la misma pista
     private readonly Grid _gpuHost;
 
     // Overlays de operación: patrón de test, identificación y blackout.
@@ -88,13 +90,9 @@ public partial class VideoOutputWindow : Window
             Child = container,
         };
 
-        // Compositor: en WPF el ÚLTIMO hijo queda encima → añadir 4..0
+        // Compositor: host vacío — los controles se crean POR CUE al arrancar
+        // cada vídeo y se retiran solos cuando el motor suelta la superficie
         _gpuHost = new Grid { Background = System.Windows.Media.Brushes.Black };
-        for (int i = _gpuLayers.Length - 1; i >= 0; i--)
-        {
-            _gpuLayers[i] = new CompositorLayerControl();
-            _gpuHost.Children.Add(_gpuLayers[i]);
-        }
 
         // Overlays (de abajo a arriba): patrón de test → identificar → blackout
         _patternHost = new Grid { Visibility = Visibility.Collapsed };
@@ -296,22 +294,41 @@ public partial class VideoOutputWindow : Window
         _blackoutVeil.BeginAnimation(OpacityProperty, anim);
     }
 
-    /// <summary>Superficie del compositor GPU para la pista dada.</summary>
-    public CompositorLayerControl GetCompositorSurface(int layer)
+    /// <summary>Superficie del compositor GPU para UN CUE en la pista dada:
+    /// se crea un control nuevo (z por pista; dentro de la misma pista, el
+    /// más reciente encima — crossfade A→B) que se retira solo cuando el
+    /// motor suelta la superficie.</summary>
+    public CompositorLayerControl GetCompositorSurface(int layer, int cueId)
     {
         if (!IsVisible)
             Show();
         ShowHwndMode(false);
-        return _gpuLayers[Math.Clamp(layer, 0, _gpuLayers.Length - 1)];
+
+        // Re-arranque del mismo cue: sustituir su control anterior
+        if (_gpuByCue.Remove(cueId, out var stale))
+            _gpuHost.Children.Remove(stale);
+
+        var ctl = new CompositorLayerControl();
+        int z = (7 - Math.Clamp(layer, 0, 7)) * 100_000 + (++_gpuSeq & 0xFFFF);
+        Panel.SetZIndex(ctl, z);
+        ctl.Cleared = () =>
+        {
+            if (_gpuByCue.TryGetValue(cueId, out var cur) && ReferenceEquals(cur, ctl))
+                _gpuByCue.Remove(cueId);
+            _gpuHost.Children.Remove(ctl);
+        };
+        _gpuHost.Children.Add(ctl);
+        _gpuByCue[cueId] = ctl;
+        return ctl;
     }
 
-    /// <summary>Opacidad (0..1) de una pista del compositor. fadeSeconds &gt; 0
-    /// = transición animada (fundidos de entrada/salida y crossfades).</summary>
-    public void SetLayerOpacity(int layer, double opacity, double fadeSeconds = 0.0)
+    /// <summary>Opacidad (0..1) del vídeo de un cue en ESTA salida.
+    /// fadeSeconds &gt; 0 = transición animada (fundidos y crossfades).
+    /// Sin superficie de ese cue aquí, no-op.</summary>
+    public void SetCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0)
     {
-        if (layer < 0 || layer >= _gpuLayers.Length)
+        if (!_gpuByCue.TryGetValue(cueId, out var target))
             return;
-        var target = _gpuLayers[layer];
         double value = Math.Clamp(opacity, 0.0, 1.0);
         if (fadeSeconds > 0.0)
         {

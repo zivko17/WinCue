@@ -89,7 +89,12 @@ public sealed record VideoPlayParams(
     VideoGeometry? Geometry = null,
     int Layer = 2,
     int Screen = 0,
-    IReadOnlyList<CanvasView>? CanvasOutputs = null);
+    IReadOnlyList<CanvasView>? CanvasOutputs = null,
+    double HandoverSeconds = 0.0);
+// HandoverSeconds > 0 = CROSSFADE en la misma pista (solo compositor GPU):
+// el vídeo que ya ocupa (Screen, Layer) NO se termina al entrar este; sigue
+// vivo ese tiempo (su propio fin/fade_out lo retira) para que ambos se vean
+// durante el fundido. En modo clásico se ignora (sustitución a corte).
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine
@@ -178,10 +183,11 @@ public interface IVideoEngine
     void SetLayerHandleProvider(Func<int, int, nint>? provider) { }
 
     /// <summary>MODO COMPOSITOR GPU: si se fija, los vídeos renderizan vía
-    /// render API a superficies D3D compartidas (opacidad real entre capas)
-    /// en vez de a HWNDs, por (salida, pista). null = modo clásico.
-    /// Default: no-op (fakes).</summary>
-    void SetGpuLayerSurfaceProvider(Func<int, int, IVideoLayerSurface>? provider) { }
+    /// render API a superficies D3D compartidas (opacidad real) en vez de a
+    /// HWNDs. El provider recibe (salida, pista, cueId) y devuelve una
+    /// superficie POR CUE: dos cues pueden convivir en la misma pista
+    /// durante un crossfade. null = modo clásico. Default: no-op (fakes).</summary>
+    void SetGpuLayerSurfaceProvider(Func<int, int, int, IVideoLayerSurface>? provider) { }
 
     void Cleanup();
 }

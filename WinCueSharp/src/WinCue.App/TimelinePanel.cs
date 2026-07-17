@@ -141,10 +141,11 @@ public sealed class TimelinePanel : Border
             Margin = new Thickness(0, 0, 10, 0),
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
             FontSize = 11,
-            ToolTip = "ACTIVADO: dos AUDIOS consecutivos de la MISMA capa que se " +
-                      "solapan se cruzan (fade out/in = solape) y al separarlos " +
-                      "se quita. Las capas distintas son independientes: nunca " +
-                      "se funden solas — usa clic derecho → \"Crossfade con…\" " +
+            ToolTip = "ACTIVADO: dos medias consecutivas de la MISMA capa que se " +
+                      "solapan se cruzan (fade out/in = solape; el vídeo funde " +
+                      "por opacidad con el compositor GPU) y al separarlas se " +
+                      "quita. Las capas distintas son independientes: nunca se " +
+                      "funden solas — usa clic derecho → \"Crossfade con…\" " +
                       "para linkarlas.\n" +
                       "DESACTIVADO: el timeline no toca ningún fade (todo a mano " +
                       "en el inspector).",
@@ -1386,12 +1387,13 @@ public sealed class TimelineCanvas : FrameworkElement
 
     /// <summary>Reconciliación de fades POR CAPA tras un arrastre (🔀 ON):
     /// entre cada par de medias CONSECUTIVAS DE LA MISMA CAPA, el solape se
-    /// convierte en crossfade (solo AUDIO–AUDIO: dos vídeos en la misma capa
-    /// se sustituyen a corte por diseño del motor) y al separarse el
-    /// crossfade se retira. Las CAPAS DISTINTAS son independientes: nunca se
-    /// escriben fades entre ellas — para fundir entre capas está el menú
-    /// contextual "Crossfade con…". Los fades de bloques sin vecino en su
-    /// capa (primero/último/aislados) NO se tocan (manuales del usuario).</summary>
+    /// convierte en crossfade (audio mezcla; vídeo funde por opacidad — el
+    /// compositor da a cada cue su superficie y el motor mantiene vivo al
+    /// saliente durante el fundido) y al separarse el crossfade se retira.
+    /// Las CAPAS DISTINTAS son independientes: nunca se escriben fades entre
+    /// ellas — para fundir entre capas está el menú contextual "Crossfade
+    /// con…". Los fades de bloques sin vecino en su capa (primero/último/
+    /// aislados) NO se tocan (manuales del usuario).</summary>
     private void ReconcileSameLayerFades()
     {
         if (!AutoCrossfade || _model is null)
@@ -1408,9 +1410,7 @@ public sealed class TimelineCanvas : FrameworkElement
                 var a = ordered[i];
                 var b = ordered[i + 1];
                 double overlap = a.Start + a.Dur - b.Start;
-                bool bothAudio = a.Cue.Type == CueType.Audio
-                              && b.Cue.Type == CueType.Audio;
-                double xf = bothAudio && overlap > 0.05
+                double xf = overlap > 0.05
                     ? Math.Round(Math.Min(overlap,
                         Math.Min(a.Dur, Math.Max(0.1, b.Dur))), 1)
                     : 0.0;

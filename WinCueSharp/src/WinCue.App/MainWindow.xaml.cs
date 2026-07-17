@@ -536,19 +536,22 @@ public partial class MainWindow : Window, IShowView
             _videoOutputs[screen]?.SetActiveLayers(activeLayers);
     }
 
-    public void SetVideoLayerOpacity(int screen, int layer, double opacity, double fadeSeconds = 0.0)
+    public void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0)
     {
-        if (screen >= 0 && screen < _videoOutputs.Length)
-            _videoOutputs[screen]?.SetLayerOpacity(layer, opacity, fadeSeconds);
+        // El cue puede verse en varias salidas (modo canvas): cada ventana
+        // funde su superficie si la tiene; sin ella, no-op.
+        foreach (var w in _videoOutputs)
+            w?.SetCueOpacity(cueId, opacity, fadeSeconds);
     }
 
-    /// <summary>Superficie del compositor GPU (la usa App para el provider).</summary>
-    public CompositorLayerControl GetCompositorSurface(int screen, int layer)
+    /// <summary>Superficie del compositor GPU POR CUE (la usa App para el
+    /// provider del motor).</summary>
+    public CompositorLayerControl GetCompositorSurface(int screen, int layer, int cueId)
     {
         screen = Math.Clamp(screen, 0, _videoOutputs.Length - 1);
         bool firstOpen = _videoOutputs[screen] is null || !_videoOutputs[screen]!.IsVisible;
         EnsureVideoOutputWindow(screen);
-        var surface = _videoOutputs[screen]!.GetCompositorSurface(layer);
+        var surface = _videoOutputs[screen]!.GetCompositorSurface(layer, cueId);
         if (firstOpen)
             PlaceVideoOutput(screen);
         return surface;

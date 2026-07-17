@@ -734,6 +734,11 @@ public class MainController
 
             case CueType.Video:
                 ModelState(idx, CueState.Playing);
+                // Fade de entrada pendiente (con offset, lo que quede): además
+                // de la opacidad, es la señal de CROSSFADE en la misma pista
+                // (el motor mantiene vivo al saliente durante el fundido)
+                double targetOpacity = cue.Opacity / 100.0;
+                double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
                 _video.Play(cue.Id, cue.FilePath, new VideoPlayParams(
                     Volume: cue.Volume, Loop: cue.Loop, Scale: cue.Scale,
                     TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
@@ -742,13 +747,9 @@ public class MainController
                     Geometry: GeoFor(cue),
                     Layer: VideoLayerOf(cue),
                     Screen: ScreenOf(cue),
-                    CanvasOutputs: CanvasMode ? CanvasViews() : null));
+                    CanvasOutputs: CanvasMode ? CanvasViews() : null,
+                    HandoverSeconds: fadeLeft / RateOf(cue)));
                 RefreshVideoTally();
-                // Opacidad de la pista: con fade_in entra fundiendo desde 0
-                // (dos vídeos solapados con fades = crossfade real). Con
-                // offset, el fade que quede por cumplir.
-                double targetOpacity = cue.Opacity / 100.0;
-                double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
                 if (fadeLeft > 0.0)
                 {
                     SetCueLayerOpacity(cue, 0.0);
@@ -901,17 +902,11 @@ public class MainController
         return new CanvasView(screen, 0, 0, cw, ch);
     }
 
-    /// <summary>Opacidad de la pista del cue en TODAS sus salidas: en canvas,
-    /// todas las habilitadas (el vídeo vive en todas); en clásico, la suya.</summary>
-    private void SetCueLayerOpacity(Cue cue, double opacity, double fadeSeconds = 0.0)
-    {
-        int layer = VideoLayerOf(cue);
-        if (CanvasMode)
-            foreach (var v in CanvasViews())
-                _view.SetVideoLayerOpacity(v.Screen, layer, opacity, fadeSeconds);
-        else
-            _view.SetVideoLayerOpacity(ScreenOf(cue), layer, opacity, fadeSeconds);
-    }
+    /// <summary>Opacidad del vídeo del cue (compositor GPU): cada cue tiene su
+    /// superficie propia en todas las salidas donde se ve — la vista la
+    /// localiza por id, valga clásico multi-salida o modo canvas.</summary>
+    private void SetCueLayerOpacity(Cue cue, double opacity, double fadeSeconds = 0.0) =>
+        _view.SetVideoCueOpacity(cue.Id, opacity, fadeSeconds);
 
     /// <summary>Al disparar un media, corta otros cues según el modo de GO.
     /// El vídeo es exclusivo POR PISTA: misma pista → sustituye; pistas
@@ -926,8 +921,12 @@ public class MainController
                 continue;
             // En modo canvas la pista es GLOBAL (el vídeo vive en todas las
             // salidas); en clásico, exclusiva por (salida, pista).
+            // CROSSFADE: si el entrante trae fade_in, el saliente de su misma
+            // pista NO se corta aquí — se funde y lo retira su propio fin
+            // (el motor mantiene ambos vivos durante el fundido).
             bool sameVideoLayer = cue.Type == CueType.Video
                 && other.Kind == CueType.Video
+                && cue.FadeIn <= 0.0
                 && _model.GetById(otherId) is Cue oc
                 && VideoLayerOf(oc) == VideoLayerOf(cue)
                 && (CanvasMode || ScreenOf(oc) == ScreenOf(cue));
