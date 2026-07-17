@@ -1155,11 +1155,22 @@ public class MainController
         }
         bool stopAfter = cue.FadeStopOnDone && cue.Volume <= 0.0001;
         if (_audio.IsPlaying(target.Id))
+        {
             _audio.Fade(target.Id, cue.Volume, cue.Duration, stopAfter);
+        }
         else if (_video.IsPlaying(target.Id))
+        {
             _video.FadeVolume(target.Id, cue.Volume, cue.Duration, stopAfter);
+            // La rampa que dibuja el timeline es también VISUAL: la opacidad
+            // acompaña al volumen (proporcional a la opacidad base del cue)
+            SetCueLayerOpacity(target,
+                Math.Clamp(cue.Volume, 0.0, 1.0) * target.Opacity / 100.0,
+                Math.Max(0.0, cue.Duration));
+        }
         else
+        {
             _view.FlashStatus($"FADE → cue {target.DisplayNumber} no está sonando");
+        }
     }
 
     private void ExecStart(Cue cue)

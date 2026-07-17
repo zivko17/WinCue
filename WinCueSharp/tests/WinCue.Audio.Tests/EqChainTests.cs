@@ -52,6 +52,51 @@ public class EqChainTests
     }
 
     [Fact]
+    public void GrMeter_MideLaReduccionDelCompresor()
+    {
+        // Seno a 0 dBFS con umbral −20 dB y ratio 4:1 → sobre-umbral 20 dB,
+        // reducción esperada 20 · (1 − 1/4) = 15 dB (ataque rapidísimo para
+        // que el envolvente converja dentro del buffer).
+        var chain = new EqChain(48000, 1);
+        chain.Configure(new AudioEqParams(Comp: new AudioCompParams(
+            Enabled: true, ThresholdDb: -20.0, Ratio: 4.0,
+            AttackMs: 0.1, ReleaseMs: 500.0, MakeupDb: 0.0)));
+        var buf = Sine(1000, 48000, 9600);
+
+        chain.Process(buf, 0, buf.Length);
+
+        Assert.InRange(chain.CurrentGainReductionDb, 13.0f, 16.5f);
+    }
+
+    [Fact]
+    public void GrMeter_CeroBajoElUmbral()
+    {
+        var chain = new EqChain(48000, 1);
+        chain.Configure(new AudioEqParams(Comp: new AudioCompParams(
+            Enabled: true, ThresholdDb: -20.0, Ratio: 4.0,
+            AttackMs: 0.1, ReleaseMs: 500.0)));
+        var buf = Sine(1000, 48000, 9600);
+        for (int i = 0; i < buf.Length; i++)
+            buf[i] *= 0.01f;   // −40 dBFS: muy por debajo del umbral
+
+        chain.Process(buf, 0, buf.Length);
+
+        Assert.Equal(0f, chain.CurrentGainReductionDb);
+    }
+
+    [Fact]
+    public void GrMeter_CeroSinCompresor()
+    {
+        var chain = new EqChain(48000, 1);
+        chain.Configure(new AudioEqParams(GainDb: 3.0));   // sin comp
+        var buf = Sine(1000, 48000, 4800);
+
+        chain.Process(buf, 0, buf.Length);
+
+        Assert.Equal(0f, chain.CurrentGainReductionDb);
+    }
+
+    [Fact]
     public void Hpf_EliminaLaContinua()
     {
         var chain = new EqChain(48000, 1);

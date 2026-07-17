@@ -589,12 +589,14 @@ public sealed class TimelineCanvas : FrameworkElement
             {
                 case CueType.Start:
                 {
+                    // El disparo respeta el PRE-WAIT del objetivo (semántica
+                    // QLab): el fantasma se dibuja donde SONARÁ de verdad
                     double dur = EffectiveDuration(target);
                     int raw = Math.Clamp(target.TimelineLayer, -1, MaxLayers - 1);
                     _blocks.Add(new Block
                     {
                         Cue = target,
-                        Start = at,
+                        Start = at + DisplayPreWait(target),
                         Dur = dur,
                         Layer = raw,
                         ManualLayer = raw >= 0,
