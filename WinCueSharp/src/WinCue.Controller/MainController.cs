@@ -56,6 +56,8 @@ public class MainController
         public double Offset;                // arranque con seek (play-desde-cursor)
         public bool SuppressChain;           // la proyección ya trae la cadena resuelta
         public double? PreWaitOverride;      // espera programada del timeline (≠ pre_wait)
+        public bool SuppressVisualFadeOut;   // crossfade misma pista: el entrante
+                                             // lo cubre fundiendo — no oscurecer
     }
 
     /// <summary>Elemento de "reproducir desde el cursor del timeline":
@@ -752,6 +754,21 @@ public class MainController
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
                 {
+                    // CROSSFADE en la misma pista: el saliente queda DEBAJO
+                    // del entrante — que NO funda su opacidad (el cruce se
+                    // hundiría a negro); su volumen sí funde y su fin lo retira.
+                    foreach (var (ocid, orun) in _running)
+                    {
+                        if (ocid == cue.Id || orun.Kind != CueType.Video)
+                            continue;
+                        if (_model.GetById(ocid) is not Cue oc
+                            || VideoLayerOf(oc) != VideoLayerOf(cue))
+                            continue;
+                        if (!CanvasMode && ScreenOf(oc) != ScreenOf(cue))
+                            continue;
+                        orun.SuppressVisualFadeOut = true;
+                        _view.SetVideoCueOpacity(ocid, oc.Opacity / 100.0);
+                    }
                     SetCueLayerOpacity(cue, 0.0);
                     SetCueLayerOpacity(cue, targetOpacity, fadeLeft);
                 }
@@ -764,7 +781,7 @@ public class MainController
                 {
                     Schedule(run,
                         (int)(Math.Max(0.0, run.Duration - offset) / RateOf(cue) * 1000),
-                        () => DurationElapsed(cue.Id));
+                        () => VideoEndCheck(cue.Id, 0));
                     // El fade_out del VÍDEO vive DENTRO de sus últimos
                     // fade_out segundos (como lo dibuja el timeline y como
                     // hace el audio), no a partir del final del bloque.
@@ -772,10 +789,8 @@ public class MainController
                     if (fo > 0.01)
                     {
                         double startIn = Math.Max(0.0, run.Duration - offset - fo);
-                        double wallFade = Math.Min(fo, run.Duration - offset)
-                            / RateOf(cue);
                         Schedule(run, (int)(startIn / RateOf(cue) * 1000),
-                            () => BeginVideoFadeOut(cue.Id, wallFade));
+                            () => BeginVideoFadeOut(cue.Id, fo, 0));
                     }
                 }
                 break;
@@ -1039,16 +1054,67 @@ public class MainController
     }
 
     /// <summary>Arranca el fundido de SALIDA de un vídeo (volumen + opacidad)
-    /// dentro de sus últimos fade_out segundos. No detiene el cue: el timer
-    /// de fin (DurationElapsed) llega justo cuando el fundido acaba.</summary>
-    private void BeginVideoFadeOut(int cueId, double wallSeconds)
+    /// dentro de sus últimos fade_out segundos de CONTENIDO. El reloj de
+    /// pared y la posición real del vídeo derivan (latencia de arranque de
+    /// mpv ~100-300 ms): con fades cortos ese desfase se come el fundido,
+    /// así que el timer se CORRIGE contra la posición real y se reprograma
+    /// si llegó pronto. No detiene el cue: el fin llega con el fundido hecho.</summary>
+    private void BeginVideoFadeOut(int cueId, double contentFadeSeconds, int attempt)
     {
         if (!_running.TryGetValue(cueId, out var run) || run.ManualStop)
             return;
         if (!_video.IsPlaying(cueId) || _model.GetById(cueId) is not Cue cue)
             return;
-        _video.FadeVolume(cueId, 0.0, wallSeconds, stopAfter: false);
-        SetCueLayerOpacity(cue, 0.0, wallSeconds);
+
+        // Base sin telemetría del motor: el fade no puede durar más de lo
+        // que queda de bloque desde el punto de arranque (offset)
+        double wall = Math.Min(contentFadeSeconds,
+            Math.Max(0.05, run.Duration - run.Offset)) / RateOf(cue);
+        double eng = _video.GetElapsed(cueId);
+        if (eng > 0.0)
+        {
+            double pos = eng + run.Offset;                       // contenido real
+            double target = run.Duration - contentFadeSeconds;   // inicio del fade
+            if (pos + 0.03 < target && attempt < 60)
+            {
+                // Llegamos pronto (deriva): reprogramar lo que falta de verdad
+                Schedule(run, Math.Max(16, (int)((target - pos) / RateOf(cue) * 1000)),
+                    () => BeginVideoFadeOut(cueId, contentFadeSeconds, attempt + 1));
+                return;
+            }
+            wall = Math.Max(0.05, (run.Duration - pos) / RateOf(cue));
+        }
+
+        _video.FadeVolume(cueId, 0.0, wall, stopAfter: false);
+        // Crossfade en la MISMA pista: el entrante (encima) ya funde de 0→1
+        // sobre este — oscurecer también al saliente hundiría el cruce a
+        // negro. Se mantiene opaco y lo retira su fin (el volumen SÍ funde).
+        if (!run.SuppressVisualFadeOut)
+            SetCueLayerOpacity(cue, 0.0, wall);
+    }
+
+    /// <summary>Fin de vídeo corregido por deriva: si la posición real aún no
+    /// llegó al final (arrancó con latencia), se reprograma lo que falta —
+    /// clave para que los fades CORTOS no se corten a medias.</summary>
+    private void VideoEndCheck(int cueId, int attempt)
+    {
+        if (_running.TryGetValue(cueId, out var run) && !run.ManualStop
+            && _video.IsPlaying(cueId))
+        {
+            double eng = _video.GetElapsed(cueId);
+            if (eng > 0.0 && attempt < 60
+                && _model.GetById(cueId) is Cue cue)
+            {
+                double remaining = run.Duration - (eng + run.Offset);
+                if (remaining > 0.08)
+                {
+                    Schedule(run, Math.Max(16, (int)(remaining / RateOf(cue) * 1000)),
+                        () => VideoEndCheck(cueId, attempt + 1));
+                    return;
+                }
+            }
+        }
+        DurationElapsed(cueId);
     }
 
     /// <summary>La duración fijada expiró antes del fin natural: parar. El

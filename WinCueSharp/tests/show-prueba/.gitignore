@@ -1,0 +1,4 @@
+# Medias sintéticas: se regeneran con tools\generar-show-prueba.ps1
+*.mp4
+*.wav
+*.png
