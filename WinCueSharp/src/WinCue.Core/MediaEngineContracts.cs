@@ -67,7 +67,7 @@ public sealed record VideoGeometry(
 public sealed record CanvasView(int Screen, int X, int Y, int W, int H);
 
 /// <summary>Parámetros de reproducción de un cue de vídeo.
-/// Layer: pista de prioridad de la salida (0 = arriba del todo … 4 = fondo;
+/// Layer: pista de prioridad de la salida (0 = arriba del todo … 7 = fondo;
 /// 2 = por defecto). Vídeos en pistas distintas conviven — el de la pista
 /// superior tapa al de abajo; en la misma pista se sustituyen.
 /// Screen: salida de vídeo de destino (0 = principal … 3); cada salida tiene

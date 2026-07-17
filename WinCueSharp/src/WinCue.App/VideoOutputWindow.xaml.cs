@@ -39,14 +39,14 @@ public partial class VideoOutputWindow : Window
 
     private bool _shutdown;
 
-    // MODO CLÁSICO: 5 superficies HWND apiladas (una por pista): el índice 0
+    // MODO CLÁSICO: 8 superficies HWND apiladas (una por pista): el índice 0
     // es la de ARRIBA. mpv renderiza sobre el HWND del panel de su pista;
     // las vacías se ocultan (un panel WinForms pinta su fondo negro).
-    private readonly WF.Panel[] _layers = new WF.Panel[5];
+    private readonly WF.Panel[] _layers = new WF.Panel[8];
     private readonly System.Windows.Forms.Integration.WindowsFormsHost _hwndHost;
 
-    // MODO COMPOSITOR GPU: 5 D3DImage apiladas con opacidad real por capa
-    private readonly CompositorLayerControl[] _gpuLayers = new CompositorLayerControl[5];
+    // MODO COMPOSITOR GPU: 8 D3DImage apiladas con opacidad real por capa
+    private readonly CompositorLayerControl[] _gpuLayers = new CompositorLayerControl[8];
     private readonly Grid _gpuHost;
 
     // Overlays de operación: patrón de test, identificación y blackout.

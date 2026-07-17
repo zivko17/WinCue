@@ -806,7 +806,7 @@ public class MainController
     /// (0 = arriba tapa a las demás); sin fijar (-1) → pista 2 por defecto,
     /// que preserva el comportamiento clásico "un vídeo sustituye al otro".</summary>
     private static int VideoLayerOf(Cue c) =>
-        c.TimelineLayer < 0 ? 2 : Math.Min(c.TimelineLayer, 4);
+        c.TimelineLayer < 0 ? 2 : Math.Min(c.TimelineLayer, 7);
 
     /// <summary>Salida de vídeo del cue (0 = Salida 1 … 3 = Salida 4).</summary>
     private static int ScreenOf(Cue c) => Math.Clamp(c.VideoOutput, 0, 3);

@@ -459,7 +459,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         }
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
-        int layer = Math.Clamp(p.Layer, 0, 4);
+        int layer = Math.Clamp(p.Layer, 0, 7);
         bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
         // MODO CANVAS: solo con compositor GPU (varias vistas de un render).
         // Sin compositor, el cue cae al modo clásico sobre su salida Screen.

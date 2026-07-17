@@ -10,7 +10,7 @@
 //   · los grupos se dibujan como un RECUADRO que abraza sus bloques, con
 //     nombre y modo; arrastrarlo mueve el grupo entero (pre_wait)
 //   · capas: -1 = automática (se apila sola al solaparse); arrastrar un
-//     bloque en vertical lo fija a mano en esa pista (timeline_layer 0-4)
+//     bloque en vertical lo fija a mano en esa pista (timeline_layer 0-7)
 // Interacción: arrastre horizontal = pre_wait (snap 0,1 s; el resto del show
 // se desplaza en vivo); arrastrar más allá del vecino = reordenar la lista;
 // clic = seleccionar en la tabla (y viceversa); Ctrl+rueda = zoom. Cursor
@@ -161,7 +161,9 @@ public sealed class TimelinePanel : Border
 public sealed class TimelineCanvas : FrameworkElement
 {
     private const double RulerH = 20;
-    private const int MaxLayers = 5;
+    // 3 pistas por defecto (UI ligera); crecen solas al usarlas, techo 8.
+    // El techo va a juego con las 8 superficies de la ventana de salida.
+    private const int MaxLayers = 8;
     private const int MinLayers = 3;
     private const double SnapSeconds = 0.1;
     private const double InstantFootprint = 0.3;   // huella temporal de un cue instantáneo

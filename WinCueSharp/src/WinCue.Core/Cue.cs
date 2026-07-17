@@ -85,7 +85,8 @@ public class Cue
     [JsonPropertyName("collapsed")]  public bool      Collapsed { get; set; }
 
     /// <summary>Capa (fila) del cue en la línea de tiempo: -1 = automática
-    /// (se apila sola al solaparse), 0–4 = colocada a mano por el usuario.
+    /// (se apila sola al solaparse), 0–7 = colocada a mano por el usuario.
+    /// El timeline enseña 3 pistas y crece según se usan (techo: 8).
     /// Campo nuevo de la versión C# — Python lo ignora al cargar.</summary>
     [JsonPropertyName("timeline_layer")] public int TimelineLayer { get; set; } = -1;
 
@@ -176,7 +177,7 @@ public class Cue
         FadeIn   = Math.Max(0.0, FadeIn);
         FadeOut  = Math.Max(0.0, FadeOut);
         Volume   = Math.Clamp(Volume, 0.0, 1.0);
-        TimelineLayer = Math.Clamp(TimelineLayer, -1, 4);
+        TimelineLayer = Math.Clamp(TimelineLayer, -1, 7);
         VideoOutput = Math.Clamp(VideoOutput, 0, 3);
         GainDb  = Math.Clamp(GainDb, -24.0, 12.0);
         HpfFreq = Math.Clamp(HpfFreq, 20.0, 2000.0);

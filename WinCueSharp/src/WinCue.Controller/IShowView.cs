@@ -55,7 +55,7 @@ public interface IShowView
     /// 0 si aún no existe.</summary>
     nint GetVideoOutputHandle();
 
-    /// <summary>HWND de la superficie de la PISTA dada (0..4) dentro de la
+    /// <summary>HWND de la superficie de la PISTA dada (0..7) dentro de la
     /// SALIDA dada (0..3). Por defecto cae a la superficie única (fakes).</summary>
     nint GetVideoOutputLayerHandle(int screen, int layer) => GetVideoOutputHandle();
 

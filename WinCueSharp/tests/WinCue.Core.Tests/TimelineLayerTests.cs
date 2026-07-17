@@ -35,8 +35,8 @@ public class TimelineLayerTests
     [InlineData(-5, -1)]
     [InlineData(-1, -1)]
     [InlineData(0, 0)]
-    [InlineData(4, 4)]
-    [InlineData(99, 4)]
+    [InlineData(7, 7)]
+    [InlineData(99, 7)]
     public void Normalize_ClampaCapaAlRango(int valor, int esperado)
     {
         var cue = new Cue { Id = 1, TimelineLayer = valor };
