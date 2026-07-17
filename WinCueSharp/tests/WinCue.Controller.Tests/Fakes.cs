@@ -172,7 +172,16 @@ public sealed class FakeVideoEngine : IVideoEngine
         Playing.Add(cueId);
     }
 
-    public void PreloadNext(int cueId, string filePath) { }
+    public void PreloadNext(int cueId, string filePath) => Preloaded.Add(cueId);
+
+    public readonly List<int> Preloaded = new();
+    public readonly List<(int CueId, VideoPlayParams P)> Prepared = new();
+    public readonly List<int> Discarded = new();
+
+    public void PrepareStandby(int cueId, string filePath, VideoPlayParams? p = null) =>
+        Prepared.Add((cueId, p ?? new VideoPlayParams()));
+
+    public void DiscardStandby(int cueId = -1) => Discarded.Add(cueId);
 
     public void Stop(int cueId)
     {
@@ -252,6 +261,14 @@ public sealed class FakeView : IShowView
     public nint GetVideoOutputHandle() => 0;
     public (double Width, double Height) SurfaceDimensions() => (1920.0, 1080.0);
     public void SetOutputContent(string? videoName) => LastOutputContent = videoName;
+
+    /// <summary>Simula ventanas de salida abiertas (precarga en pausa).</summary>
+    public readonly HashSet<int> VisibleOutputs = new();
+    public bool IsVideoOutputVisible(int screen) => VisibleOutputs.Contains(screen);
+
+    public readonly Dictionary<int, double> CueOpacities = new();
+    public void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0) =>
+        CueOpacities[cueId] = opacity;
 }
 
 // ---------------------------------------------------------------------------

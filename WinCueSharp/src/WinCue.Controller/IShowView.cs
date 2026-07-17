@@ -69,6 +69,11 @@ public interface IShowView
     /// cues de la misma pista). Default: no-op (fakes / modo clásico).</summary>
     void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0) { }
 
+    /// <summary>true si la ventana de esa salida ya está visible. La precarga
+    /// en pausa del standby solo se hace entonces (no debe ABRIR ventanas al
+    /// mover el playhead en modo EDIT). Default: false (fakes).</summary>
+    bool IsVideoOutputVisible(int screen) => false;
+
     /// <summary>Dimensiones del canvas de salida (para la geometría CUSTOM).</summary>
     (double Width, double Height) SurfaceDimensions();
 

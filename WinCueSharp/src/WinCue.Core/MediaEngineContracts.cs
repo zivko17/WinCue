@@ -165,6 +165,17 @@ public interface IVideoEngine
 
     void Play(int cueId, string filePath, VideoPlayParams? p = null);
     void PreloadNext(int cueId, string filePath);
+
+    /// <summary>GO INSTANTÁNEO: prepara el cue en STANDBY con el player ya
+    /// creado y PAUSADO en su primer frame (compositor GPU); el Play posterior
+    /// con los mismos parámetros solo quita la pausa (~0 ms de latencia).
+    /// Sin compositor cae a la verificación clásica. Default: PreloadNext.</summary>
+    void PrepareStandby(int cueId, string filePath, VideoPlayParams? p = null) =>
+        PreloadNext(cueId, filePath);
+
+    /// <summary>Descarta la precarga en pausa (cueId concreto, o -1 =
+    /// cualquiera): playhead movido, cue editado o show recargado.</summary>
+    void DiscardStandby(int cueId = -1) { }
     void Stop(int cueId);
     void StopAll();
     bool FadeVolume(int cueId, double target, double duration, bool stopAfter = false);

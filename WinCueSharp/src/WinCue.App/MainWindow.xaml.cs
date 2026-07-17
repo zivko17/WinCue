@@ -599,6 +599,10 @@ public partial class MainWindow : Window, IShowView
             _settings.Set($"video_output_geom{screen + 1}", geom);
     }
 
+    public bool IsVideoOutputVisible(int screen) =>
+        screen >= 0 && screen < _videoOutputs.Length
+        && _videoOutputs[screen] is { IsVisible: true };
+
     public (double Width, double Height) SurfaceDimensions() => SurfaceDimensions(0);
 
     public (double Width, double Height) SurfaceDimensions(int screen)

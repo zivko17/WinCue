@@ -77,6 +77,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     // Compositor GPU: renderer + superficie de la vista, por cue
     private Func<int, int, int, IVideoLayerSurface>? _gpuSurfaces;
     private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
+
+    /// <summary>GO INSTANTÁNEO: player del cue en STANDBY ya creado y PAUSADO
+    /// en su primer frame; el Play con parámetros equivalentes solo despausa.</summary>
+    private sealed record StandbyPrep(int CueId, string Path, VideoPlayParams Params,
+        MpvPlayer Player, MpvGpuRenderer Renderer, List<IVideoLayerSurface> Sinks);
+    private StandbyPrep? _standby;
     // Red de seguridad del crossfade en la misma pista: si el saliente no
     // tiene fin propio (loop), se termina al acabar el fundido
     private readonly Dictionary<int, System.Threading.Timer> _handoverTimers = new();
@@ -165,18 +171,39 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// Árbol de estados idéntico al Python:
     ///   PLAYING → no-op · LOADING → playWhenReady · LOADED+caché → directo ·
     ///   resto → re-verificación y play al terminar.</summary>
+    /// <summary>Clamps defensivos (idénticos en Play y PrepareStandby: la
+    /// equivalencia de parámetros del GO instantáneo depende de ello).</summary>
+    private static VideoPlayParams NormalizeParams(VideoPlayParams p) => p with
+    {
+        Volume = Math.Clamp(p.Volume, 0.0, 1.0),
+        Scale = Math.Max(1.0, p.Scale),
+        TrimStart = Math.Max(0.0, p.TrimStart),
+        TrimEnd = Math.Max(0.0, p.TrimEnd),
+        Rate = Math.Max(0.1, p.Rate),
+        PlayCount = Math.Max(1, p.PlayCount),
+    };
+
+    /// <summary>Igualdad de parámetros con CanvasOutputs por CONTENIDO (el
+    /// record compara la lista por referencia).</summary>
+    private static bool ParamsEquivalent(VideoPlayParams a, VideoPlayParams b)
+    {
+        if ((a with { CanvasOutputs = null }) != (b with { CanvasOutputs = null }))
+            return false;
+        var ca = a.CanvasOutputs;
+        var cb = b.CanvasOutputs;
+        if ((ca?.Count ?? 0) != (cb?.Count ?? 0))
+            return false;
+        if (ca is not null && cb is not null)
+            for (int i = 0; i < ca.Count; i++)
+                if (ca[i] != cb[i])
+                    return false;
+        return true;
+    }
+
     public void Play(int cueId, string filePath, VideoPlayParams? p = null)
     {
         p ??= new VideoPlayParams();
-        _playParams[cueId] = p with
-        {
-            Volume = Math.Clamp(p.Volume, 0.0, 1.0),
-            Scale = Math.Max(1.0, p.Scale),
-            TrimStart = Math.Max(0.0, p.TrimStart),
-            TrimEnd = Math.Max(0.0, p.TrimEnd),
-            Rate = Math.Max(0.1, p.Rate),
-            PlayCount = Math.Max(1, p.PlayCount),
-        };
+        _playParams[cueId] = NormalizeParams(p);
 
         if (!MpvAvailable) { EmitError(cueId, MpvNotFoundMsg); return; }
         if (string.IsNullOrEmpty(filePath))
@@ -381,6 +408,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// <summary>Termina todos los players y fades (al salir de la aplicación).</summary>
     public void Cleanup()
     {
+        DiscardStandby();
         foreach (int cueId in _fadeTimers.Keys.ToList())
             CancelFade(cueId);
         foreach (int cueId in _players.Keys.ToList())
@@ -472,6 +500,42 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // exclusividad usa la salida virtual -1 (global).
         int screen = canvas ? -1 : Math.Clamp(p.Screen, 0, 3);
 
+        // ── GO INSTANTÁNEO: promover el standby preparado (player en pausa
+        // sobre su primer frame) — solo hay que quitar la pausa ─────────
+        if (gpu && _standby is { } sb && sb.CueId == cueId && sb.Path == filePath
+            && ParamsEquivalent(sb.Params, p))
+        {
+            _standby = null;
+            TerminateSlotOccupants(cueId, screen, layer,
+                gpu && p.HandoverSeconds > 0.0, p.HandoverSeconds);
+            TerminatePlayer(cueId);   // instancia previa del mismo cue (retrigger)
+
+            _players[cueId] = sb.Player;
+            _playerSlots[cueId] = (screen, layer);
+            _renderers[cueId] = (sb.Renderer, sb.Sinks);
+            _volumes[cueId] = p.Volume;
+            long tGo = System.Diagnostics.Stopwatch.GetTimestamp();
+            try { sb.Player.SetProperty("pause", false); }
+            catch (Exception exc)
+            {
+                TerminatePlayer(cueId);
+                EmitError(cueId, $"GO instantáneo falló al despausar: {exc.Message}");
+                return;
+            }
+            SetState(cueId, MediaCueState.Playing);
+            Post(() =>
+            {
+                LatencyReport?.Invoke(cueId,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(tGo).TotalMilliseconds);
+                FrameReady?.Invoke(cueId);
+            });
+            return;
+        }
+        // Standby de este cue que NO se puede promover (parámetros/modo
+        // cambiaron): descartarlo y seguir por el camino normal
+        if (_standby?.CueId == cueId)
+            DiscardStandby(cueId);
+
         // ── Validación del HWND (modo clásico; el compositor no usa wid) ─
         nint hwnd = 0;
         if (_forcedVo is null && !gpu)
@@ -486,27 +550,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             }
         }
 
-        // ── Salida única POR (SALIDA, PISTA): terminar los players de la
-        // MISMA pista de la MISMA salida. Pistas distintas (o salidas
-        // distintas) conviven. El huérfano pasa a STOPPED (mejora sobre
-        // Python, que dejaba su estado en PLAYING y any_playing() mentía).
-        // EXCEPCIÓN — CROSSFADE en la misma pista (compositor GPU): con
-        // HandoverSeconds el saliente sigue vivo durante el fundido (su
-        // propio fin/fade_out lo retira; timer de seguridad por si no).
-        bool handover = gpu && p.HandoverSeconds > 0.0;
-        foreach (int otherId in _players.Keys.ToList())
-        {
-            if (otherId == cueId) continue;
-            if (_playerSlots.GetValueOrDefault(otherId, (0, 2)) != (screen, layer)) continue;
-            if (handover)
-            {
-                ScheduleHandoverKill(otherId, p.HandoverSeconds + 0.25);
-                continue;
-            }
-            CancelFade(otherId);
-            SetState(otherId, MediaCueState.Stopped);
-            TerminatePlayer(otherId);
-        }
+        TerminateSlotOccupants(cueId, screen, layer,
+            gpu && p.HandoverSeconds > 0.0, p.HandoverSeconds);
         TerminatePlayer(cueId);   // player anterior de este cue, si existía
 
         // ── Crear instancia MPV con cadena de fallback de vo ────────────
@@ -690,6 +735,157 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             }
         }
         catch (Exception) { /* geometría es best-effort */ }
+    }
+
+    /// <summary>Salida única POR (SALIDA, PISTA): termina los players de la
+    /// misma pista de la misma salida; pistas o salidas distintas conviven.
+    /// El huérfano pasa a STOPPED. EXCEPCIÓN — crossfade en la misma pista
+    /// (compositor): con handover el saliente sigue vivo durante el fundido
+    /// (su propio fin lo retira; timer de seguridad por si no).</summary>
+    private void TerminateSlotOccupants(int cueId, int screen, int layer,
+        bool handover, double handoverSeconds)
+    {
+        foreach (int otherId in _players.Keys.ToList())
+        {
+            if (otherId == cueId) continue;
+            if (_playerSlots.GetValueOrDefault(otherId, (0, 2)) != (screen, layer)) continue;
+            if (handover)
+            {
+                ScheduleHandoverKill(otherId, handoverSeconds + 0.25);
+                continue;
+            }
+            CancelFade(otherId);
+            SetState(otherId, MediaCueState.Stopped);
+            TerminatePlayer(otherId);
+        }
+    }
+
+    // ------------------------------------------------------------------
+    // GO instantáneo: precarga en PAUSA del cue en standby (compositor)
+    // ------------------------------------------------------------------
+
+    /// <summary>Prepara el cue en standby con el player YA creado, cargado y
+    /// pausado en su primer frame (solo compositor GPU; sin él cae a la
+    /// verificación clásica). El Play posterior con parámetros equivalentes
+    /// solo quita la pausa. Idempotente si ya está preparado igual.</summary>
+    public void PrepareStandby(int cueId, string filePath, VideoPlayParams? p = null)
+    {
+        if (!MpvAvailable || string.IsNullOrEmpty(filePath))
+            return;
+        var np = NormalizeParams(p ?? new VideoPlayParams());
+        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
+        if (!gpu || _players.ContainsKey(cueId))
+        {
+            Load(cueId, filePath);   // clásico o ya sonando: solo verificación
+            return;
+        }
+        if (_standby is { } sb && sb.CueId == cueId && sb.Path == filePath
+            && ParamsEquivalent(sb.Params, np))
+            return;
+
+        DiscardStandby();
+        try
+        {
+            _standby = BuildStandby(cueId, filePath, np);
+            _files[cueId] = filePath;   // caché: un GO no-promovible no re-verifica
+            if (GetState(cueId) is MediaCueState.Idle or MediaCueState.Stopped)
+                SetState(cueId, MediaCueState.Loaded);
+        }
+        catch (Exception exc)
+        {
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Precarga en pausa falló ({exc.Message}); el GO usará el camino normal.");
+            Load(cueId, filePath);
+        }
+    }
+
+    private StandbyPrep BuildStandby(int cueId, string filePath, VideoPlayParams p)
+    {
+        int layer = Math.Clamp(p.Layer, 0, 7);
+        bool canvas = p.CanvasOutputs is { Count: > 0 };
+        bool isImage = ImageFormats.Contains(Path.GetExtension(filePath));
+
+        var options = new Dictionary<string, string>
+        {
+            ["vo"] = "libmpv",
+            ["hwdec"] = "auto",
+            ["keep-open"] = "yes",
+            ["hr-seek"] = "yes",
+            ["keepaspect"] = "yes",
+            ["osc"] = "no",
+            ["input-default-bindings"] = "no",
+            ["input-vo-keyboard"] = "no",
+            ["pause"] = "yes",   // ← cargado y congelado en su primer frame
+        };
+        if (_nullAudio) options["ao"] = "null";
+        if (p.Loop) options["loop-file"] = "inf";
+        else if (p.PlayCount > 1) options["loop-file"] = (p.PlayCount - 1).ToString();
+        if (p.TrimStart > 0.0) options["start"] = p.TrimStart.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+        if (p.TrimEnd > 0.0) options["end"] = p.TrimEnd.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
+        if (isImage) options["image-display-duration"] = "inf";
+
+        var player = new MpvPlayer(options);
+        MpvGpuRenderer? renderer = null;
+        var sinks = new List<IVideoLayerSurface>();
+        try
+        {
+            var geo = p.Geometry ?? new VideoGeometry();
+            renderer = new MpvGpuRenderer(player, (int)geo.SurfW, (int)geo.SurfH,
+                canvas ? p.CanvasOutputs : null);
+            for (int i = 0; i < renderer.Views.Count; i++)
+            {
+                var v = renderer.Views[i];
+                int sinkScreen = canvas ? v.Screen : Math.Clamp(p.Screen, 0, 3);
+                var sink = _gpuSurfaces!(sinkScreen, layer, cueId);
+                sink.SetSurface(renderer.ViewSurface(i), v.W, v.H);
+                renderer.FrameRendered += sink.InvalidateFrame;
+                sinks.Add(sink);
+            }
+
+            player.EndFile += () => Post(() =>
+            {
+                if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
+                {
+                    SetState(cueId, MediaCueState.Stopped);
+                    TerminatePlayer(cueId);
+                }
+            });
+
+            try
+            {
+                player.SetProperty("volume",
+                    Math.Clamp(p.Volume * 100.0, 0.0, 100.0) * _master);
+                if (Math.Abs(p.Rate - 1.0) > 0.001)
+                    player.SetProperty("speed", p.Rate);
+                player.SetProperty("audio-pitch-correction", p.PreservePitch);
+            }
+            catch (Exception) { /* no críticas */ }
+            ApplyGeo(player, p.Geometry ?? new VideoGeometry(), BaseZoom(p));
+
+            player.Play(filePath);   // carga PAUSADO (pause=yes va en opciones)
+            return new StandbyPrep(cueId, filePath, p, player, renderer, sinks);
+        }
+        catch
+        {
+            renderer?.Dispose();
+            foreach (var s in sinks)
+                s.ClearSurface();
+            player.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Descarta la precarga en pausa (cueId concreto o -1 = la que
+    /// haya). Regla mpv: el render context muere ANTES que el core.</summary>
+    public void DiscardStandby(int cueId = -1)
+    {
+        if (_standby is not { } sb || (cueId >= 0 && sb.CueId != cueId))
+            return;
+        _standby = null;
+        sb.Renderer.Dispose();
+        foreach (var sink in sb.Sinks)
+            sink.ClearSurface();
+        sb.Player.Dispose();
     }
 
     /// <summary>Red de seguridad del crossfade: termina al saliente cuando el

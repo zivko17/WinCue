@@ -751,16 +751,7 @@ public class MainController
                 // (el motor mantiene vivo al saliente durante el fundido)
                 double targetOpacity = cue.Opacity / 100.0;
                 double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
-                _video.Play(cue.Id, cue.FilePath, new VideoPlayParams(
-                    Volume: cue.Volume, Loop: cue.Loop, Scale: cue.Scale,
-                    TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
-                    Rate: cue.Rate, PlayCount: cue.PlayCount,
-                    PreservePitch: cue.PreservePitch,
-                    Geometry: GeoFor(cue),
-                    Layer: VideoLayerOf(cue),
-                    Screen: ScreenOf(cue),
-                    CanvasOutputs: CanvasMode ? CanvasViews() : null,
-                    HandoverSeconds: fadeLeft / RateOf(cue)));
+                _video.Play(cue.Id, cue.FilePath, VideoParamsFor(cue, offset));
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
                 {
@@ -1488,13 +1479,17 @@ public class MainController
         ActiveIndexChanged?.Invoke(_playhead);
         _view.SetPlayhead(_playhead);
 
-        // Precargar el media del standby: el GO no paga la verificación
+        // Precargar el media del standby: el GO no paga la verificación (y
+        // con compositor + salida visible, el vídeo queda EN PAUSA listo)
         var next = _model.GetCue(_playhead);
-        if (next is { FilePath.Length: > 0 })
+        if (next is { Type: CueType.Video, FilePath.Length: > 0 })
         {
-            if (next.Type == CueType.Video)
-                _video.PreloadNext(next.Id, next.FilePath);
-            else if (next.Type == CueType.Audio)
+            PrepareVideoStandby(next);
+        }
+        else
+        {
+            _video.DiscardStandby();   // el standby ya no es un vídeo
+            if (next is { Type: CueType.Audio, FilePath.Length: > 0 })
                 _audio.Preload(next.Id, next.FilePath);
         }
     }
@@ -1595,6 +1590,41 @@ public class MainController
         var nxt = _model.GetCue(_playhead);
         if (nxt is { Type: CueType.Audio } && nxt.FilePath.Length > 0)
             _audio.Preload(nxt.Id, nxt.FilePath);
+    }
+
+    /// <summary>Parámetros de reproducción del vídeo de un cue. FACTORIZADO:
+    /// los usa el GO (StartAction) y la precarga en pausa del standby — el
+    /// GO instantáneo exige que ambos sean EQUIVALENTES.</summary>
+    private VideoPlayParams VideoParamsFor(Cue cue, double offset) => new(
+        Volume: cue.Volume, Loop: cue.Loop, Scale: cue.Scale,
+        TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
+        Rate: cue.Rate, PlayCount: cue.PlayCount,
+        PreservePitch: cue.PreservePitch,
+        Geometry: GeoFor(cue),
+        Layer: VideoLayerOf(cue),
+        Screen: ScreenOf(cue),
+        CanvasOutputs: CanvasMode ? CanvasViews() : null,
+        HandoverSeconds: Math.Max(0.0, cue.FadeIn - offset) / RateOf(cue));
+
+    /// <summary>Precarga del vídeo en STANDBY: con compositor y la salida YA
+    /// visible, deja el player creado y PAUSADO en su primer frame con su
+    /// superficie a opacidad 0 (el GO solo despausa → disparo instantáneo);
+    /// si la salida no está abierta (modo EDIT), verificación clásica — la
+    /// precarga nunca debe ABRIR ventanas sola.</summary>
+    private void PrepareVideoStandby(Cue cue)
+    {
+        bool visible = CanvasMode
+            ? _view.IsVideoOutputVisible(0)
+            : _view.IsVideoOutputVisible(ScreenOf(cue));
+        if (visible && !_running.ContainsKey(cue.Id))
+        {
+            _video.PrepareStandby(cue.Id, cue.FilePath, VideoParamsFor(cue, 0.0));
+            _view.SetVideoCueOpacity(cue.Id, 0.0);   // preparado ≠ en pantalla
+        }
+        else
+        {
+            _video.PreloadNext(cue.Id, cue.FilePath);
+        }
     }
 
     private VideoGeometry GeoFor(Cue cue)
@@ -2079,6 +2109,16 @@ public class MainController
 
         ApplyLiveEdits(cue, fields);
 
+        // El vídeo en STANDBY quedó precargado con los parámetros de antes de
+        // la edición: re-preparar (o degradar a verificación) con los nuevos
+        if (cue.Type == CueType.Video && row == _playhead
+            && !_running.ContainsKey(cue.Id))
+        {
+            _video.DiscardStandby(cue.Id);
+            if (cue.FilePath.Length > 0)
+                PrepareVideoStandby(cue);
+        }
+
         _view.RefreshRow(row);
         if (row == _playhead)
             _view.SetPlayhead(_playhead);
@@ -2229,6 +2269,7 @@ public class MainController
 
         PushUndo();   // deshacer la carga restaura el show anterior
         StopEverything(fade: 0.0);
+        _video.DiscardStandby();   // los ids del show anterior ya no valen
 
         // Rutas relativas → absolutas respecto a la carpeta del show
         string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";
