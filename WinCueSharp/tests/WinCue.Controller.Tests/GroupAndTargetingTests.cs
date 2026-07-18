@@ -225,4 +225,30 @@ public class GroupAndTargetingTests : ControllerTestBase
         Assert.False(Audio.IsPlaying(b.Id));
         Assert.True(Audio.StopAllCalls > 0);
     }
+
+    // ── Bordes de START (auditoría 03: ramas de error sin cubrir) ──────
+
+    [Fact]
+    public void StartCue_SinObjetivo_AvisaYNoDispara()
+    {
+        var start = AddCue(CueType.Start, "huerfano");   // TargetId null
+
+        Controller.TriggerCueId(start.Id);
+
+        Assert.Empty(Audio.Plays);
+        Assert.Contains(View.Statuses, s => s.Contains("START sin objetivo"));
+        Assert.Empty(Controller.RunningCueIds);          // el START terminó solo
+    }
+
+    [Fact]
+    public void StartCue_ObjetivoInexistente_AvisaYNoDispara()
+    {
+        var start = AddCue(CueType.Start, "roto",
+            setup: c => c.TargetId = 9_999);             // id que no existe
+
+        Controller.TriggerCueId(start.Id);
+
+        Assert.Empty(Audio.Plays);
+        Assert.Contains(View.Statuses, s => s.Contains("START: objetivo inexistente"));
+    }
 }

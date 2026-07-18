@@ -114,4 +114,47 @@ public class VideoFadeOutTests : ControllerTestBase
         Assert.Equal(a.Id, stop.CueId);
         Assert.Equal(2.0, stop.Fade);        // el motor la aplica sample-accurate
     }
+
+    // ── Corrección por deriva (auditoría 03: las ramas de reprogramación
+    //    contra la posición REAL del motor estaban sin cubrir) ──────────
+
+    [Fact]
+    public void FadeOut_ConDeriva_SeReprogramaContraLaPosicionReal()
+    {
+        // mpv arrancó con latencia: al vencer el timer (t=7 de pared) el motor
+        // solo va por el segundo 5 de contenido → el fade se REPROGRAMA para
+        // los 2 s de contenido que faltan, y al dispararse de verdad dura lo
+        // que queda de bloque según la posición real.
+        var v = AddCue(CueType.Video, "derivado", duration: 10.0,
+            setup: c => c.FadeOut = 3.0);
+
+        Controller.OnGoPressed();
+        Video.Elapsed[v.Id] = 5.0;           // posición real ≠ reloj de pared
+        Clock.Advance(7_000);
+        Assert.Empty(Video.Fades);           // llegó pronto: reprogramado
+
+        Video.Elapsed[v.Id] = 7.0;           // el motor ya alcanzó el punto
+        Clock.Advance(2_000);
+        var fade = Assert.Single(Video.Fades);
+        Assert.Equal(0.0, fade.Target);
+        Assert.Equal(3.0, fade.Duration, 2); // 10 − 7 = lo que queda de verdad
+    }
+
+    [Fact]
+    public void FinDeVideo_ConDeriva_NoCortaAntesDeTiempo()
+    {
+        // Sin corrección, el timer de fin (pared) cortaría el vídeo con
+        // contenido pendiente. VideoEndCheck consulta la posición real y
+        // reprograma lo que falta.
+        var v = AddCue(CueType.Video, "lento", duration: 5.0);
+
+        Controller.OnGoPressed();
+        Video.Elapsed[v.Id] = 4.0;           // al vencer: aún queda 1 s real
+        Clock.Advance(5_000);
+        Assert.True(Video.IsPlaying(v.Id));  // NO cortado
+
+        Video.Elapsed[v.Id] = 5.0;
+        Clock.Advance(1_000);
+        Assert.False(Video.IsPlaying(v.Id)); // ahora sí: fin de verdad
+    }
 }
