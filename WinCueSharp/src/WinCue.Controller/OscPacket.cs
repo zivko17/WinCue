@@ -158,6 +158,9 @@ public static class OscPacket
                 _ => 's',
             });
         PadString(tags.ToString());
+        // CA2014: el stackalloc va FUERA del bucle (dentro se acumulaba una
+        // asignación de pila por argumento → desbordamiento con args de sobra)
+        Span<byte> scratch = stackalloc byte[4];
         foreach (object? a in args)
         {
             switch (a)
@@ -165,14 +168,12 @@ public static class OscPacket
                 case int i: AddBE(i); break;
                 case long l: AddBE((int)l); break;
                 case float f:
-                    Span<byte> bf = stackalloc byte[4];
-                    BinaryPrimitives.WriteSingleBigEndian(bf, f);
-                    bytes.AddRange(bf.ToArray());
+                    BinaryPrimitives.WriteSingleBigEndian(scratch, f);
+                    bytes.AddRange(scratch.ToArray());
                     break;
                 case double d:
-                    Span<byte> bd = stackalloc byte[4];
-                    BinaryPrimitives.WriteSingleBigEndian(bd, (float)d);
-                    bytes.AddRange(bd.ToArray());
+                    BinaryPrimitives.WriteSingleBigEndian(scratch, (float)d);
+                    bytes.AddRange(scratch.ToArray());
                     break;
                 case bool: break;   // T/F van solo en los tags
                 default: PadString(a?.ToString() ?? ""); break;
