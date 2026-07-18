@@ -1,0 +1,18 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "WAIT", "number": "1", "name": "arranque (el standby nunca ve un vídeo)",
+      "duration": 0.5, "post_wait": 0.5,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "START", "number": "2", "name": "dispara el vídeo por id (sin standby)",
+      "target_id": 4, "post_wait": 0.5,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 3, "type": "WAIT", "number": "3", "name": "fin de vuelta",
+      "duration": 1.0,
+      "continue_mode": "NONE" },
+    { "id": 4, "type": "VIDEO", "number": "4", "name": "A por la ruta NORMAL del compositor",
+      "file_path": "../show-prueba/video-A-colores.mp4", "duration": 4.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

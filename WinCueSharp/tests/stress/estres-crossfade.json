@@ -1,0 +1,16 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "A con fade_out (saliente del crossfade)",
+      "file_path": "../show-prueba/video-A-colores.mp4", "duration": 4.0,
+      "timeline_layer": 2, "fade_out": 0.5, "post_wait": 3.5,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "B entra fundiendo (handover misma pista)",
+      "file_path": "../show-prueba/video-B-gris.mp4", "duration": 4.0,
+      "timeline_layer": 2, "fade_in": 0.5, "post_wait": 4.5,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 3, "type": "WAIT", "number": "3", "name": "respiro",
+      "duration": 1.0,
+      "continue_mode": "NONE" }
+  ]
+}
