@@ -67,14 +67,33 @@ function Take-GcDump([string]$name) {
     Write-Host "gcdump: $name.gcdump"
 }
 
+# ── Muestreador de VRAM (nivel 1 de la auditoría 04, automatizado):
+#    memoria de GPU dedicada del proceso vía contadores de Windows ─────────
+$gpuCsv = Join-Path $out "gpu.csv"
+"timestamp,vram_dedicada_mb,vram_compartida_mb" | Set-Content $gpuCsv
+function Sample-Gpu {
+    try {
+        $ded = (Get-Counter '\GPU Process Memory(*)\Dedicated Usage' -ErrorAction Stop).CounterSamples |
+            Where-Object { $_.InstanceName -match "pid_$($app.Id)_" } |
+            Measure-Object CookedValue -Sum
+        $sha = (Get-Counter '\GPU Process Memory(*)\Shared Usage' -ErrorAction Stop).CounterSamples |
+            Where-Object { $_.InstanceName -match "pid_$($app.Id)_" } |
+            Measure-Object CookedValue -Sum
+        "{0:yyyy-MM-dd HH:mm:ss},{1:0.0},{2:0.0}" -f (Get-Date),
+            ($ded.Sum / 1MB), ($sha.Sum / 1MB) | Add-Content $gpuCsv
+    } catch { }   # contadores de GPU no disponibles: se sigue sin VRAM
+}
+
 # ── Cronograma: dump inicial (t+60 s), horario, y final ─────────────────
 Start-Sleep -Seconds 60
 Take-GcDump "00-inicio"
+Sample-Gpu
 
 $deadline = if ($Hours -gt 0) { (Get-Date).AddHours($Hours) } else { [datetime]::MaxValue }
 $nextHourly = (Get-Date).AddHours(1)
 while (-not $app.HasExited -and (Get-Date) -lt $deadline) {
     Start-Sleep -Seconds 30
+    Sample-Gpu
     if ((Get-Date) -ge $nextHourly) {
         Take-GcDump ("{0:HH}h" -f (Get-Date))
         $nextHourly = $nextHourly.AddHours(1)
