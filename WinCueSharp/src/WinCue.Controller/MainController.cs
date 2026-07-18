@@ -78,6 +78,7 @@ public class MainController
     private readonly Random _random;
     private readonly ShowFileService _files;
     private readonly CueListEditor _listEditor;
+    private readonly RemoteRouter _remote;
 
     private int _playhead;
     private bool _paused;
@@ -163,6 +164,21 @@ public class MainController
                     EndCue(cueId, markStopped: false);
             },
             forgetGroupState: groupId => _rrState.Remove(groupId));
+
+        // Ruteo remoto extraído (paso 3): OSC/MIDI/MTC/wall-clock parsean y
+        // despachan hacia estas acciones — nunca mutan _running directamente.
+        _remote = new RemoteRouter(
+            model, settings, view,
+            log: Log,
+            go: OnGoPressed,
+            stopAll: OnStopPressed,
+            panic: OnPanic,
+            fadeAll: OnFadeAll,
+            pauseToggle: OnPauseToggle,
+            triggerCueId: TriggerCueId,
+            triggerAt: idx => Trigger(idx, advanceChain: false),
+            stopCue: cueId => EndCue(cueId, markStopped: true),
+            isRunning: _running.ContainsKey);
 
         SetPlayhead(0);
     }
@@ -404,169 +420,23 @@ public class MainController
     }
 
     // ==================================================================
-    // CONTROL REMOTO — OSC / MIDI IN (fase 6)
+    // CONTROL REMOTO — implementación en RemoteRouter (OSC/MIDI/MTC/reloj)
     // ==================================================================
 
-    /// <summary>Rutea un mensaje OSC entrante a la acción correspondiente.
-    /// Direcciones: /wincue/go /wincue/stop /wincue/panic /wincue/fadeall
-    /// /wincue/pause y /wincue/cue/{número}/go|stop (con alias sin prefijo:
-    /// /go /stop /panic /fadeall /pause). Un único argumento numérico 0 se
-    /// ignora (convención "release" de Companion/TouchOSC).</summary>
-    public void OnOscMessage(string address, IReadOnlyList<object?> args)
-    {
-        // Botón soltado (arg único == 0): no reaccionar
-        if (args.Count == 1 && args[0] is int i0 && i0 == 0) return;
-        if (args.Count == 1 && args[0] is float f0 && f0 == 0f) return;
+    /// <summary>Rutea un mensaje OSC entrante a la acción correspondiente.</summary>
+    public void OnOscMessage(string address, IReadOnlyList<object?> args) =>
+        _remote.OnOscMessage(address, args);
 
-        var parts = address.Trim().TrimEnd('/').ToLowerInvariant()
-            .Split('/', StringSplitOptions.RemoveEmptyEntries);
-        if (parts.Length == 0)
-            return;
-        if (parts[0] == "wincue")
-            parts = parts[1..];
-        if (parts.Length == 0)
-            return;
+    /// <summary>Mensaje MIDI entrante: notas globales de GO/STOP y triggers por cue.</summary>
+    public void OnMidiMessage(MidiTriggerType type, int channel, int data1, int data2) =>
+        _remote.OnMidiMessage(type, channel, data1, data2);
 
-        if (parts.Length == 1)
-        {
-            switch (parts[0])
-            {
-                case "go": Log($"OSC {address} → GO"); OnGoPressed(); break;
-                case "stop": Log($"OSC {address} → STOP ALL"); OnStopPressed(); break;
-                case "panic": Log($"OSC {address} → PANIC"); OnPanic(); break;
-                case "fadeall": Log($"OSC {address} → FADE ALL"); OnFadeAll(); break;
-                case "pause": Log($"OSC {address} → PAUSA"); OnPauseToggle(); break;
-            }
-            return;
-        }
-
-        // /cue/{número}[/go|/start|/stop]
-        if (parts[0] != "cue")
-            return;
-        string number = parts[1];
-        string verb = parts.Length >= 3 ? parts[2] : "go";
-        if (verb is "go" or "start")
-        {
-            TriggerByNumber(number, $"OSC {address}");
-        }
-        else if (verb == "stop" && FindByNumber(number) is Cue tgt
-                 && _running.ContainsKey(tgt.Id))
-        {
-            Log($"OSC {address} → STOP cue {tgt.DisplayNumber}");
-            EndCue(tgt.Id, markStopped: true);
-        }
-    }
-
-    /// <summary>Mensaje MIDI entrante: notas globales de GO/STOP (Settings →
-    /// Red) y triggers por cue (Triggers → MIDI del inspector).
-    /// data1 = nota/CC/programa; data2 = velocity/valor.</summary>
-    public void OnMidiMessage(MidiTriggerType type, int channel, int data1, int data2)
-    {
-        // Convención MIDI: NoteOn con velocity 0 equivale a NoteOff
-        if (type == MidiTriggerType.NoteOn && data2 == 0)
-            type = MidiTriggerType.NoteOff;
-
-        // Notas globales de transporte (cualquier canal)
-        if (type == MidiTriggerType.NoteOn)
-        {
-            if (data1 == _settings.Get("midi_go_note", 60))
-            {
-                Log($"MIDI nota {data1} → GO");
-                OnGoPressed();
-                return;
-            }
-            if (data1 == _settings.Get("midi_stop_note", 61))
-            {
-                Log($"MIDI nota {data1} → STOP ALL");
-                OnStopPressed();
-                return;
-            }
-        }
-
-        // Triggers por cue
-        for (int i = 0; i < _model.Count; i++)
-        {
-            var c = _model.Cues[i];
-            if (c.MidiEnabled && c.MidiType == type && c.MidiChannel == channel
-                && c.MidiNote == data1
-                && (c.MidiVelocity == -1 || c.MidiVelocity == data2))
-            {
-                Log($"MIDI {type} ch{channel} {data1}/{data2} → {c.DisplayNumber} · {c.Name}");
-                Trigger(i, advanceChain: false);
-            }
-        }
-    }
-
-    // ── Timecode (MTC) ─────────────────────────────────────────────────
-
-    private double _tcLastSeconds = -1;
-    private readonly HashSet<int> _tcFired = new();
-
-    /// <summary>Posición de timecode entrante (segundos desde 00:00:00:00).
-    /// Dispara los cues con Triggers → Timecode cuya marca se acaba de cruzar
-    /// (una vez por pasada; un salto atrás &gt; 0,5 s re-arma todo).</summary>
-    public void OnTimecode(double seconds)
-    {
-        if (seconds < _tcLastSeconds - 0.5)
-            _tcFired.Clear();   // rebobinado / nueva pasada
-        _tcLastSeconds = seconds;
-
-        for (int i = 0; i < _model.Count; i++)
-        {
-            var c = _model.Cues[i];
-            if (!c.TimecodeEnabled || !c.Armed || _tcFired.Contains(c.Id)
-                || _running.ContainsKey(c.Id))
-                continue;
-            if (ParseTimecode(c.TimecodeValue) is not double mark)
-                continue;
-            if (seconds >= mark && seconds - mark < 1.0)
-            {
-                _tcFired.Add(c.Id);
-                Log($"TIMECODE {c.TimecodeValue} → {c.DisplayNumber} · {c.Name}");
-                Trigger(i, advanceChain: false);
-            }
-        }
-    }
+    /// <summary>Posición de timecode entrante (segundos desde 00:00:00:00).</summary>
+    public void OnTimecode(double seconds) => _remote.OnTimecode(seconds);
 
     /// <summary>"HH:MM:SS:FF" (frames a fps dado), "HH:MM:SS.mmm" o "MM:SS".</summary>
-    public static double? ParseTimecode(string text, double fps = 30.0)
-    {
-        var parts = text.Trim().Split(':');
-        try
-        {
-            var inv = System.Globalization.CultureInfo.InvariantCulture;
-            return parts.Length switch
-            {
-                4 => int.Parse(parts[0]) * 3600.0 + int.Parse(parts[1]) * 60.0
-                     + int.Parse(parts[2]) + int.Parse(parts[3]) / Math.Max(1.0, fps),
-                3 => int.Parse(parts[0]) * 3600.0 + int.Parse(parts[1]) * 60.0
-                     + double.Parse(parts[2].Replace(',', '.'), inv),
-                2 => int.Parse(parts[0]) * 60.0
-                     + double.Parse(parts[1].Replace(',', '.'), inv),
-                _ => null,
-            };
-        }
-        catch (Exception exc) when (exc is FormatException or OverflowException)
-        {
-            return null;
-        }
-    }
-
-    private Cue? FindByNumber(string number) =>
-        _model.Cues.FirstOrDefault(c => c.DisplayNumber == number);
-
-    private void TriggerByNumber(string number, string source)
-    {
-        if (FindByNumber(number) is Cue cue)
-        {
-            Log($"{source} → GO cue {cue.DisplayNumber} · {cue.Name}");
-            TriggerCueId(cue.Id);
-        }
-        else
-        {
-            _view.FlashStatus($"{source}: no hay cue con número «{number}»");
-        }
-    }
+    public static double? ParseTimecode(string text, double fps = 30.0) =>
+        RemoteRouter.ParseTimecode(text, fps);
 
     // ==================================================================
     // NÚCLEO DE DISPARO
@@ -1389,39 +1259,17 @@ public class MainController
     // TICK — panel de activos + countdown (la UI lo llama cada ~100 ms)
     // ==================================================================
 
-    /// <summary>Reloj inyectable (los tests fijan la hora para el wall-clock).</summary>
-    public Func<DateTime> NowProvider { get; set; } = () => DateTime.Now;
-
-    private string _lastWallclockSecond = "";
-
-    /// <summary>Disparo por hora del día (Triggers → Wall-clock). Se evalúa una
-    /// vez por segundo desde el Tick de la UI.</summary>
-    private void CheckWallclock()
+    /// <summary>Reloj inyectable (los tests fijan la hora para el wall-clock;
+    /// vive en el RemoteRouter, que es quien evalúa los disparos por hora).</summary>
+    public Func<DateTime> NowProvider
     {
-        var now = NowProvider();
-        string hhmmss = now.ToString("HH:mm:ss");
-        if (hhmmss == _lastWallclockSecond)
-            return;
-        _lastWallclockSecond = hhmmss;
-
-        int dayBit = ((int)now.DayOfWeek + 6) % 7;   // lunes=0 … domingo=6
-        for (int i = 0; i < _model.Count; i++)
-        {
-            var c = _model.Cues[i];
-            if (c.WallclockEnabled && c.Armed &&
-                c.WallclockTime == hhmmss &&
-                ((c.WallclockDays >> dayBit) & 1) == 1 &&
-                !_running.ContainsKey(c.Id))
-            {
-                Log($"WALL-CLOCK {hhmmss} → {c.DisplayNumber} · {c.Name}");
-                Trigger(i, advanceChain: false);
-            }
-        }
+        get => _remote.NowProvider;
+        set => _remote.NowProvider = value;
     }
 
     public void Tick()
     {
-        CheckWallclock();
+        _remote.CheckWallclock();
 
         if (_running.Count == 0)
         {
