@@ -21,8 +21,13 @@ using WinCue.Video;
 
 namespace WinCue.App;
 
+// CA1001: control WPF — vive tanto como MainWindow; el mpv embebido se libera
+// deterministamente vía Shutdown() (llamado al cerrar la app) y el
+// WindowsFormsHost lo desmonta el árbol visual de WPF.
+#pragma warning disable CA1001
 public sealed class LiveMonitorControl : Border
 {
+#pragma warning restore CA1001
     private readonly WindowsFormsHost _host;
     private readonly System.Windows.Forms.Panel _panel;
     private readonly TextBlock _msg;

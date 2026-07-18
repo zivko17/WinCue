@@ -27,8 +27,13 @@ namespace WinCue.App;
 /// <summary>Patrón de test de una salida (alineado de proyectores).</summary>
 public enum TestPattern { None, Grid, Bars, Border }
 
+// CA1001: ventana WPF de vida completa de la app (se OCULTA en vez de cerrarse
+// porque mpv puede seguir apuntando a su HWND); el WindowsFormsHost lo
+// desmonta WPF en CloseForShutdown() al salir.
+#pragma warning disable CA1001
 public partial class VideoOutputWindow : Window
 {
+#pragma warning restore CA1001
     private const uint SWP_NOZORDER = 0x0004;
     private const uint SWP_FRAMECHANGED = 0x0020;
     private const uint SWP_SHOWWINDOW = 0x0040;

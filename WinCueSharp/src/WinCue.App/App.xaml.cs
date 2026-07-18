@@ -20,8 +20,12 @@ using WinCue.Video;
 
 namespace WinCue.App;
 
+// CA1001: Application no se "dispose-a" — los motores (_audio/_video/_remote)
+// se liberan deterministamente en OnExit, el punto de cierre de WPF.
+#pragma warning disable CA1001
 public partial class App : Application
 {
+#pragma warning restore CA1001
     /// <summary>true en arranque --smoke: sin diálogos modales (colgarían la
     /// verificación desatendida).</summary>
     public static bool SmokeMode { get; private set; }

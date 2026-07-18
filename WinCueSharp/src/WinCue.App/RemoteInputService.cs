@@ -86,19 +86,19 @@ public sealed class RemoteInputService : IDisposable
         }
 
         int port = _settings.Get("osc_listen_port", 8000);
-        UdpClient client;
         try
         {
-            client = new UdpClient(new IPEndPoint(IPAddress.Any, port));
+            // Asignar directo al campo: el dueño es este servicio y Dispose/
+            // Apply lo liberan (CA2000 no rastrea campos)
+            _osc = new UdpClient(new IPEndPoint(IPAddress.Any, port));
         }
         catch (SocketException exc)
         {
             Status?.Invoke($"OSC: no se pudo abrir el puerto {port} ({exc.SocketErrorCode})");
             return;
         }
-        _osc = client;
         Status?.Invoke($"OSC escuchando en el puerto {port}");
-        _ = ReceiveLoop(client);
+        _ = ReceiveLoop(_osc);
     }
 
     private async Task ReceiveLoop(UdpClient client)

@@ -21,8 +21,12 @@ using WinCue.Core;
 
 namespace WinCue.App;
 
+// CA1001: ventana WPF — el MidiIn del MIDI Learn (_learnInput) se libera
+// deterministamente en StopMidiLearn(), llamado desde OnClosed.
+#pragma warning disable CA1001
 public partial class SettingsWindow : Window
 {
+#pragma warning restore CA1001
     private readonly SettingsManager _sm;
 
     /// <summary>Invocado tras guardar, con el dict de cambios aplicados.</summary>
