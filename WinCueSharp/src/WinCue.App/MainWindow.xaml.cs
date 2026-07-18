@@ -601,6 +601,16 @@ public partial class MainWindow : Window, IShowView
         screen >= 0 && screen < _videoOutputs.Length
         && _videoOutputs[screen] is { IsVisible: true };
 
+    /// <summary>Abre (o trae) una salida de vídeo desde código — lo usa el
+    /// modo estrés desatendido, que necesita la salida activa sin operador.</summary>
+    public void ShowVideoOutput(int screen)
+    {
+        screen = Math.Clamp(screen, 0, _videoOutputs.Length - 1);
+        EnsureVideoOutputWindow(screen);
+        _videoOutputs[screen]!.Show();
+        PlaceVideoOutput(screen);
+    }
+
     public (double Width, double Height) SurfaceDimensions() => SurfaceDimensions(0);
 
     public (double Width, double Height) SurfaceDimensions(int screen)

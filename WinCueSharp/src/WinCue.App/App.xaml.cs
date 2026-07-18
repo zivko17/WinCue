@@ -34,6 +34,7 @@ public partial class App : Application
     private AudioEngine? _audio;
     private VideoEngine? _video;
     private RemoteInputService? _remote;
+    private StressRunner? _stress;
     private DispatcherTimer? _tick;
     private DispatcherTimer? _autosaveTimer;
     private string _autosavePath = "";
@@ -113,9 +114,18 @@ public partial class App : Application
 
         window.Show();
 
+        // Modo estrés desatendido (auditoría 04): --stress <show.json> [--stress-loops N]
+        int stressIdx = Array.IndexOf(e.Args, "--stress");
+        string? stressShow = stressIdx >= 0 && stressIdx + 1 < e.Args.Length
+            ? e.Args[stressIdx + 1] : null;
+        int loopsIdx = Array.IndexOf(e.Args, "--stress-loops");
+        int stressLoops = loopsIdx >= 0 && loopsIdx + 1 < e.Args.Length
+            && int.TryParse(e.Args[loopsIdx + 1], out int n) ? n : 0;
+
         // Recuperación de autoguardado (cierre inesperado en la sesión anterior).
-        // En modo --smoke NO se pregunta: un diálogo modal colgaría la verificación.
-        bool smokeMode = e.Args.Contains("--smoke");
+        // En modo --smoke/--stress NO se pregunta: un diálogo modal colgaría la
+        // ejecución desatendida.
+        bool smokeMode = e.Args.Contains("--smoke") || stressShow is not null;
         SmokeMode = smokeMode;
         _autosavePath = Path.Combine(AppContext.BaseDirectory, "autosave.json");
         bool recovered = false;
@@ -138,13 +148,29 @@ public partial class App : Application
         if (!recovered && showPath is not null)
             _controller.LoadShow(showPath);
 
-        // Autoguardado cada 60 s
-        _autosaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
-        _autosaveTimer.Tick += (_, _) => _controller.Autosave(_autosavePath);
-        _autosaveTimer.Start();
+        // Estrés: abrir la salida 1 (el compositor necesita ventana activa),
+        // cargar el show de tortura y arrancar el runner
+        if (stressShow is not null && File.Exists(stressShow))
+        {
+            _controller.LoadShow(Path.GetFullPath(stressShow));
+            window.ShowVideoOutput(0);
+            _stress = new StressRunner(_controller, model, stressLoops);
+            _stress.Start();
+        }
 
-        // Arranque de humo: cerrar solo (verificación sin operador)
-        if (smokeMode)
+        // Autoguardado cada 60 s (NO en estrés: ensuciaría autosave.json con el
+        // show de tortura y metería I/O periódica en las métricas)
+        if (stressShow is null)
+        {
+            _autosaveTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(60) };
+            _autosaveTimer.Tick += (_, _) => _controller.Autosave(_autosavePath);
+            _autosaveTimer.Start();
+        }
+
+        // Arranque de humo: cerrar solo (verificación sin operador).
+        // OJO: solo --smoke — el modo estrés comparte la supresión de diálogos
+        // (SmokeMode) pero debe seguir corriendo horas.
+        if (e.Args.Contains("--smoke"))
         {
             var quit = new DispatcherTimer { Interval = TimeSpan.FromSeconds(3) };
             quit.Tick += (_, _) => Shutdown(0);
