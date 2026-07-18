@@ -123,7 +123,8 @@ public sealed class FakeAudioEngine : IAudioEngine
     public double GetDuration(int cueId) => Durations.GetValueOrDefault(cueId);
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
     public void InvalidateCache(int cueId) => Invalidated.Add(cueId);
-    public void Cleanup() { }
+    public int CleanupCalls;
+    public void Cleanup() => CleanupCalls++;
 
     public readonly HashSet<int> PausedCues = new();
 
@@ -212,7 +213,8 @@ public sealed class FakeVideoEngine : IVideoEngine
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
     public void ApplyGeometry(int cueId, VideoGeometry geo) => GeometryApplied.Add((cueId, geo));
     public void SetWindowHandleProvider(Func<nint> getWindowHandle) => HandleProvider = getWindowHandle;
-    public void Cleanup() { }
+    public int CleanupCalls;
+    public void Cleanup() => CleanupCalls++;
 
     public readonly HashSet<int> PausedCues = new();
 
@@ -221,6 +223,8 @@ public sealed class FakeVideoEngine : IVideoEngine
         Playing.Remove(cueId);
         StateChanged?.Invoke(cueId, MediaCueState.Stopped);
     }
+
+    public void RaiseError(int cueId, string msg) => ErrorOccurred?.Invoke(cueId, msg);
 }
 
 // ---------------------------------------------------------------------------
