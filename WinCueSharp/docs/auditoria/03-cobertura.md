@@ -84,3 +84,7 @@ Ordenado por peligro real = (probabilidad de ejecutarse en show) × (no probado)
 | 5 | `TimerScheduler` real (test corto de tiempo real) + `AudioEngine.Fade`/pausa vía provider | Audio.Tests / Controller.Tests |
 
 Cobertura objetivo razonable tras las tandas: Controller ≥ 90 %, Audio ≥ 82 %, OscPacket ≥ 85 %. El bloque GPU queda para la sesión de estrés; `WinCue.App` queda como riesgo aceptado y documentado (00-inventario) hasta que se decida invertir en tests de UI.
+
+## 6. Hallazgos aparecidos AL escribir los tests
+
+- **Escala absoluta del RTA (posible defecto cosmético, producción NO tocada):** al testear `CueSampleProvider.GetSpectrum` se vio que un seno de amplitud 0,5 reporta ~**−73 dBFS** en su banda (esperable ≈ −6). La normalización de `FeedSpectrum` divide dos veces por N (la FFT de NAudio con `forward=true` ya normaliza; luego se aplica `4·√peak/N` otra vez). El RTA *funciona* en pantalla porque el rango se estira visualmente y hay ganancia de vista (+18 dB), pero los dB mostrados no son dBFS reales. El test verifica lo funcional (el tono destaca sobre el suelo y cae en la banda correcta) y este apunte queda para decidir si se corrige la escala.
