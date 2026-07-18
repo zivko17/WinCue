@@ -85,6 +85,22 @@ Ordenado por peligro real = (probabilidad de ejecutarse en show) × (no probado)
 
 Cobertura objetivo razonable tras las tandas: Controller ≥ 90 %, Audio ≥ 82 %, OscPacket ≥ 85 %. El bloque GPU queda para la sesión de estrés; `WinCue.App` queda como riesgo aceptado y documentado (00-inventario) hasta que se decida invertir en tests de UI.
 
+## Resultado de las tandas ejecutadas (2026-07-18)
+
+5 tandas escritas y commiteadas el mismo día (suite completa en verde tras cada una), **255 → 286 tests (+31)**:
+
+| Tanda | Commit | Tests | Hueco cerrado |
+|---|---|---:|---|
+| 1 | `9d2c2b03` | +9 | Señales de vídeo: fin natural (encadenado auto-follow, tally, eco tardío sin doble disparo), errores vs [AVISO], OnStopSelected, Shutdown |
+| 2 | `d666920d` | +5 | CueSampleProvider en vivo: SetPaused congela sin matar el stream, SetEq en caliente, RTA lazy con localización de tono, GR del compresor |
+| 3 | `e0139afa` | +9 | OscPacket: Build round-trips (incl. el escenario del fix CA2014 con 500 floats), bundles anidados, d/h/N, blobs, corruptos, tag desconocido |
+| 4 | `6754d808` | +4 | Deriva de vídeo: BeginVideoFadeOut y VideoEndCheck reprogramando contra la posición real; bordes de ExecStart |
+| 5 | `bcc6411d` | +4 | TimerScheduler REAL (tiempo real con márgenes generosos): one-shot, cancelación, dispatch, dispose tardío |
+
+**Cobertura tras las tandas:** líneas **73,2 % → 77,3 %** · ramas **65,9 % → 71,4 %** · Controller **83,0 → 89,6 %** · Audio **75,4 → 82,3 %** (objetivos §5 prácticamente alcanzados).
+
+**Pendiente consciente de la lista crítica:** `VideoEngine.PrepareStandby/BuildStandby` y `AudioEngine.Fade/PauseCue` reales (requieren decidir una estrategia de test de motor con mpv/dispositivo o refactor de costura — no se toca producción sin acordarlo), y el bloque GPU (sesión de estrés).
+
 ## 6. Hallazgos aparecidos AL escribir los tests
 
 - **Escala absoluta del RTA (posible defecto cosmético, producción NO tocada):** al testear `CueSampleProvider.GetSpectrum` se vio que un seno de amplitud 0,5 reporta ~**−73 dBFS** en su banda (esperable ≈ −6). La normalización de `FeedSpectrum` divide dos veces por N (la FFT de NAudio con `forward=true` ya normaliza; luego se aplica `4·√peak/N` otra vez). El RTA *funciona* en pantalla porque el rango se estira visualmente y hay ganancia de vista (+18 dB), pero los dB mostrados no son dBFS reales. El test verifica lo funcional (el tono destaca sobre el suelo y cae en la banda correcta) y este apunte queda para decidir si se corrige la escala.
