@@ -28,7 +28,11 @@ public sealed class MpvGpuRenderer : IDisposable
     private volatile bool _shutdown;
     private Exception? _initError;
 
+    // CA2213: _gl SÍ se libera, pero en CleanupOnThread() (hilo de render, el
+    // único que puede tocar el contexto GL) — el analizador no puede verlo.
+#pragma warning disable CA2213
     private GlContext? _gl;
+#pragma warning restore CA2213
     private nint _renderCtx;
     private nint _d3dDevice;
 
@@ -224,7 +228,14 @@ public sealed class MpvGpuRenderer : IDisposable
             return;
         _shutdown = true;
         _wake.Set();
-        if (Thread.CurrentThread != _thread)
-            _thread.Join(4_000);
+        if (Thread.CurrentThread != _thread && _thread.Join(4_000))
+        {
+            // El hilo terminó (ya pasó por CleanupOnThread): liberar los wait
+            // handles del SO. Si el Join expira se dejan vivos A PROPÓSITO:
+            // el hilo colgado podría seguir usándolos y un Dispose aquí
+            // provocaría ObjectDisposedException en pleno render.
+            _wake.Dispose();
+            _ready.Dispose();
+        }
     }
 }

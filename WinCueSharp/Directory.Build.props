@@ -1,0 +1,25 @@
+<Project>
+
+  <!-- =========================================================================
+       Directory.Build.props — propiedades comunes a TODOS los proyectos de
+       WinCueSharp (heredado por cada .csproj bajo esta carpeta).
+       Análisis estático de Roslyn al máximo nivel razonable.
+       NOTA: TreatWarningsAsErrors se deja DESACTIVADO a propósito (FASE 1):
+       primero medimos y limpiamos; el gate duro vendrá en una fase posterior.
+       ========================================================================= -->
+
+  <PropertyGroup>
+    <!-- Analizadores del SDK .NET (reglas CAxxxx) -->
+    <EnableNETAnalyzers>true</EnableNETAnalyzers>
+    <!-- "latest-all": habilita el conjunto completo de reglas (incl. las que por
+         defecto son sugerencia) al nivel de análisis más reciente -->
+    <AnalysisLevel>latest-all</AnalysisLevel>
+    <!-- Que las reglas de estilo del IDE (IDExxxx del .editorconfig) también se
+         evalúen durante la compilación, no solo en el editor -->
+    <EnforceCodeStyleInBuild>true</EnforceCodeStyleInBuild>
+
+    <!-- Los warnings NO bloquean el build todavía -->
+    <TreatWarningsAsErrors>false</TreatWarningsAsErrors>
+  </PropertyGroup>
+
+</Project>

@@ -16,8 +16,14 @@ using static WinCue.Video.MpvNative;
 
 namespace WinCue.Video;
 
+// CA2216 (finalizador de respaldo): NO añadir. mpv_terminate_destroy exige que
+// antes haya parado el hilo de eventos (Dispose lo hace con Join); un
+// finalizador en el hilo del GC correría en paralelo con ese hilo → crash
+// nativo. La liberación es determinista vía Dispose()/Terminate().
+#pragma warning disable CA2216
 public sealed class MpvPlayer : IDisposable
 {
+#pragma warning restore CA2216
     private readonly nint _handle;
     private readonly Thread _eventThread;
     private volatile bool _shutdown;

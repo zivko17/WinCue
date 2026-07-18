@@ -132,8 +132,14 @@ internal static class D3D9Minimal
 // WGL: ventana oculta + contexto GL + extensión WGL_NV_DX_interop2 + FBO
 // ---------------------------------------------------------------------------
 
+// CA2216 (finalizador de respaldo): NO añadir. El contexto GL tiene afinidad
+// estricta de hilo (todo se crea y destruye en el hilo de render con el
+// contexto current); un finalizador correría en el hilo del GC → comportamiento
+// indefinido en el driver. La liberación es determinista vía Dispose().
+#pragma warning disable CA2216
 internal sealed class GlContext : IDisposable
 {
+#pragma warning restore CA2216
     // ── user32 / gdi32 / opengl32 ──────────────────────────────────────
     [DllImport("user32.dll", SetLastError = true, CharSet = CharSet.Unicode)]
     private static extern nint CreateWindowExW(uint exStyle, string className,
@@ -177,10 +183,14 @@ internal sealed class GlContext : IDisposable
     [DllImport("opengl32.dll")]
     private static extern bool wglMakeCurrent(nint dc, nint ctx);
 
-    [DllImport("opengl32.dll", CharSet = CharSet.Ansi)]
+    // CA2101: marshaling ANSI explícito y sin best-fit (los nombres de proc GL
+    // son ASCII puro; best-fit podría mapear caracteres inesperados).
+    [DllImport("opengl32.dll", CharSet = CharSet.Ansi,
+        BestFitMapping = false, ThrowOnUnmappableChar = true)]
     private static extern nint wglGetProcAddress(string name);
 
-    [DllImport("kernel32.dll", CharSet = CharSet.Ansi)]
+    [DllImport("kernel32.dll", CharSet = CharSet.Ansi,
+        BestFitMapping = false, ThrowOnUnmappableChar = true)]
     private static extern nint GetProcAddress(nint module, string name);
 
     [DllImport("kernel32.dll", CharSet = CharSet.Unicode)]
@@ -448,7 +458,7 @@ internal sealed class GlContext : IDisposable
         if (_glCtx != 0)
             wglDeleteContext(_glCtx);
         if (_dc != 0)
-            ReleaseDC(_hwnd, _dc);
+            _ = ReleaseDC(_hwnd, _dc);   // 0 = fallo; en Dispose no hay recuperación posible
         if (_hwnd != 0)
             DestroyWindow(_hwnd);
         _glCtx = 0;

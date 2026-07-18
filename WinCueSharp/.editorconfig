@@ -1,0 +1,172 @@
+# =============================================================================
+# .editorconfig — estilo de WinCueSharp
+# =============================================================================
+# DEDUCIDO del código existente (no se impone un estilo nuevo):
+#   - namespaces file-scoped (37/37 ficheros)      -> csharp_style_namespace_declarations
+#   - llaves Allman (apertura en línea nueva)       -> csharp_new_line_before_open_brace
+#   - 4 espacios, sin tabs
+#   - campos privados _camelCase                    -> naming rule abajo
+#   - sin cualificación this. (0 usos)
+#   - var cuando el tipo es aparente; tipos primitivos explícitos (int maxNum ...)
+#   - miembros con cuerpo de expresión (=>) muy frecuentes
+#   - using fuera del namespace
+# Las reglas de ESTILO se dejan como 'suggestion'/'silent' para NO generar
+# warnings de build (el código ya es coherente); la FASE 1 mide reglas CA.
+# =============================================================================
+
+root = true
+
+# --- Todos los ficheros ------------------------------------------------------
+[*]
+indent_style = space
+charset = utf-8-bom
+trim_trailing_whitespace = true
+insert_final_newline = true
+
+[*.{csproj,props,targets,json,xml,config}]
+indent_size = 2
+
+# --- C# ----------------------------------------------------------------------
+[*.cs]
+indent_size = 4
+end_of_line = crlf
+
+# Organización de usings
+dotnet_sort_system_directives_first = true
+dotnet_separate_import_directive_groups = false
+csharp_using_directive_placement = outside_namespace:silent
+
+# Namespaces file-scoped
+csharp_style_namespace_declarations = file_scoped:suggestion
+
+# Llaves Allman
+csharp_new_line_before_open_brace = all
+csharp_new_line_before_else = true
+csharp_new_line_before_catch = true
+csharp_new_line_before_finally = true
+csharp_new_line_before_members_in_object_initializers = true
+csharp_new_line_before_members_in_anonymous_types = true
+csharp_new_line_between_query_expression_clauses = true
+
+# Sangría
+csharp_indent_case_contents = true
+csharp_indent_switch_labels = true
+csharp_indent_labels = one_less_than_current
+
+# 'this.' nunca (el código no lo usa)
+dotnet_style_qualification_for_field = false:suggestion
+dotnet_style_qualification_for_property = false:suggestion
+dotnet_style_qualification_for_method = false:suggestion
+dotnet_style_qualification_for_event = false:suggestion
+
+# var: cuando el tipo es aparente; tipos primitivos explícitos
+csharp_style_var_for_built_in_types = false:silent
+csharp_style_var_when_type_is_apparent = true:silent
+csharp_style_var_elsewhere = false:silent
+
+# Miembros con cuerpo de expresión (patrón dominante en el código)
+csharp_style_expression_bodied_methods = true:silent
+csharp_style_expression_bodied_properties = true:silent
+csharp_style_expression_bodied_accessors = true:silent
+csharp_style_expression_bodied_indexers = true:silent
+csharp_style_expression_bodied_lambdas = true:silent
+
+# Preferencias modernas coherentes con el código
+csharp_prefer_braces = when_multiline:silent
+csharp_style_prefer_switch_expression = true:suggestion
+csharp_style_pattern_matching_over_is_with_cast_check = true:suggestion
+csharp_style_pattern_matching_over_as_with_null_check = true:suggestion
+dotnet_style_object_initializer = true:suggestion
+dotnet_style_collection_initializer = true:suggestion
+dotnet_style_prefer_conditional_expression_over_assignment = true:silent
+dotnet_style_prefer_conditional_expression_over_return = true:silent
+dotnet_style_readonly_field = true:suggestion
+
+# --- Convenciones de nombres -------------------------------------------------
+# Campos privados: _camelCase (patrón real: private readonly List<Cue> _cues)
+dotnet_naming_rule.private_fields_underscore.severity = suggestion
+dotnet_naming_rule.private_fields_underscore.symbols = private_fields
+dotnet_naming_rule.private_fields_underscore.style = underscore_camel
+
+dotnet_naming_symbols.private_fields.applicable_kinds = field
+dotnet_naming_symbols.private_fields.applicable_accessibilities = private
+dotnet_naming_symbols.private_fields.required_modifiers =
+
+dotnet_naming_style.underscore_camel.capitalization = camel_case
+dotnet_naming_style.underscore_camel.required_prefix = _
+
+# Constantes y públicos: PascalCase
+dotnet_naming_rule.pascal_members.severity = suggestion
+dotnet_naming_rule.pascal_members.symbols = public_members
+dotnet_naming_rule.pascal_members.style = pascal
+dotnet_naming_symbols.public_members.applicable_kinds = property,method,event,class,struct,enum,delegate
+dotnet_naming_symbols.public_members.applicable_accessibilities = public,internal,protected
+dotnet_naming_style.pascal.capitalization = pascal_case
+
+# =============================================================================
+# CUBO 3 — reglas silenciadas (FASE 1)
+# =============================================================================
+# Silenciadas explícitamente porque NO aportan valor a este proyecto (app de
+# escritorio Windows, mono-persona, sin API pública). Cada 'none' lleva su
+# justificación. Las reglas de BUGS (cubo 1) y RECURSOS/IDisposable (cubo 2)
+# NO se tocan aquí: siguen visibles para arreglarse.
+
+# --- Diseño de API / DTO (deliberado) ---
+# El modelo Cue expone campos públicos por diseño (paridad 1:1 con el JSON de
+# Python y con el WinCue original). No es una librería reutilizable.
+dotnet_diagnostic.CA1051.severity = none   # Campos de instancia visibles (DTO Cue)
+dotnet_diagnostic.CA1002.severity = none   # Exponer List<T> (colecciones del modelo)
+dotnet_diagnostic.CA1819.severity = none   # Propiedades que devuelven arrays (buffers DSP)
+dotnet_diagnostic.CA1034.severity = none   # Tipos anidados visibles (estructura deliberada)
+dotnet_diagnostic.CA1024.severity = none   # Usar propiedades en vez de Get* (algunos tienen coste)
+dotnet_diagnostic.CA1003.severity = none   # Firmas de evento propias (Action/Action<T>)
+dotnet_diagnostic.CA1030.severity = none   # "Usar eventos" en métodos de notificación propios
+
+# --- Validación de argumentos: cubierta por NRT ---
+# Nullable=enable ya obliga a la anulabilidad en compilación; añadir guardas
+# ArgumentNullException en cada método público interno es puro ruido.
+dotnet_diagnostic.CA1062.severity = none   # Validar args de métodos públicos
+
+# --- Captura amplia de excepciones: deliberada ("el show nunca se cae") ---
+# catch(Exception) es una decisión de diseño para directo. (Nota de auditoría:
+# varios de estos swallow SIN log; endurecer/loguear es tema de una fase aparte,
+# no un warning que deba bloquear.)
+dotnet_diagnostic.CA1031.severity = none   # No capturar Exception genérica
+
+# --- Globalización: datos invariantes ---
+# Claves snake_case, números de cue ASCII, rutas: nada localizable. Comparar/
+# formatear con CultureInfo explícito no cambia el resultado aquí.
+dotnet_diagnostic.CA1304.severity = none   # CultureInfo en ToUpper/ToLower
+dotnet_diagnostic.CA1305.severity = none   # IFormatProvider en formateo
+dotnet_diagnostic.CA1307.severity = none   # StringComparison en comparaciones
+dotnet_diagnostic.CA1308.severity = none   # Preferir ToUpperInvariant
+dotnet_diagnostic.CA1310.severity = none   # StringComparison en StartsWith/IndexOf
+
+# --- Cosmética de nombres / firmas ---
+dotnet_diagnostic.CA1707.severity = none   # Guiones bajos: convención de nombres de test (Metodo_Escenario_Resultado)
+dotnet_diagnostic.CA1725.severity = none   # Nombres de parámetro que coinciden con la base
+dotnet_diagnostic.CA1716.severity = none   # Identificadores que chocan con keywords (Stop, etc. — dominio)
+dotnet_diagnostic.CA1724.severity = none   # Nombre de tipo que coincide con namespace
+dotnet_diagnostic.CA1032.severity = none   # Constructores estándar de excepción (excepción interna)
+
+# --- Micro-optimizaciones sin impacto medible en frío ---
+dotnet_diagnostic.CA1859.severity = none   # Usar tipos concretos por rendimiento
+dotnet_diagnostic.CA1861.severity = none   # Arrays constantes como argumento
+dotnet_diagnostic.CA1814.severity = none   # Jagged vs multidimensional
+dotnet_diagnostic.CA1820.severity = none   # Cadena vacía por Length
+dotnet_diagnostic.CA1513.severity = none   # ObjectDisposedException.ThrowIf (azúcar)
+
+# --- Contexto WPF / P/Invoke de sistema ---
+# App WPF: ConfigureAwait(false) rompería la afinidad de hilo de UI → NO aplicar.
+dotnet_diagnostic.CA2007.severity = none   # ConfigureAwait en await
+# P/Invoke a DLLs de sistema (user32/gdi32/opengl32/kernel32/d3d9) resueltas por
+# KnownDLLs; libmpv usa un DllImportResolver propio. Forzar DefaultDllImportSearchPaths
+# rompería ese resolver. (Nota: revisar antes de distribuir, por DLL planting.)
+dotnet_diagnostic.CA5392.severity = none   # DefaultDllImportSearchPaths en P/Invoke
+# Random del round-robin de grupos RANDOM: no es aleatoriedad criptográfica.
+dotnet_diagnostic.CA5394.severity = none   # Aleatoriedad insegura
+
+# --- Tests: patrón Dispose no crítico en fixtures xUnit ---
+[tests/**/*.cs]
+dotnet_diagnostic.CA1063.severity = none   # Patrón Dispose(bool) en fixtures de test
+dotnet_diagnostic.CA1816.severity = none   # GC.SuppressFinalize en fixtures de test

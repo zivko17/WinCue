@@ -585,7 +585,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
             try
             {
+                // CA2000: la propiedad del player se transfiere a _players (o
+                // se libera en cada ruta de error de más abajo) — falso positivo.
+#pragma warning disable CA2000
                 player = new MpvPlayer(options);
+#pragma warning restore CA2000
                 usedVo = vo;
                 break;
             }
@@ -607,13 +611,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // ── Compositor GPU: render context → superficies D3D de la pista ─
         if (gpu)
         {
+            MpvGpuRenderer? renderer = null;
             try
             {
                 var geo = p.Geometry ?? new VideoGeometry();
                 // En modo canvas el FBO de mpv ES el canvas y cada salida
                 // recibe su recorte; en clásico, una única vista completa.
                 var views = canvas ? p.CanvasOutputs : null;
-                var renderer = new MpvGpuRenderer(player,
+                renderer = new MpvGpuRenderer(player,
                     (int)geo.SurfW, (int)geo.SurfH, views);
                 var sinks = new List<IVideoLayerSurface>();
                 for (int i = 0; i < renderer.Views.Count; i++)
@@ -637,6 +642,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             {
                 // Driver sin interop GL↔D3D (o similar): caer al modo clásico
                 // de forma permanente en esta sesión y reintentar este cue.
+                // Regla mpv: el render context muere ANTES que el core → si el
+                // renderer llegó a crearse (p.ej. falló el cableado de sinks),
+                // liberarlo primero; sin esto quedaba un hilo de render vivo
+                // apuntando a un player destruido.
+                renderer?.Dispose();
                 player.Dispose();
                 _gpuFailed = true;
                 ErrorOccurred?.Invoke(cueId,
@@ -830,8 +840,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         try
         {
             var geo = p.Geometry ?? new VideoGeometry();
+            // CA2000: la propiedad pasa al StandbyPrep devuelto; el catch de
+            // abajo libera renderer y player en toda ruta de error.
+#pragma warning disable CA2000
             renderer = new MpvGpuRenderer(player, (int)geo.SurfW, (int)geo.SurfH,
                 canvas ? p.CanvasOutputs : null);
+#pragma warning restore CA2000
             for (int i = 0; i < renderer.Views.Count; i++)
             {
                 var v = renderer.Views[i];
