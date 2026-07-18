@@ -79,8 +79,10 @@ function Sample-Gpu {
         $sha = (Get-Counter '\GPU Process Memory(*)\Shared Usage' -ErrorAction Stop).CounterSamples |
             Where-Object { $_.InstanceName -match "pid_$($app.Id)_" } |
             Measure-Object CookedValue -Sum
-        "{0:yyyy-MM-dd HH:mm:ss},{1:0.0},{2:0.0}" -f (Get-Date),
-            ($ded.Sum / 1MB), ($sha.Sum / 1MB) | Add-Content $gpuCsv
+        # Cultura invariante: una coma decimal regional rompería el CSV
+        [string]::Format([Globalization.CultureInfo]::InvariantCulture,
+            "{0:yyyy-MM-dd HH:mm:ss},{1:0.0},{2:0.0}",
+            (Get-Date), ($ded.Sum / 1MB), ($sha.Sum / 1MB)) | Add-Content $gpuCsv
     } catch { }   # contadores de GPU no disponibles: se sigue sin VRAM
 }
 
@@ -106,7 +108,12 @@ if (-not $app.HasExited) {
     $app.CloseMainWindow() | Out-Null
     if (-not $app.WaitForExit(15000)) { $app.Kill() }
 }
-if (-not $counters.HasExited) { Stop-Process -Id $counters.Id -Force -ErrorAction SilentlyContinue }
+# dotnet-counters vuelca counters.csv AL SALIR: darle tiempo a detectar la
+# muerte del proceso objetivo y salir solo (matarlo a la fuerza pierde el CSV)
+if (-not $counters.WaitForExit(30000)) {
+    Write-Warning "dotnet-counters no salió solo; counters.csv puede quedar incompleto"
+    Stop-Process -Id $counters.Id -Force -ErrorAction SilentlyContinue
+}
 
 Write-Host "`nSesión terminada. Analizar:"
 Write-Host "  $out\proceso.csv    (CSV de la app, cada 30 s)"
