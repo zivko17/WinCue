@@ -80,6 +80,7 @@ public class MainController
     private readonly CueListEditor _listEditor;
     private readonly RemoteRouter _remote;
     private readonly UndoService _undo;
+    private readonly CanvasLayout _canvas;
 
     private int _playhead;
     private bool _paused;
@@ -130,6 +131,10 @@ public class MainController
         _video.SetWindowHandleProvider(() => _view.GetVideoOutputHandle());
         _video.SetLayerHandleProvider(
             (screen, layer) => _view.GetVideoOutputLayerHandle(screen, layer));
+
+        // Colocación de vídeo extraída (paso 5): canvas, recortes por salida,
+        // geometría y factoría de VideoPlayParams. Solo lee settings/vista.
+        _canvas = new CanvasLayout(settings, view);
 
         // Undo/redo extraído (paso 4): el controlador envuelve Push() en
         // PushUndo() para mantener el flag HasUnsavedChanges en su sitio.
@@ -653,7 +658,7 @@ public class MainController
                 // (el motor mantiene vivo al saliente durante el fundido)
                 double targetOpacity = cue.Opacity / 100.0;
                 double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
-                _video.Play(cue.Id, cue.FilePath, VideoParamsFor(cue, offset));
+                _video.Play(cue.Id, cue.FilePath, _canvas.ParamsFor(cue, offset));
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
                 {
@@ -740,9 +745,8 @@ public class MainController
         }
     }
 
-    /// <summary>Velocidad de reproducción (el timer de fin corre en tiempo de
-    /// PARED: un media de 60 s a rate 0,5 tarda 120 s reales).</summary>
-    private static double RateOf(Cue c) => Math.Clamp(c.Rate, 0.25, 4.0);
+    /// <summary>Velocidad de reproducción efectiva (vive en CanvasLayout).</summary>
+    private static double RateOf(Cue c) => CanvasLayout.RateOf(c);
 
     /// <summary>Duración efectiva de la ACCIÓN: en media, con el TRIM aplicado
     /// (el countdown y el timer de fin deben medir lo que va a sonar de
@@ -757,68 +761,22 @@ public class MainController
         return Math.Max(0.0, end - c.TrimStart);
     }
 
-    /// <summary>Pista de prioridad visual de un cue de vídeo: la del timeline
-    /// (0 = arriba tapa a las demás); sin fijar (-1) → pista 2 por defecto,
-    /// que preserva el comportamiento clásico "un vídeo sustituye al otro".</summary>
-    private static int VideoLayerOf(Cue c) =>
-        c.TimelineLayer < 0 ? 2 : Math.Min(c.TimelineLayer, 7);
+    /// <summary>Pista de prioridad visual del cue (vive en CanvasLayout).</summary>
+    private static int VideoLayerOf(Cue c) => CanvasLayout.VideoLayerOf(c);
 
-    /// <summary>Salida de vídeo del cue (0 = Salida 1 … 3 = Salida 4).</summary>
-    private static int ScreenOf(Cue c) => Math.Clamp(c.VideoOutput, 0, 3);
+    /// <summary>Salida de vídeo del cue (vive en CanvasLayout).</summary>
+    private static int ScreenOf(Cue c) => CanvasLayout.ScreenOf(c);
 
     // ------------------------------------------------------------------
-    // MODO CANVAS (estilo Watchout): los cues se colocan en un canvas
-    // global y cada salida muestra su recorte. Solo con compositor GPU.
+    // MODO CANVAS — implementación en CanvasLayout
     // ------------------------------------------------------------------
 
     /// <summary>true si el show opera en modo canvas (Settings → Vídeo).</summary>
-    private bool CanvasMode =>
-        _settings.Get("video_canvas_mode", false) &&
-        _settings.Get("video_compositor", false);
-
-    /// <summary>Tamaño del canvas global (settings surface_*; 0 → FHD).</summary>
-    private (int W, int H) CanvasDims()
-    {
-        int w = _settings.Get("surface_width", 0);
-        int h = _settings.Get("surface_height", 0);
-        return (w > 0 ? w : 1920, h > 0 ? h : 1080);
-    }
-
-    /// <summary>Recortes de las salidas HABILITADAS (la 1 siempre lo está).
-    /// Región por salida en settings "x,y,w,h"; ausente → canvas completo.</summary>
-    private IReadOnlyList<CanvasView> CanvasViews()
-    {
-        var (cw, ch) = CanvasDims();
-        var list = new List<CanvasView>();
-        for (int s = 0; s < 4; s++)
-        {
-            if (s > 0 && !_settings.Get($"video_output_enabled{s + 1}", false))
-                continue;
-            string key = s == 0 ? "video_output_region" : $"video_output_region{s + 1}";
-            list.Add(ParseRegion(_settings.Get(key, ""), s, cw, ch));
-        }
-        return list;
-    }
+    private bool CanvasMode => _canvas.CanvasMode;
 
     /// <summary>Parsea "x,y,w,h" y lo recorta al canvas; inválido → completo.</summary>
-    public static CanvasView ParseRegion(string text, int screen, int cw, int ch)
-    {
-        var parts = (text ?? "").Split(',');
-        if (parts.Length == 4
-            && int.TryParse(parts[0].Trim(), out int x)
-            && int.TryParse(parts[1].Trim(), out int y)
-            && int.TryParse(parts[2].Trim(), out int w)
-            && int.TryParse(parts[3].Trim(), out int h)
-            && w > 0 && h > 0)
-        {
-            x = Math.Clamp(x, 0, Math.Max(0, cw - 16));
-            y = Math.Clamp(y, 0, Math.Max(0, ch - 16));
-            w = Math.Clamp(w, 16, cw - x);
-            h = Math.Clamp(h, 16, ch - y);
-            return new CanvasView(screen, x, y, w, h);
-        }
-        return new CanvasView(screen, 0, 0, cw, ch);
-    }
+    public static CanvasView ParseRegion(string text, int screen, int cw, int ch) =>
+        CanvasLayout.ParseRegion(text, screen, cw, ch);
 
     /// <summary>Opacidad del vídeo del cue (compositor GPU): cada cue tiene su
     /// superficie propia en todas las salidas donde se ve — la vista la
@@ -1424,7 +1382,7 @@ public class MainController
         var activeBy = new Dictionary<int, List<int>>();
         bool canvasMode = CanvasMode;
         var canvasScreens = canvasMode
-            ? CanvasViews().Select(v => v.Screen).ToHashSet()
+            ? _canvas.CanvasViews().Select(v => v.Screen).ToHashSet()
             : null;
         foreach (var (cid, r) in _running)
             if (r.Kind == CueType.Video && _video.IsPlaying(cid)
@@ -1472,20 +1430,6 @@ public class MainController
             _audio.Preload(nxt.Id, nxt.FilePath);
     }
 
-    /// <summary>Parámetros de reproducción del vídeo de un cue. FACTORIZADO:
-    /// los usa el GO (StartAction) y la precarga en pausa del standby — el
-    /// GO instantáneo exige que ambos sean EQUIVALENTES.</summary>
-    private VideoPlayParams VideoParamsFor(Cue cue, double offset) => new(
-        Volume: cue.Volume, Loop: cue.Loop, Scale: cue.Scale,
-        TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
-        Rate: cue.Rate, PlayCount: cue.PlayCount,
-        PreservePitch: cue.PreservePitch,
-        Geometry: GeoFor(cue),
-        Layer: VideoLayerOf(cue),
-        Screen: ScreenOf(cue),
-        CanvasOutputs: CanvasMode ? CanvasViews() : null,
-        HandoverSeconds: Math.Max(0.0, cue.FadeIn - offset) / RateOf(cue));
-
     /// <summary>Precarga del vídeo en STANDBY: con compositor y la salida YA
     /// visible, deja el player creado y PAUSADO en su primer frame con su
     /// superficie a opacidad 0 (el GO solo despausa → disparo instantáneo);
@@ -1498,36 +1442,13 @@ public class MainController
             : _view.IsVideoOutputVisible(ScreenOf(cue));
         if (visible && !_running.ContainsKey(cue.Id))
         {
-            _video.PrepareStandby(cue.Id, cue.FilePath, VideoParamsFor(cue, 0.0));
+            _video.PrepareStandby(cue.Id, cue.FilePath, _canvas.ParamsFor(cue, 0.0));
             _view.SetVideoCueOpacity(cue.Id, 0.0);   // preparado ≠ en pantalla
         }
         else
         {
             _video.PreloadNext(cue.Id, cue.FilePath);
         }
-    }
-
-    private VideoGeometry GeoFor(Cue cue)
-    {
-        // En modo canvas la geometría es relativa al CANVAS global (el vídeo
-        // se coloca en el canvas y las salidas lo recortan); en clásico, a la
-        // superficie de la salida del cue.
-        double sw, sh;
-        if (CanvasMode)
-        {
-            var (cw, ch) = CanvasDims();
-            (sw, sh) = (cw, ch);
-        }
-        else
-        {
-            (sw, sh) = _view.SurfaceDimensions(ScreenOf(cue));
-        }
-        return new VideoGeometry(
-            Mode: cue.GeoMode == GeoMode.Custom ? "CUSTOM" : "FULL",
-            PreserveAspect: cue.PreserveAspect,
-            TranslateX: cue.TranslateX, TranslateY: cue.TranslateY,
-            ScaleX: cue.ScaleX, RotateZ: cue.RotateZ,
-            SurfW: sw, SurfH: sh);
     }
 
     /// <summary>Timer asociado a un cue en curso: se cancela al terminar/parar.</summary>
@@ -1699,7 +1620,7 @@ public class MainController
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
             && fields.Keys.Any(GeoKeys.Contains))
         {
-            _video.ApplyGeometry(cue.Id, GeoFor(cue));
+            _video.ApplyGeometry(cue.Id, _canvas.GeoFor(cue));
         }
         // Opacidad de la pista en vivo (compositor GPU)
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
