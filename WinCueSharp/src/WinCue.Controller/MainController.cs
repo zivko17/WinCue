@@ -79,6 +79,7 @@ public class MainController
     private readonly ShowFileService _files;
     private readonly CueListEditor _listEditor;
     private readonly RemoteRouter _remote;
+    private readonly UndoService _undo;
 
     private int _playhead;
     private bool _paused;
@@ -88,11 +89,6 @@ public class MainController
     private readonly Dictionary<int, RunningCue> _running = new();
     private readonly Dictionary<int, HashSet<int>> _rrState = new();   // RANDOM round-robin
     private readonly List<IDisposable> _chainTimers = new();
-
-    // Undo/redo: snapshots JSON del modelo (baratos: el show es texto pequeño)
-    private const int MaxUndo = 100;
-    private readonly List<(string Json, int Playhead)> _undoStack = new();
-    private readonly List<(string Json, int Playhead)> _redoStack = new();
 
     // Anti doble-GO: instante del último GO aceptado
     private long _lastGoTicks;
@@ -134,6 +130,13 @@ public class MainController
         _video.SetWindowHandleProvider(() => _view.GetVideoOutputHandle());
         _video.SetLayerHandleProvider(
             (screen, layer) => _view.GetVideoOutputLayerHandle(screen, layer));
+
+        // Undo/redo extraído (paso 4): el controlador envuelve Push() en
+        // PushUndo() para mantener el flag HasUnsavedChanges en su sitio.
+        _undo = new UndoService(
+            model, view,
+            getPlayhead: () => _playhead,
+            setPlayhead: SetPlayhead);
 
         // Persistencia extraída (paso 1 de la auditoría 02): el servicio recibe
         // como callbacks lo poco que necesita del núcleo — el controlador sigue
@@ -1546,70 +1549,26 @@ public class MainController
     }
 
     // ==================================================================
-    // UNDO / REDO — snapshots JSON del modelo
+    // UNDO / REDO — implementación en UndoService
     // ==================================================================
-
-    private long _lastUndoPushTicks;
 
     /// <summary>true si hubo ediciones desde el último Guardar/Cargar
     /// (la vista lo usa para confirmar el cierre).</summary>
     public bool HasUnsavedChanges { get; private set; }
 
+    /// <summary>Apunta el estado en la pila de deshacer y marca el show como
+    /// modificado. Es el callback que reciben los servicios de edición.</summary>
     private void PushUndo()
     {
         HasUnsavedChanges = true;
-        _redoStack.Clear();
-        // Coalescencia de ráfagas: un slider o un arrastre commitean decenas de
-        // veces por segundo — solo la PRIMERA instantánea del gesto va al undo.
-        if (_lastUndoPushTicks != 0 &&
-            Stopwatch.GetElapsedTime(_lastUndoPushTicks).TotalMilliseconds < 800)
-            return;
-        _lastUndoPushTicks = Stopwatch.GetTimestamp();
-        _undoStack.Add((_model.ToJson(), _playhead));
-        if (_undoStack.Count > MaxUndo)
-            _undoStack.RemoveAt(0);
+        _undo.Push();
     }
 
-    public bool CanUndo => _undoStack.Count > 0;
-    public bool CanRedo => _redoStack.Count > 0;
+    public bool CanUndo => _undo.CanUndo;
+    public bool CanRedo => _undo.CanRedo;
 
-    public void Undo()
-    {
-        if (_undoStack.Count == 0)
-            return;
-        _redoStack.Add((_model.ToJson(), _playhead));
-        var (json, playhead) = _undoStack[^1];
-        _undoStack.RemoveAt(_undoStack.Count - 1);
-        RestoreSnapshot(json, playhead);
-        _view.FlashStatus("↶ Deshacer");
-    }
-
-    public void Redo()
-    {
-        if (_redoStack.Count == 0)
-            return;
-        _undoStack.Add((_model.ToJson(), _playhead));
-        var (json, playhead) = _redoStack[^1];
-        _redoStack.RemoveAt(_redoStack.Count - 1);
-        RestoreSnapshot(json, playhead);
-        _view.FlashStatus("↷ Rehacer");
-    }
-
-    private void RestoreSnapshot(string json, int playhead)
-    {
-        // No detiene la reproducción: los motores van por id, y las instancias
-        // en _running conservan copia de los datos que necesitan.
-        try
-        {
-            _model.ReplaceAll(CueModel.FromJson(json));
-        }
-        catch (FormatException)
-        {
-            return;   // snapshot corrupto: no tocar el modelo
-        }
-        _view.ReloadTable();
-        SetPlayhead(playhead);
-    }
+    public void Undo() => _undo.Undo();
+    public void Redo() => _undo.Redo();
 
     // ==================================================================
     // COPIAR / PEGAR / DUPLICAR / MOVER — implementación en CueListEditor
