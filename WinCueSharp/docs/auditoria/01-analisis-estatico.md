@@ -91,4 +91,22 @@ Orden sugerido, **por área y en commits separados**, empezando por IDisposable/
 
 Regla de trabajo acordada: un commit por área · `dotnet test` (255) en verde tras cada uno · si algún arreglo cambia comportamiento observable, **paro y aviso** antes de seguir.
 
-**No he tocado código de negocio. Espero tu visto bueno para empezar por el punto 1 (vídeo/IDisposable).**
+---
+
+## Resultado de la fase de arreglo (2026-07-18, tras visto bueno)
+
+**Estado final: build limpio con `AnalysisLevel=latest-all` y CERO warnings · 255/255 tests en verde.** Ningún arreglo cambió comportamiento observable en rutas normales (solo rutas de error y liberación).
+
+| Commit | Área | Contenido |
+|---|---|---|
+| `2e4a4591` | Vídeo | **La fuga del compositor:** `MpvGpuRenderer.Dispose` libera `_wake`/`_ready` tras el Join (antes: 2 wait handles filtrados POR CUE; si el Join expira se dejan vivos a propósito — un Dispose ahí rompería el hilo colgado). **Bug extra encontrado y arreglado:** si el cableado de sinks fallaba tras crear el renderer, el catch destruía el player con el render context vivo (violando la regla mpv "render context antes que core"); ahora libera el renderer primero. CA2101 (marshaling ANSI sin best-fit) y CA1806 (`ReleaseDC`). |
+| `272ca5c1` | Audio | `EnsureOutput`: si `Init`/`Play` fallan tras crear la salida, el handle WASAPI/ASIO se filtraba en cada reintento; ahora el catch lo libera. |
+| `fe31c217` | Motor de cues | `OscPacket.Build`: `stackalloc` fuera del bucle (CA2014, el candidato a desbordamiento de pila). |
+| `424eae4b` | App/UI | `RemoteInputService`: el `UdpClient` de escucha se asigna directo al campo (dueño claro). CA1001 ×4: supresión documentada — los cuatro tipos ya liberan deterministamente vía ciclo de vida WPF. |
+| `deb558bc` | App/UI menores | CS0414 (campo muerto), CA2211 (`RtaGainDb` → propiedad), CA1508 (caso `null` explícito en `AsBool`). |
+
+**Decisión técnica que difiere del plan original:** CA2216 pedía finalizadores de respaldo en `MpvPlayer` y `GlContext`. **NO se añadieron, a conciencia:** ambos tipos exigen liberación con afinidad de hilo (mpv: parar el hilo de eventos antes de `mpv_terminate_destroy`; GL: contexto current en el hilo de render). Un finalizador correría en el hilo del GC → crash nativo. Supresión justificada en el código; la liberación es determinista vía `Dispose()`.
+
+**Revisión manual de eventos `+=`/`-=` (punto 10): sin fugas.** Toda suscripción cae en un patrón inocuo: (a) cableado interno del propio control (ambos lados mueren juntos), (b) vida-larga→vida-larga (`_controller.ShowLog` desde `App`), o (c) publicador de vida corta cuya suscripción muere con él (`SettingsWindow.Saved`, `renderer.FrameRendered`). Los 9 `DispatcherTimer` viven en anfitriones con vida de aplicación.
+
+**Nota menor anotada (no tocada, fuera de alcance):** el timer del RTA de `EqEditorControl` late a 12,5 Hz durante toda la sesión aunque la pestaña EQ no esté visible. Es coste de CPU mínimo, no fuga; candidato a pausa-cuando-oculto si algún día se optimiza.
