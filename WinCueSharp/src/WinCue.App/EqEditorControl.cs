@@ -475,8 +475,9 @@ public sealed class EqCurveCanvas : FrameworkElement
     private static readonly Brush RtaBarTop = Frozen(new SolidColorBrush(Color.FromArgb(220, 0x5f, 0xf2, 0x9e)));
 
     /// <summary>Ganancia de VISUALIZACIÓN del RTA en dB (compartida por
-    /// sesión; solo afecta a la pantalla, nunca al audio).</summary>
-    public static double RtaGainDb = 18.0;
+    /// sesión; solo afecta a la pantalla, nunca al audio). Solo se toca
+    /// desde el hilo de UI.</summary>
+    public static double RtaGainDb { get; set; } = 18.0;
     private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
     private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x66, 0x5e, 0x30), 1.5);
 

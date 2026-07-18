@@ -287,9 +287,9 @@ public partial class MainWindow : Window, IShowView
     // IShowView
     // ==================================================================
 
-    // Historial de mensajes de estado (panel de avisos del botón 🕮)
+    // Historial de mensajes de estado (panel de avisos del botón 🕮).
+    // El estado "hay avisos" lo lleva el color del propio LogButton.
     private readonly List<string> _statusHistory = new();
-    private bool _statusHasWarnings;
 
     public void FlashStatus(string message)
     {
@@ -305,14 +305,12 @@ public partial class MainWindow : Window, IShowView
             || message.Contains("Error", StringComparison.OrdinalIgnoreCase)
             || message.Contains("falló", StringComparison.OrdinalIgnoreCase))
         {
-            _statusHasWarnings = true;
             LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
         }
     }
 
     private void OnShowStatusLog(object sender, RoutedEventArgs e)
     {
-        _statusHasWarnings = false;
         LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0x9a, 0x9a, 0x9a));
 
         var text = new TextBox

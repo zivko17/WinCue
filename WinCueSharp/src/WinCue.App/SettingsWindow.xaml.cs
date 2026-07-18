@@ -353,8 +353,9 @@ public partial class SettingsWindow : Window
 
     private static bool AsBool(object? v) => v switch
     {
+        null => false,
         bool b => b,
-        _ => bool.TryParse(v?.ToString(), out bool r) && r,
+        _ => bool.TryParse(v.ToString(), out bool r) && r,
     };
 
     // ==================================================================
