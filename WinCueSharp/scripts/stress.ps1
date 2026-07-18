@@ -67,22 +67,24 @@ function Take-GcDump([string]$name) {
     Write-Host "gcdump: $name.gcdump"
 }
 
-# ── Muestreador de VRAM (nivel 1 de la auditoría 04, automatizado):
-#    memoria de GPU dedicada del proceso vía contadores de Windows ─────────
+# ── Muestreador de VRAM (auditoría 04/05):
+#    ¡OJO! El contador POR PROCESO acumula compromiso FANTASMA con las
+#    superficies compartidas que presenta D3DImage (bug conocido de la
+#    métrica de Windows — auditoría 05: llegó a "12 GB" con 2 GB reales).
+#    La métrica VÁLIDA para fugas es la del ADAPTADOR (VRAM física). ────────
 $gpuCsv = Join-Path $out "gpu.csv"
-"timestamp,vram_dedicada_mb,vram_compartida_mb" | Set-Content $gpuCsv
+"timestamp,proceso_mb_NO_FIABLE,adaptador_mb" | Set-Content $gpuCsv
 function Sample-Gpu {
     try {
         $ded = (Get-Counter '\GPU Process Memory(*)\Dedicated Usage' -ErrorAction Stop).CounterSamples |
             Where-Object { $_.InstanceName -match "pid_$($app.Id)_" } |
             Measure-Object CookedValue -Sum
-        $sha = (Get-Counter '\GPU Process Memory(*)\Shared Usage' -ErrorAction Stop).CounterSamples |
-            Where-Object { $_.InstanceName -match "pid_$($app.Id)_" } |
+        $adap = (Get-Counter '\GPU Adapter Memory(*)\Dedicated Usage' -ErrorAction Stop).CounterSamples |
             Measure-Object CookedValue -Sum
         # Cultura invariante: una coma decimal regional rompería el CSV
         [string]::Format([Globalization.CultureInfo]::InvariantCulture,
             "{0:yyyy-MM-dd HH:mm:ss},{1:0.0},{2:0.0}",
-            (Get-Date), ($ded.Sum / 1MB), ($sha.Sum / 1MB)) | Add-Content $gpuCsv
+            (Get-Date), ($ded.Sum / 1MB), ($adap.Sum / 1MB)) | Add-Content $gpuCsv
     } catch { }   # contadores de GPU no disponibles: se sigue sin VRAM
 }
 

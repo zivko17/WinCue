@@ -30,7 +30,7 @@ Para el detalle: `00-inventario.md`, `01-analisis-estatico.md`, `02-arquitectura
 | # | Riesgo | Impacto en un directo real | Esfuerzo | ¿Bloquea distribuir? |
 |---:|---|---|---|:---:|
 | 1 | **libmpv GPL** | Ninguno en el show; te bloquea el negocio (venta cerrada ilegal) | 4-8 h (conseguir/compilar build LGPL + verificar features con el show de prueba) | **SÍ** |
-| 2 | **Fugas RAM/VRAM sin medir en shows largos** | El peor fallo posible: degradación/crash en la hora 3 de una función | 4-5 h (lanzar sesión + analizar CSV/gcdumps + parche mínimo si aparece algo) | SÍ (de facto: nadie debe operar horas sin este dato) |
+| 2 | ~~Fugas RAM/VRAM sin medir en shows largos~~ **RESUELTO el mismo día** (auditoría 05): CPU sano, VRAM física estable — la "fuga" era un contador de Windows defectuoso. De propina: pool de pipelines GPU + cumplimiento del contrato D3DImage. Pendiente: verificación visual del refactor + soak de 4 h opcional | — | 4-5 h (ya invertidas) | Ya no |
 | 3 | **WinCue.App sin tests (fontanería UDP/MIDI incluida)** | Una regresión de UI o del transporte de red se descubre EN el bolo | Alto (estrategia de test de UI); mitigable por partes | No (riesgo aceptado y documentado) |
 | 4 | **Sin CI** | El "todo verde" depende de disciplina manual; una regresión puede entrar sin señal | 1-2 h (GitHub Actions: build+test+warnings-as-errors) | No, pero es el mejor €/hora del proyecto |
 | 5 | **Motores reales sin test** (`VideoEngine.PrepareStandby`, `AudioEngine.Fade`…) | El GO instantáneo y los FADE dependen de código solo probado con dobles | 3-6 h (estrategia de test de motor con mpv real) | No |

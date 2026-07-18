@@ -74,20 +74,36 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly Dictionary<int, MpvPlayer> _players = new();
     private readonly Dictionary<int, (int Screen, int Layer)> _playerSlots = new();
 
-    // Compositor GPU: renderer + superficie de la vista, por cue
+    // Compositor GPU: provider de superficies de la ventana de salida
+    // (screen, layer, slotSeq) → control persistente con D3DImage
     private Func<int, int, int, IVideoLayerSurface>? _gpuSurfaces;
     private bool _gpuFailed;   // el driver no pudo → no reintentar cada GO
 
+    /// <summary>POOL de pipelines GPU persistentes (auditoría 05): crear y
+    /// destruir el pipeline por cue fugaba la VRAM del ciclo entero (interop
+    /// + dirty-rects de D3DImage). Cada slot vive toda la sesión; por cue
+    /// solo se hace Attach/Detach del mpv_render_context.</summary>
+    private sealed class GpuSlot
+    {
+        public required MpvGpuRenderer Pipeline;
+        public required List<IVideoLayerSurface> Sinks;
+        public required int Screen;   // -1 = canvas (el cue vive en todas)
+        public required int Layer;
+        public required string Spec;  // firma tamaño+vistas (reutilización exacta)
+        public int? BusyCueId;
+    }
+    private readonly List<GpuSlot> _gpuPool = new();
+    private int _gpuSlotSeq;
+
     /// <summary>GO INSTANTÁNEO: player del cue en STANDBY ya creado y PAUSADO
-    /// en su primer frame; el Play con parámetros equivalentes solo despausa.</summary>
+    /// en su primer frame; el Play con parámetros equivalentes solo despausa.
+    /// Su slot del pool queda BusyCueId=cueId (la promoción no lo toca).</summary>
     private sealed record StandbyPrep(int CueId, string Path, VideoPlayParams Params,
-        MpvPlayer Player, MpvGpuRenderer Renderer, List<IVideoLayerSurface> Sinks);
+        MpvPlayer Player);
     private StandbyPrep? _standby;
     // Red de seguridad del crossfade en la misma pista: si el saliente no
     // tiene fin propio (loop), se termina al acabar el fundido
     private readonly Dictionary<int, System.Threading.Timer> _handoverTimers = new();
-    private readonly Dictionary<int, (MpvGpuRenderer Renderer, List<IVideoLayerSurface> Sinks)>
-        _renderers = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
     private readonly Dictionary<int, double> _volumes = new();
@@ -405,7 +421,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             ? 0.0
             : Math.Log2(Math.Max(1.0, p.Scale) / 100.0);
 
-    /// <summary>Termina todos los players y fades (al salir de la aplicación).</summary>
+    /// <summary>Termina todos los players y fades (al salir de la aplicación).
+    /// Es el ÚNICO sitio donde los pipelines del pool se desmontan de verdad
+    /// (el proceso muere justo después: la fuga del teardown ya no importa).</summary>
     public void Cleanup()
     {
         DiscardStandby();
@@ -413,6 +431,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             CancelFade(cueId);
         foreach (int cueId in _players.Keys.ToList())
             TerminatePlayer(cueId);
+        foreach (var slot in _gpuPool.ToList())
+        {
+            slot.Pipeline.Dispose();
+            foreach (var s in slot.Sinks)
+                s.ClearSurface();
+        }
+        _gpuPool.Clear();
     }
 
     public void Dispose()
@@ -508,11 +533,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             _standby = null;
             TerminateSlotOccupants(cueId, screen, layer,
                 gpu && p.HandoverSeconds > 0.0, p.HandoverSeconds);
-            TerminatePlayer(cueId);   // instancia previa del mismo cue (retrigger)
+            // (Sin TerminatePlayer defensivo aquí: con standby activo no puede
+            // existir instancia previa del cue — PrepareStandby lo impide — y
+            // soltaría el slot del pool que el propio standby tiene ocupado.)
 
             _players[cueId] = sb.Player;
             _playerSlots[cueId] = (screen, layer);
-            _renderers[cueId] = (sb.Renderer, sb.Sinks);
             _volumes[cueId] = p.Volume;
             long tGo = System.Diagnostics.Stopwatch.GetTimestamp();
             try { sb.Player.SetProperty("pause", false); }
@@ -608,45 +634,32 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (usedVo != "gpu" && _forcedVo is null && !gpu)
             ErrorOccurred?.Invoke(cueId, $"[AVISO] vo=gpu no disponible. Usando vo={usedVo}.");
 
-        // ── Compositor GPU: render context → superficies D3D de la pista ─
+        // ── Compositor GPU: slot persistente del pool + attach de sesión ─
         if (gpu)
         {
-            MpvGpuRenderer? renderer = null;
+            GpuSlot? slot = null;
             try
             {
                 var geo = p.Geometry ?? new VideoGeometry();
                 // En modo canvas el FBO de mpv ES el canvas y cada salida
                 // recibe su recorte; en clásico, una única vista completa.
                 var views = canvas ? p.CanvasOutputs : null;
-                renderer = new MpvGpuRenderer(player,
+                slot = AcquireGpuSlot(cueId, screen, layer,
                     (int)geo.SurfW, (int)geo.SurfH, views);
-                var sinks = new List<IVideoLayerSurface>();
-                for (int i = 0; i < renderer.Views.Count; i++)
-                {
-                    var v = renderer.Views[i];
-                    int sinkScreen = canvas ? v.Screen : Math.Clamp(p.Screen, 0, 3);
-                    var sink = _gpuSurfaces!(sinkScreen, layer, cueId);
-                    sink.SetSurface(renderer.ViewSurface(i), v.W, v.H);
-                    renderer.FrameRendered += sink.InvalidateFrame;
-                    sinks.Add(sink);
-                }
-                _renderers[cueId] = (renderer, sinks);
+                slot.Pipeline.AttachPlayer(player);
                 // Confirmación visible del modo (barra de estado): sin esto es
                 // imposible saber desde fuera si el compositor está activo
                 ErrorOccurred?.Invoke(cueId, canvas
-                    ? $"[AVISO] Compositor GPU activo — canvas {renderer.Width}×" +
-                      $"{renderer.Height}, {sinks.Count} salida(s), pista {layer + 1}."
+                    ? $"[AVISO] Compositor GPU activo — canvas {slot.Pipeline.Width}×" +
+                      $"{slot.Pipeline.Height}, {slot.Sinks.Count} salida(s), pista {layer + 1}."
                     : $"[AVISO] Compositor GPU activo — salida {screen + 1}, pista {layer + 1}.");
             }
             catch (Exception exc)
             {
                 // Driver sin interop GL↔D3D (o similar): caer al modo clásico
                 // de forma permanente en esta sesión y reintentar este cue.
-                // Regla mpv: el render context muere ANTES que el core → si el
-                // renderer llegó a crearse (p.ej. falló el cableado de sinks),
-                // liberarlo primero; sin esto quedaba un hilo de render vivo
-                // apuntando a un player destruido.
-                renderer?.Dispose();
+                if (slot is not null)
+                    ReleaseGpuSlot(cueId);
                 player.Dispose();
                 _gpuFailed = true;
                 ErrorOccurred?.Invoke(cueId,
@@ -834,27 +847,19 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (p.TrimEnd > 0.0) options["end"] = p.TrimEnd.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
         if (isImage) options["image-display-duration"] = "inf";
 
+        // CA2000: la propiedad pasa al StandbyPrep devuelto; el catch libera
+        // slot y player en toda ruta de error — el analizador no lo rastrea.
+#pragma warning disable CA2000
         var player = new MpvPlayer(options);
-        MpvGpuRenderer? renderer = null;
-        var sinks = new List<IVideoLayerSurface>();
+#pragma warning restore CA2000
+        GpuSlot? slot = null;
         try
         {
             var geo = p.Geometry ?? new VideoGeometry();
-            // CA2000: la propiedad pasa al StandbyPrep devuelto; el catch de
-            // abajo libera renderer y player en toda ruta de error.
-#pragma warning disable CA2000
-            renderer = new MpvGpuRenderer(player, (int)geo.SurfW, (int)geo.SurfH,
-                canvas ? p.CanvasOutputs : null);
-#pragma warning restore CA2000
-            for (int i = 0; i < renderer.Views.Count; i++)
-            {
-                var v = renderer.Views[i];
-                int sinkScreen = canvas ? v.Screen : Math.Clamp(p.Screen, 0, 3);
-                var sink = _gpuSurfaces!(sinkScreen, layer, cueId);
-                sink.SetSurface(renderer.ViewSurface(i), v.W, v.H);
-                renderer.FrameRendered += sink.InvalidateFrame;
-                sinks.Add(sink);
-            }
+            int screen = canvas ? -1 : Math.Clamp(p.Screen, 0, 3);
+            slot = AcquireGpuSlot(cueId, screen, layer,
+                (int)geo.SurfW, (int)geo.SurfH, canvas ? p.CanvasOutputs : null);
+            slot.Pipeline.AttachPlayer(player);
 
             player.EndFile += () => Post(() =>
             {
@@ -877,28 +882,27 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             ApplyGeo(player, p.Geometry ?? new VideoGeometry(), BaseZoom(p));
 
             player.Play(filePath);   // carga PAUSADO (pause=yes va en opciones)
-            return new StandbyPrep(cueId, filePath, p, player, renderer, sinks);
+            return new StandbyPrep(cueId, filePath, p, player);
         }
         catch
         {
-            renderer?.Dispose();
-            foreach (var s in sinks)
-                s.ClearSurface();
+            // El slot vuelve al pool (el pipeline sobrevive); solo muere el core
+            if (slot is not null)
+                ReleaseGpuSlot(cueId);
             player.Dispose();
             throw;
         }
     }
 
     /// <summary>Descarta la precarga en pausa (cueId concreto o -1 = la que
-    /// haya). Regla mpv: el render context muere ANTES que el core.</summary>
+    /// haya). Regla mpv: el render context muere ANTES que el core — Detach
+    /// lo garantiza; el pipeline del pool sobrevive para el siguiente cue.</summary>
     public void DiscardStandby(int cueId = -1)
     {
         if (_standby is not { } sb || (cueId >= 0 && sb.CueId != cueId))
             return;
         _standby = null;
-        sb.Renderer.Dispose();
-        foreach (var sink in sb.Sinks)
-            sink.ClearSurface();
+        ReleaseGpuSlot(sb.CueId);
         sb.Player.Dispose();
     }
 
@@ -928,14 +932,81 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (_handoverTimers.Remove(cueId, out var handover))
             handover.Dispose();
         // Regla de mpv: el render context se libera ANTES que el core
-        if (_renderers.Remove(cueId, out var r))
-        {
-            r.Renderer.Dispose();
-            foreach (var sink in r.Sinks)
-                sink.ClearSurface();
-        }
+        // (ReleaseGpuSlot hace el Detach; el pipeline del pool sobrevive)
+        ReleaseGpuSlot(cueId);
         if (_players.Remove(cueId, out var player))
             player.Dispose();
+    }
+
+    // ------------------------------------------------------------------
+    // Pool de pipelines GPU persistentes (auditoría 05)
+    // ------------------------------------------------------------------
+
+    private static string GpuSpec(int w, int h, IReadOnlyList<CanvasView>? views) =>
+        views is null
+            ? $"{w}x{h}"
+            : $"{w}x{h}|" + string.Join(";",
+                views.Select(v => $"{v.Screen},{v.X},{v.Y},{v.W},{v.H}"));
+
+    /// <summary>Devuelve un slot LIBRE del pool para (salida, pista, spec) —
+    /// o crea su pipeline si no lo hay (primera vez, o crossfade que necesita
+    /// un segundo en la misma pista). Marca el slot ocupado y asigna los
+    /// sinks al cue (opacidad/z en la ventana).</summary>
+    private GpuSlot AcquireGpuSlot(int cueId, int screen, int layer,
+        int surfW, int surfH, IReadOnlyList<CanvasView>? views)
+    {
+        string spec = GpuSpec(surfW, surfH, views);
+        var slot = _gpuPool.FirstOrDefault(s =>
+            s.BusyCueId is null && s.Screen == screen && s.Layer == layer
+            && s.Spec == spec);
+        if (slot is null)
+        {
+            var pipeline = new MpvGpuRenderer(surfW, surfH, views);
+            var sinks = new List<IVideoLayerSurface>();
+            for (int i = 0; i < pipeline.Views.Count; i++)
+            {
+                var v = pipeline.Views[i];
+                int sinkScreen = views is not null ? v.Screen : Math.Max(0, screen);
+                var sink = _gpuSurfaces!(sinkScreen, layer, _gpuSlotSeq++);
+                sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
+                int viewIndex = i;
+                sink.SetFrameCopier(() => pipeline.CopyPresent(viewIndex));
+                pipeline.FrameRendered += sink.InvalidateFrame;
+                sinks.Add(sink);
+            }
+            slot = new GpuSlot
+            {
+                Pipeline = pipeline, Sinks = sinks,
+                Screen = screen, Layer = layer, Spec = spec,
+            };
+            _gpuPool.Add(slot);
+        }
+        slot.BusyCueId = cueId;
+        foreach (var s in slot.Sinks)
+            s.AssignCue(cueId);
+        return slot;
+    }
+
+    /// <summary>Suelta el slot del cue: Detach del render context (regla mpv:
+    /// antes que el core) y sinks ocultos. El pipeline queda LIBRE en el pool
+    /// — el interop jamás se desmonta por cue (esa era LA fuga de VRAM).
+    /// Si el Detach falla (hilo dañado), el pipeline se descarta entero.</summary>
+    private void ReleaseGpuSlot(int cueId)
+    {
+        var slot = _gpuPool.FirstOrDefault(s => s.BusyCueId == cueId);
+        if (slot is null)
+            return;
+        bool ok = slot.Pipeline.DetachPlayer();
+        foreach (var s in slot.Sinks)
+            s.ReleaseCue(cueId);
+        slot.BusyCueId = null;
+        if (!ok)
+        {
+            _gpuPool.Remove(slot);
+            slot.Pipeline.Dispose();
+            foreach (var s in slot.Sinks)
+                s.ClearSurface();
+        }
     }
 
     // ------------------------------------------------------------------

@@ -151,8 +151,26 @@ public interface IVideoLayerSurface
     /// <summary>Hay un frame nuevo en la superficie (¡hilo de render!).</summary>
     void InvalidateFrame();
 
-    /// <summary>La pista quedó vacía: soltar la superficie (main thread).</summary>
+    /// <summary>Soltar la superficie del todo (main thread). Con el pool de
+    /// pipelines (auditoría 05) solo se llama al DESTRUIR el pipeline (salida
+    /// de la app / cambio de spec), no por cue.</summary>
     void ClearSurface();
+
+    /// <summary>Un cue toma esta superficie del pool persistente: mapear el
+    /// cueId (opacidad/z) y hacerla visible. Main thread. El binding D3DImage
+    /// NO se recrea — la auditoría 05 demostró que el ciclo crear/destruir
+    /// por cue fuga VRAM vía interop+dirty-rects.</summary>
+    void AssignCue(int cueId) { }
+
+    /// <summary>El cue soltó la superficie: desmapear y ocultar. El binding
+    /// sobrevive para el siguiente cue. Main thread.</summary>
+    void ReleaseCue(int cueId) { }
+
+    /// <summary>Copiador de frame: el sink DEBE invocarlo DENTRO del Lock del
+    /// D3DImage, justo antes de AddDirtyRect (contrato D3DImage: escribir al
+    /// back buffer sin el Lock provoca renaming del driver = fuga de VRAM por
+    /// frame — auditoría 05).</summary>
+    void SetFrameCopier(Action copyFrame) { }
 }
 
 /// <summary>Motor de vídeo (implementado por WinCue.Video sobre libmpv).</summary>

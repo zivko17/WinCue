@@ -543,14 +543,14 @@ public partial class MainWindow : Window, IShowView
             w?.SetCueOpacity(cueId, opacity, fadeSeconds);
     }
 
-    /// <summary>Superficie del compositor GPU POR CUE (la usa App para el
-    /// provider del motor).</summary>
-    public CompositorLayerControl GetCompositorSurface(int screen, int layer, int cueId)
+    /// <summary>Superficie PERSISTENTE del compositor para un slot del pool
+    /// (la usa App para el provider del motor; auditoría 05).</summary>
+    public CompositorLayerControl GetCompositorSurface(int screen, int layer, int slotSeq)
     {
         screen = Math.Clamp(screen, 0, _videoOutputs.Length - 1);
         bool firstOpen = _videoOutputs[screen] is null || !_videoOutputs[screen]!.IsVisible;
         EnsureVideoOutputWindow(screen);
-        var surface = _videoOutputs[screen]!.GetCompositorSurface(layer, cueId);
+        var surface = _videoOutputs[screen]!.GetCompositorSurface(layer, slotSeq);
         if (firstOpen)
             PlaceVideoOutput(screen);
         return surface;

@@ -299,31 +299,31 @@ public partial class VideoOutputWindow : Window
         _blackoutVeil.BeginAnimation(OpacityProperty, anim);
     }
 
-    /// <summary>Superficie del compositor GPU para UN CUE en la pista dada:
-    /// se crea un control nuevo (z por pista; dentro de la misma pista, el
-    /// más reciente encima — crossfade A→B) que se retira solo cuando el
-    /// motor suelta la superficie.</summary>
-    public CompositorLayerControl GetCompositorSurface(int layer, int cueId)
+    /// <summary>Superficie PERSISTENTE del compositor para un SLOT del pool
+    /// (auditoría 05): el control y su binding D3DImage viven toda la sesión.
+    /// Los cues pasan por él vía AssignCue/ReleaseCue — al asignar sube el z
+    /// de su pista (dentro de la misma pista, el más reciente encima:
+    /// crossfade A→B) y se mapea para la opacidad por cue.</summary>
+    public CompositorLayerControl GetCompositorSurface(int layer, int slotSeq)
     {
         if (!IsVisible)
             Show();
         ShowHwndMode(false);
 
-        // Re-arranque del mismo cue: sustituir su control anterior
-        if (_gpuByCue.Remove(cueId, out var stale))
-            _gpuHost.Children.Remove(stale);
-
         var ctl = new CompositorLayerControl();
-        int z = (7 - Math.Clamp(layer, 0, 7)) * 100_000 + (++_gpuSeq & 0xFFFF);
-        Panel.SetZIndex(ctl, z);
-        ctl.Cleared = () =>
+        ctl.CueAssigned = cueId =>
+        {
+            _gpuByCue[cueId] = ctl;
+            int z = (7 - Math.Clamp(layer, 0, 7)) * 100_000 + (++_gpuSeq & 0xFFFF);
+            Panel.SetZIndex(ctl, z);
+        };
+        ctl.CueReleased = cueId =>
         {
             if (_gpuByCue.TryGetValue(cueId, out var cur) && ReferenceEquals(cur, ctl))
                 _gpuByCue.Remove(cueId);
-            _gpuHost.Children.Remove(ctl);
         };
+        ctl.Cleared = () => _gpuHost.Children.Remove(ctl);   // pipeline muerto
         _gpuHost.Children.Add(ctl);
-        _gpuByCue[cueId] = ctl;
         return ctl;
     }
 

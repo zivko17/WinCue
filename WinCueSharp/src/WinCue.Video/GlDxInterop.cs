@@ -49,6 +49,7 @@ internal static class D3D9Minimal
     // Slots de vtable (IUnknown = 0..2)
     private const int VtblCreateDeviceEx = 20;      // IDirect3D9Ex
     private const int VtblCreateRenderTarget = 28;  // IDirect3DDevice9
+    private const int VtblStretchRect = 34;         // IDirect3DDevice9
     private const int VtblRelease = 2;              // IUnknown
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
@@ -60,6 +61,10 @@ internal static class D3D9Minimal
     private delegate int CreateRenderTargetFn(nint self, uint width, uint height,
         uint format, uint multiSample, uint quality, int lockable,
         out nint surface, ref nint sharedHandle);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int StretchRectFn(nint self, nint srcSurface, nint srcRect,
+        nint dstSurface, nint dstRect, uint filter);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint ReleaseFn(nint self);
@@ -76,6 +81,12 @@ internal static class D3D9Minimal
         if (comObject != 0)
             Method<ReleaseFn>(comObject, VtblRelease)(comObject);
     }
+
+    /// <summary>Copia GPU src→dst completa (D3DTEXF_NONE), mismo device.
+    /// Aísla la superficie que WPF presenta de la registrada en el interop
+    /// GL — WPF jamás debe tocar esa (auditoría 05: fuga de VRAM).</summary>
+    internal static int StretchRect(nint device, nint src, nint dst) =>
+        Method<StretchRectFn>(device, VtblStretchRect)(device, src, 0, dst, 0, 0);
 
     /// <summary>Crea el dispositivo D3D9Ex (uno por renderer; las render
     /// targets compartidas se crean sobre él). Lanza si algo falla.</summary>
