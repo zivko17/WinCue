@@ -76,6 +76,7 @@ public class MainController
     private readonly IScheduler _scheduler;
     private readonly SettingsManager _settings;
     private readonly Random _random;
+    private readonly ShowFileService _files;
 
     private int _playhead;
     private bool _paused;
@@ -134,6 +135,21 @@ public class MainController
         _video.SetWindowHandleProvider(() => _view.GetVideoOutputHandle());
         _video.SetLayerHandleProvider(
             (screen, layer) => _view.GetVideoOutputLayerHandle(screen, layer));
+
+        // Persistencia extraída (paso 1 de la auditoría 02): el servicio recibe
+        // como callbacks lo poco que necesita del núcleo — el controlador sigue
+        // siendo el único dueño del estado de reproducción.
+        _files = new ShowFileService(
+            model, view,
+            log: Log,
+            pushUndo: PushUndo,
+            beforeLoad: () =>
+            {
+                StopEverything(fade: 0.0);
+                _video.DiscardStandby();   // los ids del show anterior ya no valen
+            },
+            setPlayhead: SetPlayhead,
+            invalidateAudioCache: _audio.InvalidateCache);
 
         SetPlayhead(0);
     }
@@ -2170,200 +2186,37 @@ public class MainController
         || key.StartsWith("comp", StringComparison.Ordinal);
 
     // ------------------------------------------------------------------
-    // Guardar / cargar show en JSON (la vista pone los diálogos)
+    // Guardar / cargar show en JSON — implementación en ShowFileService
+    // (la vista pone los diálogos; aquí solo queda la delegación y el
+    // flag HasUnsavedChanges, que pertenece al ciclo de edición)
     // ------------------------------------------------------------------
 
     /// <summary>Guarda el show. El media que vive junto al .json (o debajo) se
     /// guarda con RUTA RELATIVA → el show es portátil entre máquinas.</summary>
     public void SaveShow(string path)
     {
-        if (!path.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
-            path += ".json";
-        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";
-
-        // Relativizar temporalmente y restaurar tras serializar
-        var originals = new Dictionary<int, string>();
-        foreach (var c in _model.Cues)
-        {
-            if (c.FilePath.Length == 0 || !Path.IsPathRooted(c.FilePath) || dir.Length == 0)
-                continue;
-            string rel = Path.GetRelativePath(dir, c.FilePath);
-            if (!rel.StartsWith("..", StringComparison.Ordinal) && !Path.IsPathRooted(rel))
-            {
-                originals[c.Id] = c.FilePath;
-                c.FilePath = rel;
-            }
-        }
-        try
-        {
-            RotateBackups(path);
-            File.WriteAllText(path, _model.ToJson());
+        if (_files.SaveShow(path))
             HasUnsavedChanges = false;
-            Log($"Show guardado: {path}");
-            _view.FlashStatus($"Show guardado: {Path.GetFileName(path)}");
-        }
-        catch (IOException exc)
-        {
-            _view.ShowError("Error al guardar", exc.Message);
-        }
-        finally
-        {
-            foreach (var c in _model.Cues)
-                if (originals.TryGetValue(c.Id, out string? orig))
-                    c.FilePath = orig;
-        }
-    }
-
-    /// <summary>Copias de seguridad rotadas al SOBRESCRIBIR un show:
-    /// show.json → show.json.bak1 → .bak2 → .bak3. Un guardado malo en
-    /// directo nunca es irreversible.</summary>
-    private static void RotateBackups(string path)
-    {
-        if (!File.Exists(path))
-            return;
-        try
-        {
-            for (int i = 2; i >= 1; i--)
-                if (File.Exists($"{path}.bak{i}"))
-                    File.Copy($"{path}.bak{i}", $"{path}.bak{i + 1}", overwrite: true);
-            File.Copy(path, $"{path}.bak1", overwrite: true);
-        }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
-        {
-            // Sin backup no se bloquea el guardado principal
-        }
     }
 
     /// <summary>Guardado silencioso para el autosave (sin diálogos ni status).</summary>
-    public bool Autosave(string path)
-    {
-        if (_model.Count == 0)
-            return false;
-        try
-        {
-            File.WriteAllText(path, _model.ToJson());
-            return true;
-        }
-        catch (IOException) { return false; }
-    }
+    public bool Autosave(string path) => _files.Autosave(path);
 
     /// <summary>Carga un show: resuelve rutas relativas contra la carpeta del
     /// .json y marca en ERROR los cues cuyo media no existe.</summary>
     public void LoadShow(string path)
     {
-        List<Cue> newCues;
-        try
-        {
-            newCues = CueModel.FromJson(File.ReadAllText(path));
-        }
-        catch (Exception exc) when (exc is IOException or FormatException)
-        {
-            _view.ShowError("Error al cargar", exc.Message);
-            return;
-        }
-        if (newCues.Count == 0)
-        {
-            _view.ShowError("Show vacío", "El archivo no contiene ningún cue.");
-            return;
-        }
-
-        PushUndo();   // deshacer la carga restaura el show anterior
-        StopEverything(fade: 0.0);
-        _video.DiscardStandby();   // los ids del show anterior ya no valen
-
-        // Rutas relativas → absolutas respecto a la carpeta del show
-        string dir = Path.GetDirectoryName(Path.GetFullPath(path)) ?? "";
-        foreach (var c in newCues)
-            if (c.FilePath.Length > 0 && !Path.IsPathRooted(c.FilePath) && dir.Length > 0)
-                c.FilePath = Path.GetFullPath(Path.Combine(dir, c.FilePath));
-
-        _model.ReplaceAll(newCues);
-
-        // Media faltante → estado ERROR visible en la tabla
-        int missing = 0;
-        for (int i = 0; i < _model.Count; i++)
-        {
-            var c = _model.Cues[i];
-            if ((c.IsMedia() || c.Type == CueType.Script) &&
-                c.FilePath.Length > 0 && !File.Exists(c.FilePath))
-            {
-                _model.SetState(i, CueState.Error);
-                missing++;
-            }
-        }
-
-        _view.ReloadTable();
-        SetPlayhead(0);
-        HasUnsavedChanges = false;
-        Log($"Show cargado: {path}");
-        _view.FlashStatus(missing > 0
-            ? $"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados"
-            : $"Show cargado: {Path.GetFileName(path)}");
+        if (_files.LoadShow(path))
+            HasUnsavedChanges = false;
     }
 
     /// <summary>Cues de media/script cuyo archivo NO existe en disco.</summary>
-    public int MissingMediaCount()
-    {
-        int missing = 0;
-        foreach (var c in _model.Cues)
-            if ((c.IsMedia() || c.Type == CueType.Script)
-                && c.FilePath.Length > 0 && !File.Exists(c.FilePath))
-                missing++;
-        return missing;
-    }
+    public int MissingMediaCount() => _files.MissingMediaCount();
 
     /// <summary>Relocaliza los medios faltantes buscando POR NOMBRE DE
     /// ARCHIVO (recursivo) en la carpeta dada — el caso "show movido de
     /// máquina". Devuelve cuántos se recuperaron.</summary>
-    public int RelocateMedia(string folder)
-    {
-        if (!Directory.Exists(folder))
-            return 0;
-
-        // Índice nombre → primera ruta encontrada
-        var index = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
-        try
-        {
-            foreach (string f in Directory.EnumerateFiles(
-                folder, "*", SearchOption.AllDirectories))
-            {
-                string name = Path.GetFileName(f);
-                if (!index.ContainsKey(name))
-                    index[name] = f;
-            }
-        }
-        catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
-        {
-            // Carpeta parcialmente ilegible: se relocaliza lo que se pudo indexar
-        }
-
-        PushUndo();
-        int recovered = 0;
-        for (int i = 0; i < _model.Count; i++)
-        {
-            var c = _model.Cues[i];
-            if (!(c.IsMedia() || c.Type == CueType.Script)
-                || c.FilePath.Length == 0 || File.Exists(c.FilePath))
-                continue;
-            if (index.TryGetValue(Path.GetFileName(c.FilePath), out string? found))
-            {
-                c.FilePath = found;
-                c.LatencyMs = null;
-                _model.SetState(i, CueState.Idle);
-                _audio.InvalidateCache(c.Id);
-                recovered++;
-            }
-        }
-
-        if (recovered > 0)
-            _view.ReloadTable();
-        int stillMissing = MissingMediaCount();
-        Log($"Relocalización de medios: {recovered} recuperados, {stillMissing} pendientes ({folder})");
-        _view.FlashStatus(stillMissing > 0
-            ? $"Relocalizados {recovered} archivo(s) — ⚠ quedan {stillMissing} sin encontrar"
-            : $"Relocalizados {recovered} archivo(s). Todos los medios OK.");
-        return recovered;
-    }
+    public int RelocateMedia(string folder) => _files.RelocateMedia(folder);
 
     // ------------------------------------------------------------------
     // Cierre limpio
