@@ -479,6 +479,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     {
         if (_outputs.TryGetValue(bus, out var existing))
             return existing.Mixer;
+        IWavePlayer? player = null;
         try
         {
             var mixer = new MixingSampleProvider(
@@ -488,7 +489,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             };
             mixer.MixerInputEnded += OnMixerInputEnded;
 
-            var player = CreateOutput(bus);
+            // CA2000: la propiedad pasa a _outputs; el catch libera en toda
+            // ruta de error — el analizador no reconoce el patrón.
+#pragma warning disable CA2000
+            player = CreateOutput(bus);
+#pragma warning restore CA2000
             player.Init(mixer);
             player.Play();
             _outputs[bus] = new OutputBus(player, mixer);
@@ -496,6 +501,9 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         }
         catch (Exception exc)
         {
+            // Si Init/Play fallan tras crear la salida, liberar el dispositivo
+            // (antes se filtraba el handle WASAPI/ASIO en cada reintento)
+            try { player?.Dispose(); } catch (Exception) { }
             EmitError(cueId, $"No se pudo abrir el dispositivo de audio" +
                 (bus.Length > 0 ? $" '{bus}'" : "") + $": {exc.Message}");
             return null;
