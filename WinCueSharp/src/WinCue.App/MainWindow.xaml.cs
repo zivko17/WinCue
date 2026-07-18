@@ -916,6 +916,31 @@ public partial class MainWindow : Window, IShowView
             : "Blackout levantado.");
     }
 
+    /// <summary>Acerca de: versión + atribuciones de terceros (auditoría 05).
+    /// El archivo THIRD-PARTY-NOTICES.md se distribuye junto al exe.</summary>
+    private void OnAboutClick(object sender, RoutedEventArgs e)
+    {
+        string ver = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "dev";
+        string notices = System.IO.Path.Combine(AppContext.BaseDirectory,
+            "THIRD-PARTY-NOTICES.md");
+        var res = MessageBox.Show(this,
+            $"WinCue {ver} — reproductor de cues de audio y vídeo para directo.\n\n" +
+            "Este software incluye componentes de terceros (NAudio, libmpv, " +
+            "runtime de .NET); las atribuciones y licencias completas están en " +
+            "THIRD-PARTY-NOTICES.md, junto al ejecutable.\n\n" +
+            "¿Abrir el archivo de atribuciones?",
+            "Acerca de WinCue", MessageBoxButton.YesNo, MessageBoxImage.Information);
+        if (res == MessageBoxResult.Yes)
+        {
+            if (System.IO.File.Exists(notices))
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(notices) { UseShellExecute = true });
+            else
+                FlashStatus("THIRD-PARTY-NOTICES.md no está junto al ejecutable " +
+                    "(se incluye al publicar con publish.ps1).");
+        }
+    }
+
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {
         var dlg = new SettingsWindow(_settings) { Owner = this };
