@@ -1,4 +1,4 @@
-# =============================================================================
+﻿# =============================================================================
 # generar-show-prueba.ps1 — Medias sintéticas para el show de prueba de fades
 # =============================================================================
 # Genera con ffmpeg (debe estar en PATH) los vídeos/audios/imágenes que usa
