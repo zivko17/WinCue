@@ -136,6 +136,31 @@ Criterio: **(riesgo de mantenimiento que elimina) / (riesgo de romper al extraer
 
 ---
 
+## Resultado de la ejecución (2026-07-18)
+
+Los 5 pasos de bajo riesgo se ejecutaron el mismo día, uno por commit, con la
+suite completa (255) en verde tras cada uno y smoke final OK:
+
+| Paso | Servicio nuevo | Commit | MainController |
+|---|---|---|---:|
+| 1 | `ShowFileService` (241 L) | `5d637e13` | 2 383 → 2 236 |
+| 2 | `CueListEditor` (379 L) | `1d06ea53` | → 1 959 |
+| 3 | `RemoteRouter` (274 L) | `7b997989` | → 1 807 |
+| 4 | `UndoService` (104 L) | `8d49dfb3` | → 1 766 |
+| 5 | `CanvasLayout` (141 L) | `75496957` | → **1 687 (−29 %)** |
+
+Reglas respetadas en los 5: API pública de `MainController` intacta
+(delegación), un módulo por fichero, y el núcleo como **dueño único de
+`_running`** — los servicios reciben callbacks, jamás mutan estado de
+reproducción. `HasUnsavedChanges` quedó en el controlador (ciclo de edición);
+`NowProvider` y los estáticos públicos (`ParseTimecode`, `ParseRegion`)
+delegan para no romper tests ni UI.
+
+Los tests pendientes anotados por paso (RotateBackups, MaxUndo, snapshot
+corrupto, bordes de ParseRegion) siguen pendientes — son deuda de test, no de
+código. El paso 6 (`CueRuntime`) queda como estaba: **no ejecutar** salvo
+crecimiento del proyecto.
+
 ## 5. Resumen ejecutivo
 
 - `MainController` son **16 responsabilidades en un fichero**; el núcleo legítimo (disparo+fin+tick, ~820 líneas) está rodeado de ~1 000 líneas de edición, persistencia y ruteo que **no necesitan estar ahí**.
