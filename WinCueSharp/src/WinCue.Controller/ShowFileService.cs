@@ -259,8 +259,11 @@ public sealed class ShowFileService
 
         _model.ReplaceAll(newCues);
 
-        // Media faltante → estado ERROR visible en la tabla
-        int missing = 0;
+        // Media faltante → ERROR. Los vídeos HAP se SONDEAN AQUÍ (reproducción
+        // parada = seguro) para calentar la caché del enrutado: en caliente el
+        // controlador solo consulta la caché, nunca lanza ffprobe en el hilo de
+        // UI. HAP no es error: se reproduce por la ruta clásica.
+        int missing = 0, classicPath = 0;
         for (int i = 0; i < _model.Count; i++)
         {
             var c = _model.Cues[i];
@@ -270,16 +273,26 @@ public sealed class ShowFileService
                 _model.SetState(i, CueState.Error);
                 missing++;
             }
+            else if (c.Type == CueType.Video && c.FilePath.Length > 0 &&
+                     MediaImporter.IsUnsupportedVideoCodec(c.FilePath))
+            {
+                classicPath++;
+            }
         }
 
         _view.ReloadTable();
         _setPlayhead(0);
-        _log($"Show cargado: {path}");
-        _view.FlashStatus(missing > 0
-            ? Loc.T($"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados",
-                    $"Show loaded — ⚠ {missing} media file(s) NOT found")
-            : Loc.T($"Show cargado: {Path.GetFileName(path)}",
-                    $"Show loaded: {Path.GetFileName(path)}"));
+        _log($"Show cargado: {path} ({missing} faltantes, {classicPath} HAP por ruta clásica)");
+        string warn = missing > 0
+            ? Loc.T($" — ⚠ {missing} archivo(s) NO encontrados", $" — ⚠ {missing} file(s) NOT found")
+            : "";
+        warn += classicPath > 0
+            ? Loc.T($" — {classicPath} vídeo(s) HAP → ruta clásica (sin fundidos de opacidad)",
+                    $" — {classicPath} HAP video(s) → classic path (no opacity fades)")
+            : "";
+        _view.FlashStatus(warn.Length > 0
+            ? Loc.T($"Show cargado{warn}", $"Show loaded{warn}")
+            : Loc.T($"Show cargado: {Path.GetFileName(path)}", $"Show loaded: {Path.GetFileName(path)}"));
         return true;
     }
 

@@ -658,7 +658,24 @@ public class MainController
                 // (el motor mantiene vivo al saliente durante el fundido)
                 double targetOpacity = cue.Opacity / 100.0;
                 double fadeLeft = Math.Max(0.0, cue.FadeIn - offset);
-                _video.Play(cue.Id, cue.FilePath, _canvas.ParamsFor(cue, offset));
+                var vparams = _canvas.ParamsFor(cue, offset);
+                // Códec que el compositor no renderiza (HAP): ruta CLÁSICA —
+                // se reproduce embebido en la ventana de salida, sin fundidos
+                // de opacidad (el interop del compositor revienta con HAP; la
+                // ruta clásica está verificada). Sondeo cacheado al cargar.
+                if (MediaImporter.IsUnsupportedVideoCodec(cue.FilePath))
+                {
+                    vparams = vparams with
+                    {
+                        ForceClassicPath = true,
+                        HandoverSeconds = 0.0,
+                        CanvasOutputs = null,
+                    };
+                    _view.FlashStatus(Loc.T(
+                        $"«{cue.Name}»: HAP → ruta clásica (sin fundidos de opacidad).",
+                        $"«{cue.Name}»: HAP → classic path (no opacity fades)."));
+                }
+                _video.Play(cue.Id, cue.FilePath, vparams);
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
                 {
@@ -1437,6 +1454,13 @@ public class MainController
     /// precarga nunca debe ABRIR ventanas sola.</summary>
     private void PrepareVideoStandby(Cue cue)
     {
+        // HAP (u otro códec sin soporte en el compositor): solo verificación
+        // clásica — el standby GPU con HAP era EL crash nativo original.
+        if (MediaImporter.IsUnsupportedVideoCodec(cue.FilePath))
+        {
+            _video.PreloadNext(cue.Id, cue.FilePath);
+            return;
+        }
         bool visible = CanvasMode
             ? _view.IsVideoOutputVisible(0)
             : _view.IsVideoOutputVisible(ScreenOf(cue));

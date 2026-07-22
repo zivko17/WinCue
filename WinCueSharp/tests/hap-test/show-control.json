@@ -1,0 +1,9 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "MEMO", "number": "0", "name": "CONTROL H264", "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "1", "name": "control h264 (10 s)",
+      "file_path": "control-h264.mp4", "duration": 10.0,
+      "timeline_layer": 2, "continue_mode": "NONE" }
+  ]
+}

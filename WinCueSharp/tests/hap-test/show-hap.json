@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "MEMO", "number": "0",
+      "name": "PRUEBA HAP — GO en cada cue · mira fluidez (30 fps), scrub y CPU",
+      "notes": "1) HAP estándar (DXT1) · 2) HAP Q (mejor calidad). Encadenado con AUTO_CONTINUE para el modo --stress.",
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "1", "name": "HAP estándar 1080p30 (10 s)",
+      "file_path": "prueba-hap.mov", "duration": 10.0,
+      "timeline_layer": 2, "post_wait": 10.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 3, "type": "VIDEO", "number": "2", "name": "HAP Q 1080p30 (10 s)",
+      "file_path": "prueba-hap-q.mov", "duration": 10.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

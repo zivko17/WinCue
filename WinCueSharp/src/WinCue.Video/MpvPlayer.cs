@@ -30,6 +30,44 @@ public sealed class MpvPlayer : IDisposable
     private bool _disposed;
 
     private const ulong EofReachedUserdata = 0xE0F;
+    private const ulong TimePosUserdata = 0x71ED;
+    private const ulong PauseUserdata = 0x7A05;
+
+    // Última time-pos EMPUJADA por mpv (hilo de eventos): leerla no toca el
+    // core. Con el core saturado (p. ej. decode SW de HAP 1080p), la consulta
+    // síncrona GetPropertyDouble se atascaba y el cursor del timeline iba a
+    // trompicones. double no admite volatile → bits por Interlocked.
+    // mpv empuja time-pos A RÁFAGAS (a veces >300 ms entre pushes): se guarda
+    // también el INSTANTE del push para extrapolar con reloj de pared.
+    private long _timePosBits = BitConverter.DoubleToInt64Bits(double.NaN);
+    private long _timePosStamp;          // Stopwatch ticks del último push
+    private volatile int _observedPause; // 1 = pausado (propiedad observada)
+
+    /// <summary>time-pos observada (asíncrona, sin bloquear el core); null si
+    /// mpv aún no la ha publicado.</summary>
+    public double? ObservedTimePos
+    {
+        get
+        {
+            double v = BitConverter.Int64BitsToDouble(Interlocked.Read(ref _timePosBits));
+            return double.IsNaN(v) ? null : v;
+        }
+    }
+
+    /// <summary>time-pos observada + extrapolación con reloj de pared desde el
+    /// último push (cap 1 s; en pausa no extrapola). Da un reloj CONTINUO
+    /// aunque mpv publique a ráfagas — es lo que consume la UI.</summary>
+    public double? ObservedTimePosSmooth(double rate = 1.0)
+    {
+        double v = BitConverter.Int64BitsToDouble(Interlocked.Read(ref _timePosBits));
+        if (double.IsNaN(v))
+            return null;
+        if (_observedPause != 0)
+            return v;
+        double since = System.Diagnostics.Stopwatch
+            .GetElapsedTime(Interlocked.Read(ref _timePosStamp)).TotalSeconds;
+        return v + Math.Min(Math.Max(0.0, since), 1.0) * Math.Max(0.0, rate);
+    }
 
     // Eventos (¡se disparan en el hilo de eventos de mpv!)
     public event Action? FileLoaded;
@@ -81,6 +119,12 @@ public sealed class MpvPlayer : IDisposable
 
         // eof-reached: única señal fiable de fin natural con keep-open=yes
         _ = mpv_observe_property(_handle, EofReachedUserdata, "eof-reached", MpvFormat.Flag);
+        // time-pos observada: mpv la empuja por el hilo de eventos → GetElapsed
+        // no consulta el core en caliente (ver ObservedTimePos)
+        _ = mpv_observe_property(_handle, TimePosUserdata, "time-pos", MpvFormat.Double);
+        // pause observada: la extrapolación de ObservedTimePosSmooth se apaga
+        // en pausa (si no, el reloj deslizaría y volvería atrás al reanudar)
+        _ = mpv_observe_property(_handle, PauseUserdata, "pause", MpvFormat.Flag);
 
         _eventThread = new Thread(EventLoop)
         {
@@ -181,6 +225,26 @@ public sealed class MpvPlayer : IDisposable
                     {
                         SafeRaise(EndFile);
                     }
+                    break;
+                case MpvEventId.PropertyChange when ev.ReplyUserdata == TimePosUserdata:
+                    var tp = System.Runtime.InteropServices.Marshal
+                        .PtrToStructure<MpvEventProperty>(ev.Data);
+                    if (tp.Format == MpvFormat.Double && tp.Data != 0)
+                    {
+                        double v = System.Runtime.InteropServices.Marshal
+                            .PtrToStructure<double>(tp.Data);
+                        Interlocked.Exchange(ref _timePosBits,
+                            BitConverter.DoubleToInt64Bits(v));
+                        Interlocked.Exchange(ref _timePosStamp,
+                            System.Diagnostics.Stopwatch.GetTimestamp());
+                    }
+                    break;
+                case MpvEventId.PropertyChange when ev.ReplyUserdata == PauseUserdata:
+                    var pp = System.Runtime.InteropServices.Marshal
+                        .PtrToStructure<MpvEventProperty>(ev.Data);
+                    if (pp.Format == MpvFormat.Flag && pp.Data != 0)
+                        _observedPause = System.Runtime.InteropServices.Marshal
+                            .ReadInt32(pp.Data);
                     break;
             }
         }

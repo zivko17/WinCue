@@ -34,6 +34,9 @@ public sealed class LiveMonitorControl : Border
     private readonly TextBlock _status;
 
     private MpvPlayer? _player;
+    private static int _monitorSeq;   // numera los logs de diagnóstico por monitor
+    private bool? _pauseState;        // último pause aplicado (null = re-asertar)
+    private double _cachedDuration;   // duración del archivo actual (0 = pedirla)
     private string _currentPath = "";
     private double _lastElapsed = -1;
 
@@ -110,6 +113,8 @@ public sealed class LiveMonitorControl : Border
         {
             _currentPath = path;
             _lastElapsed = -1;
+            _cachedDuration = 0.0;
+            _pauseState = null;
             try
             {
                 _player!.SetProperty("loop-file", loop ? "inf" : "no");
@@ -147,6 +152,8 @@ public sealed class LiveMonitorControl : Border
         if (path != _currentPath)
         {
             _currentPath = path;
+            _cachedDuration = 0.0;
+            _pauseState = null;
             try
             {
                 _player!.SetProperty("loop-file", "no");
@@ -173,6 +180,7 @@ public sealed class LiveMonitorControl : Border
         try
         {
             _player.SetProperty("pause", true);
+            _pauseState = true;
             _player.Command("seek",
                 Math.Max(0.0, seconds).ToString("F3", CultureInfo.InvariantCulture),
                 "absolute");
@@ -196,7 +204,12 @@ public sealed class LiveMonitorControl : Border
         catch (Exception) { }
     }
 
-    /// <summary>Re-sincroniza el monitor con el reloj real del motor (PGM).</summary>
+    /// <summary>Re-sincroniza el monitor con el reloj real del motor (PGM).
+    /// OJO: corre en el hilo de UI cada 500 ms — aquí NO puede haber llamadas
+    /// síncronas al core de mpv en caliente (con el core saturado, p. ej.
+    /// decode SW de HAP, bloqueaban el hilo de UI y el cursor del timeline iba
+    /// a trompicones). Posición = observada (push); duración = cacheada por
+    /// archivo; pause = solo al CAMBIAR de estado.</summary>
     public void SyncClock(double elapsed)
     {
         if (_player is null || _currentPath.Length == 0)
@@ -205,14 +218,22 @@ public sealed class LiveMonitorControl : Border
         {
             // Pausa-espejo: si el reloj del motor no avanza, congelar el monitor
             bool advancing = _lastElapsed < 0 || elapsed > _lastElapsed + 0.02;
-            _player.SetProperty("pause", !advancing);
+            bool wantPause = !advancing;
+            if (_pauseState != wantPause)
+            {
+                _player.SetProperty("pause", wantPause);
+                _pauseState = wantPause;
+            }
             _lastElapsed = elapsed;
 
+            // Duración: consultarla UNA vez por archivo (0 = aún desconocida)
+            if (_cachedDuration <= 0.0)
+                _cachedDuration = _player.GetPropertyDouble("duration") ?? 0.0;
+
             // Corrección de drift (solo si el archivo tiene línea de tiempo)
-            double? dur = _player.GetPropertyDouble("duration");
-            if (dur is > 0.5)
+            if (_cachedDuration > 0.5)
             {
-                double? pos = _player.GetPropertyDouble("time-pos");
+                double? pos = _player.ObservedTimePos;
                 if (pos.HasValue && Math.Abs(pos.Value - elapsed) > 0.35)
                     _player.Command("seek",
                         elapsed.ToString("F3", CultureInfo.InvariantCulture), "absolute");
@@ -225,6 +246,8 @@ public sealed class LiveMonitorControl : Border
     {
         _currentPath = "";
         _lastElapsed = -1;
+        _cachedDuration = 0.0;
+        _pauseState = null;
         _msg.Text = message;
         _status.Text = "";
         _host.Visibility = Visibility.Collapsed;   // oculta el HWND nativo
@@ -249,7 +272,7 @@ public sealed class LiveMonitorControl : Border
         try
         {
             nint hwnd = _panel.Handle;   // fuerza la creación del HWND
-            _player = new MpvPlayer(new Dictionary<string, string>
+            var options = new Dictionary<string, string>
             {
                 ["wid"] = hwnd.ToString(),
                 ["vo"] = "gpu",
@@ -262,7 +285,16 @@ public sealed class LiveMonitorControl : Border
                 ["osc"] = "no",
                 ["input-default-bindings"] = "no",
                 ["input-vo-keyboard"] = "no",
-            });
+            };
+            // Diagnóstico (ver VideoEngine): WINCUE_MPV_LOG=<dir> → log por
+            // monitor; el log que se corta en seco delata al player que murió.
+            if (Environment.GetEnvironmentVariable("WINCUE_MPV_LOG") is { Length: > 0 } logDir)
+            {
+                int n = System.Threading.Interlocked.Increment(ref _monitorSeq);
+                options["log-file"] = System.IO.Path.Combine(logDir, $"mpv-monitor{n}.log");
+                options["msg-level"] = "all=v";
+            }
+            _player = new MpvPlayer(options);
             return true;
         }
         catch (Exception)

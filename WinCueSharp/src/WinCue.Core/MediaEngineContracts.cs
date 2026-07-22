@@ -90,7 +90,13 @@ public sealed record VideoPlayParams(
     int Layer = 2,
     int Screen = 0,
     IReadOnlyList<CanvasView>? CanvasOutputs = null,
-    double HandoverSeconds = 0.0);
+    double HandoverSeconds = 0.0,
+    bool ForceClassicPath = false);
+// ForceClassicPath = true: el cue NO pasa por el compositor GPU aunque esté
+// activo — va por la ruta clásica (vo=gpu embebido en la ventana de salida).
+// Lo usa el controlador para códecs que el interop del compositor no soporta
+// (HAP revienta de forma nativa; la ruta clásica lo reproduce bien). Ese cue
+// pierde los fundidos de opacidad del compositor (transiciones a corte).
 // HandoverSeconds > 0 = CROSSFADE en la misma pista (solo compositor GPU):
 // el vídeo que ya ocupa (Screen, Layer) NO se termina al entrar este; sigue
 // vivo ese tiempo (su propio fin/fade_out lo retira) para que ambos se vean

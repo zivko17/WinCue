@@ -342,8 +342,52 @@ public sealed class TimelineCanvas : FrameworkElement
     private readonly List<double> _goMarks = new();
     private readonly Dictionary<int, double> _startById = new();   // cue → inicio proyectado
 
-    // Cues activos (cursor + progreso), del tick real del controlador
+    // Cues activos (cursor + progreso), del tick real del controlador.
+    // El tick llega a 10 Hz → saltos de varios píxeles: entre ticks se
+    // EXTRAPOLA con reloj de pared y se repinta por frame (60 Hz) vía
+    // CompositionTarget.Rendering, solo mientras hay cues activos.
     private readonly Dictionary<int, double> _activeElapsed = new();
+    private readonly Dictionary<int, bool> _activeAdvancing = new();
+    private readonly Dictionary<int, double> _smoothElapsed = new();
+    private long _activeStampTicks;
+    private bool _renderHooked;
+
+    /// <summary>Objetivo: raw del tick + extrapolación de pared (cap 350 ms;
+    /// solo si el cue avanzaba — un cue pausado no debe deslizar y volver).</summary>
+    private double LiveElapsed(int cueId, double raw)
+    {
+        if (!_activeAdvancing.GetValueOrDefault(cueId))
+            return raw;
+        double extra = System.Diagnostics.Stopwatch
+            .GetElapsedTime(_activeStampTicks).TotalSeconds;
+        return raw + Math.Min(Math.Max(0.0, extra), 0.35);
+    }
+
+    /// <summary>Posición DIBUJADA: persigue al objetivo (25 % del error por
+    /// frame) en vez de saltar a él — las correcciones de los pushes de mpv
+    /// quedaban como micro-tirones. Un error grande (seek) sí salta.</summary>
+    private double DrawnElapsed(int cueId, double raw)
+    {
+        double target = LiveElapsed(cueId, raw);
+        double cur = _smoothElapsed.TryGetValue(cueId, out double c) ? c : target;
+        double delta = target - cur;
+        cur = Math.Abs(delta) > 0.6 ? target : cur + delta * 0.25;
+        _smoothElapsed[cueId] = cur;
+        return cur;
+    }
+
+    private void HookRender(bool on)
+    {
+        if (on == _renderHooked)
+            return;
+        _renderHooked = on;
+        if (on)
+            System.Windows.Media.CompositionTarget.Rendering += OnFrameRendering;
+        else
+            System.Windows.Media.CompositionTarget.Rendering -= OnFrameRendering;
+    }
+
+    private void OnFrameRendering(object? sender, EventArgs e) => InvalidateVisual();
 
     // Arrastre (mover bloque/grupo, o redimensionar por los bordes)
     private enum DragMode { Move, ResizeL, ResizeR }
@@ -398,6 +442,15 @@ public sealed class TimelineCanvas : FrameworkElement
     public void SetActive(IReadOnlyList<ActiveCueInfo> rows)
     {
         bool wasEmpty = _activeElapsed.Count == 0;
+        // ¿Avanza cada cue respecto al tick anterior? (para extrapolar solo
+        // los que corren; los pausados se quedan quietos)
+        _activeAdvancing.Clear();
+        foreach (var r in rows)
+            if (r.PreWaitRemaining is null)
+                _activeAdvancing[r.Id] =
+                    !_activeElapsed.TryGetValue(r.Id, out double prev)
+                    || r.Elapsed > prev + 0.001;
+        _activeStampTicks = System.Diagnostics.Stopwatch.GetTimestamp();
         _activeElapsed.Clear();
         foreach (var r in rows)
         {
@@ -407,6 +460,12 @@ public sealed class TimelineCanvas : FrameworkElement
                 continue;
             _activeElapsed[r.Id] = r.Elapsed;
         }
+        // Purga del filtro de persecución: cues que ya no suenan
+        if (_smoothElapsed.Count > 0)
+            foreach (int id in _smoothElapsed.Keys.Where(k => !_activeElapsed.ContainsKey(k)).ToList())
+                _smoothElapsed.Remove(id);
+        // Repintado por frame SOLO mientras hay actividad (60 Hz ≈ cursor fluido)
+        HookRender(_activeElapsed.Count > 0);
         if (!(wasEmpty && rows.Count == 0))
             InvalidateVisual();
     }
@@ -850,8 +909,9 @@ public sealed class TimelineCanvas : FrameworkElement
         // y teletransportarían el cursor al final del show.
         double? cursor = null;
         foreach (var b in _blocks)
-            if (!b.Ghost && _activeElapsed.TryGetValue(b.Cue.Id, out double elapsed))
+            if (!b.Ghost && _activeElapsed.TryGetValue(b.Cue.Id, out double rawElapsed))
             {
+                double elapsed = DrawnElapsed(b.Cue.Id, rawElapsed);
                 double lim = b.Dur > 0 ? b.Dur : elapsed;
                 double pos = b.Start + Math.Min(Math.Max(0, elapsed), lim);
                 cursor = Math.Max(cursor ?? 0, pos);
@@ -992,8 +1052,9 @@ public sealed class TimelineCanvas : FrameworkElement
             dc.DrawRoundedRectangle(FadeBrush, null, rect, 3, 3);
 
         // Progreso real dentro del bloque mientras suena
-        if (!instant && _activeElapsed.TryGetValue(cue.Id, out double elapsed))
+        if (!instant && _activeElapsed.TryGetValue(cue.Id, out double rawElapsed))
         {
+            double elapsed = DrawnElapsed(cue.Id, rawElapsed);
             double pw = Math.Clamp(elapsed / Math.Max(0.001, dur), 0, 1) * bw;
             if (pw > 1)
                 dc.DrawRoundedRectangle(ProgressBrush, null,

@@ -37,6 +37,70 @@ public static class MediaImporter
     public static readonly IReadOnlySet<string> AllFormats =
         new HashSet<string>(AudioFormats.Concat(VideoFormats), StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>Códecs de vídeo que el COMPOSITOR GPU no puede renderizar: HAP
+    /// revienta de forma NATIVA el interop OpenGL↔DirectX (libmpv lo decodifica
+    /// bien — verificado con harness: decode y vo=gpu embebido funcionan). Estos
+    /// cues se ENRUTAN por la ruta clásica (ForceClassicPath): se reproducen
+    /// embebidos en la ventana de salida, sin fundidos de opacidad.</summary>
+    public static readonly IReadOnlySet<string> UnsupportedVideoCodecs =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "hap" };
+
+    /// <summary>Contenedores que PUEDEN llevar HAP (QuickTime y afines). Solo
+    /// estos se sondean con ffprobe; mp4/webm/imágenes se dan por soportados sin
+    /// coste (HAP no vive ahí).</summary>
+    private static readonly IReadOnlySet<string> HapContainers =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mov", ".avi", ".mkv" };
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool>
+        _unsupportedVideoCache = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>Códec del primer stream de vídeo (minúsculas) vía ffprobe;
+    /// "" si no hay vídeo o no se puede leer.</summary>
+    public static string VideoCodec(string filePath)
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo("ffprobe")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
+            psi.ArgumentList.Add("-select_streams"); psi.ArgumentList.Add("v:0");
+            psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("stream=codec_name");
+            psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("default=nw=1:nk=1");
+            psi.ArgumentList.Add(filePath);
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null) return "";
+            string output = proc.StandardOutput.ReadToEnd().Trim().ToLowerInvariant();
+            if (!proc.WaitForExit(8_000))
+            {
+                try { proc.Kill(); } catch (Exception) { }
+                return "";
+            }
+            return output;
+        }
+        catch (Exception) { return ""; }
+    }
+
+    /// <summary>true si el vídeo usa un códec que el compositor NO soporta (HAP).
+    /// Solo sondea contenedores que pueden llevar HAP (.mov/.avi/.mkv); cachea
+    /// por ruta (ffprobe una sola vez por archivo). Si ffprobe no está devuelve
+    /// false (no bloquear por no poder comprobar).</summary>
+    public static bool IsUnsupportedVideoCodec(string filePath)
+    {
+        // SOLO DIAGNÓSTICO: WINCUE_HAP_UNSAFE=1 desactiva el guard para poder
+        // reproducir el crash del compositor con HAP en sesiones de depuración.
+        if (Environment.GetEnvironmentVariable("WINCUE_HAP_UNSAFE") == "1")
+            return false;
+        if (filePath.Length == 0 || !HapContainers.Contains(Path.GetExtension(filePath)))
+            return false;
+        return _unsupportedVideoCache.GetOrAdd(Path.GetFullPath(filePath),
+            p => UnsupportedVideoCodecs.Contains(VideoCodec(p)));
+    }
+
     /// <summary>Valida que filePath sea un archivo de media utilizable.</summary>
     public static MediaValidation ValidateFile(string filePath)
     {
@@ -72,6 +136,12 @@ public static class MediaImporter
         var result = ValidateFile(filePath);
         if (!result.Valid)
             return (false, result.Error ?? "Error desconocido");
+
+        // HAP se acepta: el controlador lo enruta por la ruta clásica (el
+        // compositor no lo soporta). Sondearlo AQUÍ calienta la caché para que
+        // el enrutado en caliente nunca lance ffprobe en el hilo de UI.
+        if (result.MediaType == "VIDEO")
+            _ = IsUnsupportedVideoCodec(result.FilePath);
 
         string oldPath = cue.FilePath;
         cue.FilePath = result.FilePath;

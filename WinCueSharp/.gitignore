@@ -6,3 +6,7 @@ TestResults/
 publish/
 artifacts/
 graphify-out/
+
+# Media de prueba HAP (generada por tests/hap-test/generar-media.ps1)
+tests/hap-test/*.mov
+tests/hap-test/*.mp4

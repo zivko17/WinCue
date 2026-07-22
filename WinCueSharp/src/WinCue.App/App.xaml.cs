@@ -39,9 +39,51 @@ public partial class App : Application
     private DispatcherTimer? _autosaveTimer;
     private string _autosavePath = "";
 
+    /// <summary>Vuelca una excepción a logs/crash-*.log (una app de directo no
+    /// puede morir en silencio: sin esto, un fallo de UI dejaba la ventana
+    /// muerta, el proceso zombi y CERO rastro para diagnosticar).</summary>
+    private static string? DumpCrash(string origin, object exceptionObject)
+    {
+        try
+        {
+            string dir = Path.Combine(AppContext.BaseDirectory, "logs");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            File.WriteAllText(file,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {origin}\r\n\r\n{exceptionObject}\r\n");
+            return file;
+        }
+        catch (Exception) { return null; }   // sin disco no hay volcado, pero no re-reventar
+    }
+
     protected override void OnStartup(StartupEventArgs e)
     {
         base.OnStartup(e);
+
+        // La app muere cuando muere la ventana principal — sin esto, cualquier
+        // ventana secundaria OCULTA (salidas de vídeo) mantenía un proceso
+        // zombi tras cerrarse/morir la principal.
+        ShutdownMode = ShutdownMode.OnMainWindowClose;
+
+        // Red de seguridad global: volcar SIEMPRE a logs/crash-*.log.
+        // UI: se intenta continuar (en directo, un fallo puntual de UI no debe
+        // tirar el show); no-UI: es fatal, al menos queda el volcado.
+        DispatcherUnhandledException += (_, args) =>
+        {
+            string? file = DumpCrash("DispatcherUnhandledException (hilo de UI)", args.Exception);
+            args.Handled = true;
+            if (!SmokeMode)
+                (MainWindow as MainWindow)?.FlashStatus(Loc.T(
+                    $"⚠ ERROR INTERNO — detalle en {Path.GetFileName(file ?? "logs/")} (la app intenta continuar)",
+                    $"⚠ INTERNAL ERROR — details in {Path.GetFileName(file ?? "logs/")} (the app tries to continue)"));
+        };
+        AppDomain.CurrentDomain.UnhandledException += (_, args) =>
+            DumpCrash("AppDomain.UnhandledException (fatal, hilo no-UI)", args.ExceptionObject);
+        System.Threading.Tasks.TaskScheduler.UnobservedTaskException += (_, args) =>
+        {
+            DumpCrash("TaskScheduler.UnobservedTaskException", args.Exception);
+            args.SetObserved();
+        };
 
         Action<Action> dispatch = action => Dispatcher.BeginInvoke(action);
         var settings = SettingsManager.Instance;

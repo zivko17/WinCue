@@ -295,9 +295,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         if (!_players.TryGetValue(cueId, out var pl))
             return 0.0;
-        double t = pl.GetPropertyDouble("time-pos") ?? 0.0;
-        double trimStart = _playParams.GetValueOrDefault(cueId)?.TrimStart ?? 0.0;
-        return Math.Max(0.0, t - trimStart);
+        var p = _playParams.GetValueOrDefault(cueId);
+        // Reloj CONTINUO: time-pos observada (push, no bloquea el core) +
+        // extrapolación de pared entre pushes — mpv publica a ráfagas y la
+        // consulta síncrona se atascaba con el core saturado (p. ej. HAP SW).
+        double t = pl.ObservedTimePosSmooth(p?.Rate ?? 1.0)
+            ?? pl.GetPropertyDouble("time-pos") ?? 0.0;
+        return Math.Max(0.0, t - (p?.TrimStart ?? 0.0));
     }
 
     // ------------------------------------------------------------------
@@ -517,7 +521,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         int layer = Math.Clamp(p.Layer, 0, 7);
-        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
+        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null
+            && !p.ForceClassicPath;
         // MODO CANVAS: solo con compositor GPU (varias vistas de un render).
         // Sin compositor, el cue cae al modo clásico sobre su salida Screen.
         bool canvas = gpu && p.CanvasOutputs is { Count: > 0 };
@@ -602,6 +607,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             };
             if (hwnd != 0) options["wid"] = hwnd.ToString();
             if (_nullAudio) options["ao"] = "null";
+            // Diagnóstico: WINCUE_MPV_LOG=<dir> vuelca el log verboso de mpv por
+            // cue — imprescindible para cazar crashes nativos del render.
+            if (Environment.GetEnvironmentVariable("WINCUE_MPV_LOG") is { Length: > 0 } logDir)
+            {
+                options["log-file"] = System.IO.Path.Combine(logDir, $"mpv-cue{cueId}.log");
+                options["msg-level"] = "all=v";
+            }
             // Opciones que deben estar ANTES de loadfile
             if (p.Loop) options["loop-file"] = "inf";
             else if (p.PlayCount > 1) options["loop-file"] = (p.PlayCount - 1).ToString();
@@ -796,7 +808,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (!MpvAvailable || string.IsNullOrEmpty(filePath))
             return;
         var np = NormalizeParams(p ?? new VideoPlayParams());
-        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null;
+        bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null
+            && !np.ForceClassicPath;
         if (!gpu || _players.ContainsKey(cueId))
         {
             Load(cueId, filePath);   // clásico o ya sonando: solo verificación
