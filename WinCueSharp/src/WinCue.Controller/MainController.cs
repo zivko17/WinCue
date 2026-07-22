@@ -1653,6 +1653,12 @@ public class MainController
     /// <summary>Guardado silencioso para el autosave (sin diálogos ni status).</summary>
     public bool Autosave(string path) => _files.Autosave(path);
 
+    /// <summary>Exporta un show PORTÁTIL: copia los medios a una carpeta «media»
+    /// junto al .json de destino y guarda con rutas relativas. El show de
+    /// trabajo no se altera. Devuelve (copiados, faltantes).</summary>
+    public (int Copied, int Missing) ExportPortableShow(string path) =>
+        _files.ExportPortable(path);
+
     /// <summary>Carga un show: resuelve rutas relativas contra la carpeta del
     /// .json y marca en ERROR los cues cuyo media no existe.</summary>
     public void LoadShow(string path)

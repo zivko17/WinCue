@@ -153,7 +153,10 @@ public partial class App : Application
         string? showPath = e.Args.FirstOrDefault(a => a.EndsWith(".json",
             StringComparison.OrdinalIgnoreCase) && File.Exists(a));
         if (!recovered && showPath is not null)
+        {
             _controller.LoadShow(showPath);
+            window.SetCurrentShowPath(showPath);
+        }
 
         // Estrés: abrir la salida 1 (el compositor necesita ventana activa),
         // cargar el show de tortura y arrancar el runner

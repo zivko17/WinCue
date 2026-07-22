@@ -356,6 +356,37 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void ExportPortable_CopiesMediaRelative_WithoutMutatingWorkingShow()
+    {
+        // Media en una carpeta APARTE (no junto al show de trabajo)
+        string srcDir = Path.Combine(TempDir, "origen");
+        Directory.CreateDirectory(srcDir);
+        string media = Path.Combine(srcDir, "clip.wav");
+        File.WriteAllText(media, "data");
+        var a = AddCue(CueType.Audio, "clip", setup: c => c.FilePath = media);
+
+        // Exportar a otra carpeta
+        string outDir = Path.Combine(TempDir, "portable");
+        string target = Path.Combine(outDir, "show.json");
+        var (copied, missing) = Controller.ExportPortableShow(target);
+
+        Assert.Equal(1, copied);
+        Assert.Equal(0, missing);
+        // El medio se copió a «media» junto al show exportado
+        Assert.True(File.Exists(Path.Combine(outDir, "media", "clip.wav")));
+        // El show de TRABAJO no se altera (sigue apuntando al original)
+        Assert.Equal(media, a.FilePath);
+        Assert.Equal(media, Model.Cues[0].FilePath);
+
+        // Cargar el show exportado resuelve la ruta relativa al medio copiado
+        Model.ReplaceAll(new List<Cue>());
+        Controller.LoadShow(target);
+        Assert.Equal(Path.GetFullPath(Path.Combine(outDir, "media", "clip.wav")),
+                     Model.Cues[0].FilePath);
+        Assert.NotEqual(CueState.Error, Model.Cues[0].State);
+    }
+
+    [Fact]
     public void LoadShow_MarksMissingMediaAsError()
     {
         var m = new CueModel();

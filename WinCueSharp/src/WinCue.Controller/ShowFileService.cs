@@ -88,6 +88,86 @@ public sealed class ShowFileService
         }
     }
 
+    /// <summary>Exporta un show PORTÁTIL: copia todos los medios referenciados a
+    /// una carpeta «media» junto al .json de destino y guarda el show con rutas
+    /// relativas (SaveShow ya relativiza lo que cae bajo su carpeta). El show de
+    /// TRABAJO no se altera: sus cues siguen apuntando a los originales.
+    /// Devuelve (copiados, faltantes).</summary>
+    public (int Copied, int Missing) ExportPortable(string targetShowPath)
+    {
+        if (!targetShowPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
+            targetShowPath += ".json";
+        string dir = Path.GetDirectoryName(Path.GetFullPath(targetShowPath)) ?? "";
+        string mediaDir = Path.Combine(dir, "media");
+        Directory.CreateDirectory(mediaDir);
+
+        // Cada origen se copia UNA vez; nombres únicos ante colisiones dentro de
+        // esta exportación (dos archivos distintos con el mismo nombre).
+        var map = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase); // origen → destino abs
+        var usedNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        int copied = 0, missing = 0;
+        foreach (var c in _model.Cues)
+        {
+            if (c.FilePath.Length == 0 || map.ContainsKey(c.FilePath))
+                continue;
+            if (!File.Exists(c.FilePath))
+            {
+                missing++;
+                continue;
+            }
+            string name = Path.GetFileName(c.FilePath);
+            string candidate = name;
+            for (int n = 1; usedNames.Contains(candidate); n++)
+                candidate = $"{Path.GetFileNameWithoutExtension(name)}_{n}{Path.GetExtension(name)}";
+            usedNames.Add(candidate);
+            string dest = Path.Combine(mediaDir, candidate);
+            try
+            {
+                if (!string.Equals(Path.GetFullPath(c.FilePath), Path.GetFullPath(dest),
+                        StringComparison.OrdinalIgnoreCase))
+                    File.Copy(c.FilePath, dest, overwrite: true);
+                map[c.FilePath] = dest;
+                copied++;
+            }
+            catch (Exception exc) when (exc is IOException or UnauthorizedAccessException)
+            {
+                _log($"Export portable: no se pudo copiar {c.FilePath}: {exc.Message}");
+                missing++;
+            }
+        }
+
+        // Repuntar temporalmente al destino, guardar (SaveShow relativiza) y
+        // restaurar → el modelo de trabajo queda intacto.
+        var originals = new Dictionary<int, string>();
+        foreach (var c in _model.Cues)
+            if (map.TryGetValue(c.FilePath, out string? dest))
+            {
+                originals[c.Id] = c.FilePath;
+                c.FilePath = dest;
+            }
+        bool ok;
+        try
+        {
+            ok = SaveShow(targetShowPath);
+        }
+        finally
+        {
+            foreach (var c in _model.Cues)
+                if (originals.TryGetValue(c.Id, out string? orig))
+                    c.FilePath = orig;
+        }
+        if (!ok)
+            return (copied, missing);   // SaveShow ya mostró el error
+
+        _log($"Show portable exportado a {targetShowPath}: {copied} copiados, {missing} faltantes");
+        _view.FlashStatus(missing > 0
+            ? Loc.T($"Show portable exportado: {copied} medio(s) en «media» — ⚠ {missing} no encontrados",
+                    $"Portable show exported: {copied} media file(s) in «media» — ⚠ {missing} not found")
+            : Loc.T($"Show portable exportado: {copied} medio(s) copiados a «media».",
+                    $"Portable show exported: {copied} media file(s) copied to «media»."));
+        return (copied, missing);
+    }
+
     /// <summary>Copias de seguridad rotadas al SOBRESCRIBIR un show:
     /// show.json → show.json.bak1 → .bak2 → .bak3. Un guardado malo en
     /// directo nunca es irreversible.</summary>

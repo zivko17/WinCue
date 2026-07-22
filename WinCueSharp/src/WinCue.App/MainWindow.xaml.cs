@@ -56,6 +56,7 @@ public partial class MainWindow : Window, IShowView
 
     private int _playheadIndex;
     private bool _suppressSelection;   // evita bucles selección↔playhead
+    private string? _currentShowPath;  // ruta del show abierto (Save guarda ahí sin preguntar)
 
     public MainWindow()
     {
@@ -1037,24 +1038,88 @@ public partial class MainWindow : Window, IShowView
             _controller.AddCuesFromFiles(CueGrid.SelectedIndex, dlg.FileNames);
     }
 
+    /// <summary>Fija el show actual (lo usa App al abrir un show por argumento
+    /// de línea de comandos). El autosave recuperado NO lo fija: Save no debe
+    /// sobrescribir autosave.json.</summary>
+    public void SetCurrentShowPath(string path) => _currentShowPath = path;
+
     private void OnOpenShow(object sender, RoutedEventArgs e)
     {
         var dlg = new OpenFileDialog { Filter = "WinCue Show (*.json)|*.json|Todos|*.*" };
         if (dlg.ShowDialog(this) == true)
         {
             _controller.LoadShow(dlg.FileName);
+            _currentShowPath = dlg.FileName;
             AddRecentShow(dlg.FileName);
         }
     }
 
+    /// <summary>Botón Guardar: guarda sobre el show abierto SIN preguntar. Si no
+    /// hay show todavía (nunca se abrió/guardó), cae en «Guardar como…».</summary>
     private void OnSaveShow(object sender, RoutedEventArgs e)
     {
-        var dlg = new SaveFileDialog { Filter = "WinCue Show (*.json)|*.json" };
-        if (dlg.ShowDialog(this) == true)
+        if (string.IsNullOrEmpty(_currentShowPath))
         {
-            _controller.SaveShow(dlg.FileName);
-            AddRecentShow(dlg.FileName);
+            OnSaveShowAs(sender, e);
+            return;
         }
+        _controller.SaveShow(_currentShowPath);
+    }
+
+    /// <summary>Guardar como…: pregunta la ruta y pasa a ser el show actual.</summary>
+    private void OnSaveShowAs(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SaveFileDialog { Filter = "WinCue Show (*.json)|*.json" };
+        if (_currentShowPath is not null)
+        {
+            dlg.FileName = System.IO.Path.GetFileName(_currentShowPath);
+            string? d = System.IO.Path.GetDirectoryName(_currentShowPath);
+            if (d is not null) dlg.InitialDirectory = d;
+        }
+        if (dlg.ShowDialog(this) != true)
+            return;
+        string path = dlg.FileName.EndsWith(".json", StringComparison.OrdinalIgnoreCase)
+            ? dlg.FileName : dlg.FileName + ".json";
+        _controller.SaveShow(path);
+        _currentShowPath = path;
+        AddRecentShow(path);
+    }
+
+    /// <summary>Desplegable junto a «Guardar»: opciones de guardado avanzadas
+    /// (exportar portable, y sitio natural para futuras).</summary>
+    private void OnSaveMenu(object sender, RoutedEventArgs e)
+    {
+        var menu = new ContextMenu();
+        menu.Items.Add(Mi(Loc.T("Guardar como…", "Save as…"), "",
+            () => OnSaveShowAs(sender, e)));
+        menu.Items.Add(new Separator());
+        menu.Items.Add(Mi(Loc.T("📦 Exportar show portable…", "📦 Export portable show…"), "",
+            () => OnExportPortable(sender, e)));
+        menu.PlacementTarget = (Button)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Exporta un show portable: copia todos los medios a una carpeta
+    /// «media» junto al .json elegido, para llevar el show a otro equipo. No
+    /// cambia el show de trabajo ni su ruta actual.</summary>
+    private void OnExportPortable(object sender, RoutedEventArgs e)
+    {
+        var dlg = new SaveFileDialog
+        {
+            Filter = "WinCue Show (*.json)|*.json",
+            Title = Loc.T("Exportar show portable (crea carpeta «media»)",
+                          "Export portable show (creates «media» folder)"),
+        };
+        if (dlg.ShowDialog(this) != true)
+            return;
+        var (copied, missing) = _controller.ExportPortableShow(dlg.FileName);
+        if (missing > 0)
+            MessageBox.Show(this,
+                Loc.T($"Se copiaron {copied} archivo(s) a «media», pero {missing} no se encontraron en disco (cues con media faltante). Reubica esos medios y vuelve a exportar.",
+                      $"Copied {copied} file(s) to «media», but {missing} were not found on disk (cues with missing media). Relocate those media and export again."),
+                Loc.T("Exportar show portable", "Export portable show"),
+                MessageBoxButton.OK, MessageBoxImage.Warning);
     }
 
     // ── Shows recientes (botón ▾ junto a Abrir) ────────────────────────
@@ -1088,6 +1153,7 @@ public partial class MainWindow : Window, IShowView
                 menu.Items.Add(Mi(System.IO.Path.GetFileName(p), "", () =>
                 {
                     _controller.LoadShow(p);
+                    _currentShowPath = p;
                     AddRecentShow(p);
                 }));
                 ((MenuItem)menu.Items[^1]).ToolTip = p;

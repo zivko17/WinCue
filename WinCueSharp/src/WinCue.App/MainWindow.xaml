@@ -141,6 +141,8 @@
                 <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
                         ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}"/>
                 <Button Click="OnSaveShow" Content="{local:Loc Es=💾 Guardar, En=💾 Save}"/>
+                <Button Click="OnSaveMenu" Content="▾" Width="26" Margin="-2,0,3,0"
+                        ToolTip="{local:Loc Es=Más opciones de guardado, En=More save options}"/>
                 <Button x:Name="RelocateButton" Click="OnRelocateMedia"
                         Content="{local:Loc Es=🔗 Relocalizar, En=🔗 Relocate}"
                         Visibility="Collapsed"
