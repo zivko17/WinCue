@@ -13,7 +13,7 @@
 | ¿Dónde se carga? | `src/WinCue.Video/MpvNative.cs` y `MpvRenderNative.cs` (`[LibraryImport("libmpv-2.dll")]` + `DllImportResolver` propio que busca la DLL junto al exe / subiendo directorios / env `WINCUE_LIBMPV`) |
 | ¿Qué binario se distribuye? | `publish.ps1` copia `..\WinCue\libmpv-2.dll` (121 MB) junto al exe |
 | ¿Enlace dinámico? | **SÍ** ✓ — P/Invoke con carga en tiempo de ejecución; la DLL es sustituible por el usuario (cumple el mecanismo de la LGPL §6, que exige que el usuario pueda reemplazar la biblioteca) |
-| ¿La build actual es LGPL o GPL? | **Casi seguro GPL** ⚠️ — es `mpv v0.41.0-524-g5921fe50b` (build de desarrollo de la comunidad, patrón shinchiro/zhongfly). Esas builds se compilan con la configuración por defecto (**GPL-2.0-or-later**) y con FFmpeg en modo GPL. En el binario NO aparece la marca de build LGPL. |
+| ¿La build actual es LGPL o GPL? | **GPL — CONFIRMADO** (2026-07-18, vía `mpv-configuration` de la propia DLL): build de `shinchiro/mpv-winbuild-cmake`, sin `-Dgpl=false`, con componentes que exigen GPL activados (dvdnav). Además la GPL obliga a entregar el CÓDIGO FUENTE del conjunto → incompatible con licencia propietaria de código cerrado. **No existen builds LGPL prebuilt para Windows** (shinchiro issue #586 sin respuesta desde ene-2024) → hay que COMPILARLA. Nota positiva: WinCue solo usa el núcleo LGPL (reproducción, render API, hwdec, keep-open, geometría), así que el cambio es funcionalmente seguro. |
 
 **Consecuencia:** con una libmpv GPL, distribuir WinCue propietario **obliga a
 licenciar WinCue bajo GPL** (el enlace dinámico NO exime del GPL; solo la
