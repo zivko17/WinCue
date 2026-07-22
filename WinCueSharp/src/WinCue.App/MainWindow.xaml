@@ -36,9 +36,10 @@
                                               Margin="{TemplateBinding Padding}"/>
                         </Border>
                         <ControlTemplate.Triggers>
+                            <!-- Grosor CONSTANTE (solo cambia el color) para
+                                 que el hover no empuje el layout / dé saltos -->
                             <Trigger Property="IsMouseOver" Value="True">
                                 <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
-                                <Setter TargetName="bd" Property="BorderThickness" Value="2"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
                                 <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
@@ -72,9 +73,9 @@
                     <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
                             Background="#7e1e1e" Content="⚠ PANIC"/>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
-                            Content="⏸ PAUSA"/>
+                            Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
                     <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
-                        <TextBlock Text="SIGUIENTE" FontSize="9"
+                        <TextBlock Text="{local:Loc Es=SIGUIENTE, En=NEXT}" FontSize="9"
                                    Foreground="{StaticResource FgDim}"/>
                         <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14"
                                    FontWeight="Bold" TextTrimming="CharacterEllipsis"
@@ -105,9 +106,11 @@
                     </ToggleButton>
                     <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
                             Background="#7e1e1e" Content="🖵 Salida vídeo ▾"/>
-                    <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>
+                    <Button Click="OnSettingsClick" Height="44"
+                            Content="{local:Loc Es=⚙ Configuración, En=⚙ Settings}"/>
                     <Button Click="OnAboutClick" Height="44" Width="34" Content="ⓘ"
-                            ToolTip="Acerca de WinCue (versión y licencias de terceros)"/>
+                            ToolTip="{local:Loc Es=Acerca de WinCue (versión y licencias de terceros),
+                                                En=About WinCue (version and third-party licenses)}"/>
                 </StackPanel>
 
                 <!-- Centro: reloj del show (el countdown por cue vive en las
@@ -116,9 +119,10 @@
                         Padding="18,2" Cursor="Hand"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         MouseLeftButtonDown="OnShowClockClick"
-                        ToolTip="Clic: alternar restante/transcurrido · Doble clic: reiniciar">
+                        ToolTip="{local:Loc Es=Clic: alternar restante/transcurrido · Doble clic: reiniciar,
+                                            En=Click: toggle remaining/elapsed · Double-click: reset}">
                     <StackPanel>
-                        <TextBlock x:Name="ShowClockMode" Text="SHOW · RESTANTE ▾"
+                        <TextBlock x:Name="ShowClockMode" Text="{local:Loc Es=SHOW · RESTANTE ▾, En=SHOW · REMAINING ▾}"
                                    FontSize="10" Foreground="{StaticResource FgDim}"
                                    HorizontalAlignment="Center"/>
                         <TextBlock x:Name="ShowClockText" Text="0:00:00"
@@ -133,29 +137,33 @@
         <!-- ═══════════ TOOLBAR: lista ═══════════ -->
         <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
             <StackPanel Orientation="Horizontal">
-                <Button Click="OnOpenShow" Content="📂 Abrir"/>
+                <Button Click="OnOpenShow" Content="{local:Loc Es=📂 Abrir, En=📂 Open}"/>
                 <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
-                        ToolTip="Shows recientes"/>
-                <Button Click="OnSaveShow" Content="💾 Guardar"/>
-                <Button x:Name="RelocateButton" Click="OnRelocateMedia" Content="🔗 Relocalizar"
+                        ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}"/>
+                <Button Click="OnSaveShow" Content="{local:Loc Es=💾 Guardar, En=💾 Save}"/>
+                <Button x:Name="RelocateButton" Click="OnRelocateMedia"
+                        Content="{local:Loc Es=🔗 Relocalizar, En=🔗 Relocate}"
                         Visibility="Collapsed"
                         Background="#7e5a1e"
-                        ToolTip="Hay cues con archivos NO encontrados: buscar los medios en otra carpeta"/>
+                        ToolTip="{local:Loc Es=Hay cues con archivos NO encontrados: buscar los medios en otra carpeta,
+                                            En=Some cues have missing files: locate the media in another folder}"/>
                 <Separator Width="14" Background="Transparent"/>
-                <TextBlock Text="Añadir:" VerticalAlignment="Center" Margin="0,0,4,0"
-                           Foreground="{StaticResource FgDim}"/>
+                <TextBlock Text="{local:Loc Es=Añadir:, En=Add:}" VerticalAlignment="Center"
+                           Margin="0,0,4,0" Foreground="{StaticResource FgDim}"/>
                 <Button Click="OnAddCue" Tag="AUDIO" Content="♪ Audio"/>
-                <Button Click="OnAddCue" Tag="VIDEO" Content="▣ Vídeo"/>
-                <Button Click="OnAddCue" Tag="WAIT" Content="⏱ Espera"/>
-                <Button Click="OnAddCue" Tag="FADE" Content="◢ Fundido"/>
-                <Button Click="OnAddCue" Tag="START" Content="▶ Iniciar"/>
-                <Button Click="OnAddCue" Tag="STOP" Content="■ Parar"/>
+                <Button Click="OnAddCue" Tag="VIDEO" Content="{local:Loc Es=▣ Vídeo, En=▣ Video}"/>
+                <Button Click="OnAddCue" Tag="WAIT" Content="{local:Loc Es=⏱ Espera, En=⏱ Wait}"/>
+                <Button Click="OnAddCue" Tag="FADE" Content="{local:Loc Es=◢ Fundido, En=◢ Fade}"/>
+                <Button Click="OnAddCue" Tag="START" Content="{local:Loc Es=▶ Iniciar, En=▶ Start}"/>
+                <Button Click="OnAddCue" Tag="STOP" Content="{local:Loc Es=■ Parar, En=■ Stop}"/>
                 <Button Click="OnAddCue" Tag="SCRIPT" Content="⚙ Script"/>
-                <Button Click="OnAddCue" Tag="MEMO" Content="✎ Nota"/>
-                <Button Click="OnAddCue" Tag="GROUP" Content="▸ Grupo"/>
+                <Button Click="OnAddCue" Tag="MEMO" Content="{local:Loc Es=✎ Nota, En=✎ Memo}"/>
+                <Button Click="OnAddCue" Tag="GROUP" Content="{local:Loc Es=▸ Grupo, En=▸ Group}"/>
                 <Separator Width="14" Background="Transparent"/>
-                <Button Click="OnImportFiles" Content="＋ Importar archivos…"/>
-                <Button x:Name="DeleteButton" Click="OnDeleteCue" Content="🗑 Eliminar"/>
+                <Button Click="OnImportFiles"
+                        Content="{local:Loc Es=＋ Importar archivos…, En=＋ Import files…}"/>
+                <Button x:Name="DeleteButton" Click="OnDeleteCue"
+                        Content="{local:Loc Es=🗑 Eliminar, En=🗑 Delete}"/>
                 <Separator Width="14" Background="Transparent"/>
                 <TextBlock x:Name="SearchLabel" Text="🔍" VerticalAlignment="Center"
                            Visibility="Collapsed" Margin="0,0,3,0"/>
@@ -164,21 +172,24 @@
                          Background="#1a1a1a" Foreground="#ddd" BorderBrush="#555"
                          TextChanged="OnSearchChanged"
                          PreviewKeyDown="OnSearchKeyDown"
-                         ToolTip="Filtrar cues por nombre o número (Esc cierra)"/>
+                         ToolTip="{local:Loc Es=Filtrar cues por nombre o número (Esc cierra),
+                                             En=Filter cues by name or number (Esc closes)}"/>
             </StackPanel>
         </Border>
 
         <!-- ═══════════ STATUS BAR ═══════════ -->
         <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
             <DockPanel>
-                <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right" Text="SALIDA: NEGRO"
+                <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right"
+                           Text="{local:Loc Es=SALIDA: NEGRO, En=OUTPUT: BLACK}"
                            Foreground="{StaticResource FgDim}"/>
                 <Button x:Name="LogButton" DockPanel.Dock="Left" Content="🕮"
                         Click="OnShowStatusLog" Padding="4,0" Margin="0,0,8,0"
                         Background="Transparent" BorderThickness="0"
                         Foreground="{StaticResource FgDim}"
-                        ToolTip="Historial de avisos y mensajes de estado"/>
-                <TextBlock x:Name="StatusLabel" Text="Listo."/>
+                        ToolTip="{local:Loc Es=Historial de avisos y mensajes de estado,
+                                            En=History of warnings and status messages}"/>
+                <TextBlock x:Name="StatusLabel" Text="{local:Loc Es=Listo., En=Ready.}"/>
             </DockPanel>
         </Border>
 
@@ -203,13 +214,14 @@
                         CornerRadius="4" Padding="8,6" Margin="0,0,0,10"
                         Visibility="Collapsed">
                     <StackPanel>
-                        <TextBlock Text="NOTAS DEL SIGUIENTE" FontSize="9"
-                                   Foreground="#a89968"/>
+                        <TextBlock Text="{local:Loc Es=NOTAS DEL SIGUIENTE, En=NEXT CUE NOTES}"
+                                   FontSize="9" Foreground="#a89968"/>
                         <TextBlock x:Name="NotesText" TextWrapping="Wrap"
                                    Foreground="#e8dcb8" FontSize="13"/>
                     </StackPanel>
                 </Border>
-                <TextBlock DockPanel.Dock="Top" Text="EN REPRODUCCIÓN" FontWeight="Bold"
+                <TextBlock DockPanel.Dock="Top" Text="{local:Loc Es=EN REPRODUCCIÓN, En=PLAYING}"
+                           FontWeight="Bold"
                            Foreground="{StaticResource FgDim}" Margin="0,0,0,6"/>
                 <ItemsControl x:Name="ActiveList">
                     <ItemsControl.ItemTemplate>
@@ -218,9 +230,9 @@
                                     Margin="0,0,0,6">
                                 <Border.ContextMenu>
                                     <ContextMenu>
-                                        <MenuItem Header="⏸ Pausar / reanudar"
+                                        <MenuItem Header="{local:Loc Es=⏸ Pausar / reanudar, En=⏸ Pause / resume}"
                                                   Click="OnActivePauseMenu"/>
-                                        <MenuItem Header="■ Detener"
+                                        <MenuItem Header="{local:Loc Es=■ Detener, En=■ Stop}"
                                                   Click="OnActiveStopMenu"/>
                                     </ContextMenu>
                                 </Border.ContextMenu>
@@ -229,7 +241,7 @@
                                             Width="26" Height="26" Margin="6,0,0,0"
                                             Background="#5a2a2a" Foreground="#ddd"
                                             BorderBrush="#703030"
-                                            ToolTip="Detener este cue"
+                                            ToolTip="{local:Loc Es=Detener este cue, En=Stop this cue}"
                                             Tag="{Binding Id}" Click="OnActiveStopClick"/>
                                     <StackPanel>
                                         <TextBlock Text="{Binding Title}" FontWeight="Bold"
@@ -330,7 +342,7 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="Tipo" Width="88">
+                <DataGridTemplateColumn Header="{local:Loc Es=Tipo, En=Type}" Width="88">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <TextBlock Text="{Binding TypeLabel}"
@@ -340,7 +352,7 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="Nombre" Width="*">
+                <DataGridTemplateColumn Header="{local:Loc Es=Nombre, En=Name}" Width="*">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <!-- Banda del grupo (recuadro): la cabecera del
@@ -359,7 +371,7 @@
                 <DataGridTextColumn Header="Pre" Binding="{Binding PreWaitText}" Width="56"/>
                 <DataGridTextColumn Header="Dur" Binding="{Binding DurationText}" Width="64"/>
                 <DataGridTextColumn Header="Post" Binding="{Binding PostWaitText}" Width="56"/>
-                <DataGridTextColumn Header="Sigue" Binding="{Binding ContinueText}" Width="72"/>
+                <DataGridTextColumn Header="{local:Loc Es=Sigue, En=Follow}" Binding="{Binding ContinueText}" Width="72"/>
                 <DataGridTextColumn x:Name="LatColumn" Header="Lat"
                                     Binding="{Binding LatencyText}" Width="60"/>
                 <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"/>

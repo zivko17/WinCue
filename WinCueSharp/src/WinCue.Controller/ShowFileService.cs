@@ -72,12 +72,12 @@ public sealed class ShowFileService
             RotateBackups(path);
             File.WriteAllText(path, _model.ToJson());
             _log($"Show guardado: {path}");
-            _view.FlashStatus($"Show guardado: {Path.GetFileName(path)}");
+            _view.FlashStatus(Loc.T($"Show guardado: {Path.GetFileName(path)}", $"Show saved: {Path.GetFileName(path)}"));
             return true;
         }
         catch (IOException exc)
         {
-            _view.ShowError("Error al guardar", exc.Message);
+            _view.ShowError(Loc.T("Error al guardar", "Save error"), exc.Message);
             return false;
         }
         finally
@@ -133,12 +133,12 @@ public sealed class ShowFileService
         }
         catch (Exception exc) when (exc is IOException or FormatException)
         {
-            _view.ShowError("Error al cargar", exc.Message);
+            _view.ShowError(Loc.T("Error al cargar", "Load error"), exc.Message);
             return false;
         }
         if (newCues.Count == 0)
         {
-            _view.ShowError("Show vacío", "El archivo no contiene ningún cue.");
+            _view.ShowError(Loc.T("Show vacío", "Empty show"), Loc.T("El archivo no contiene ningún cue.", "The file contains no cues."));
             return false;
         }
 
@@ -170,8 +170,10 @@ public sealed class ShowFileService
         _setPlayhead(0);
         _log($"Show cargado: {path}");
         _view.FlashStatus(missing > 0
-            ? $"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados"
-            : $"Show cargado: {Path.GetFileName(path)}");
+            ? Loc.T($"Show cargado — ⚠ {missing} archivo(s) de media NO encontrados",
+                    $"Show loaded — ⚠ {missing} media file(s) NOT found")
+            : Loc.T($"Show cargado: {Path.GetFileName(path)}",
+                    $"Show loaded: {Path.GetFileName(path)}"));
         return true;
     }
 
@@ -234,8 +236,10 @@ public sealed class ShowFileService
         int stillMissing = MissingMediaCount();
         _log($"Relocalización de medios: {recovered} recuperados, {stillMissing} pendientes ({folder})");
         _view.FlashStatus(stillMissing > 0
-            ? $"Relocalizados {recovered} archivo(s) — ⚠ quedan {stillMissing} sin encontrar"
-            : $"Relocalizados {recovered} archivo(s). Todos los medios OK.");
+            ? Loc.T($"Relocalizados {recovered} archivo(s) — ⚠ quedan {stillMissing} sin encontrar",
+                    $"Relocated {recovered} file(s) — ⚠ {stillMissing} still missing")
+            : Loc.T($"Relocalizados {recovered} archivo(s). Todos los medios OK.",
+                    $"Relocated {recovered} file(s). All media OK."));
         return recovered;
     }
 }

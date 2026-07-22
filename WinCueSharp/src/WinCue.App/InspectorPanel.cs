@@ -61,7 +61,7 @@ public sealed class InspectorPanel : ContentControl
 
     // Visor de edición (fotograma de referencia para trim y geometría)
     private readonly LiveMonitorControl _editPreview =
-        new("EDICIÓN", Color.FromRgb(0xe8, 0xa2, 0x00));
+        new(Loc.T("EDICIÓN", "EDITING"), Color.FromRgb(0xe8, 0xa2, 0x00));
     private readonly StackPanel _previewHost = new()
     {
         Width = 280,
@@ -80,8 +80,8 @@ public sealed class InspectorPanel : ContentControl
         _previewHost.Children.Add(_editPreview);
         _previewHost.Children.Add(new TextBlock
         {
-            Text = "El marco azul es el CANVAS de salida: lo que quede fuera " +
-                   "se recorta. Arrastra el trim para ver el fotograma de corte.",
+            Text = Loc.T("El marco azul es el CANVAS de salida: lo que quede fuera se recorta. Arrastra el trim para ver el fotograma de corte.",
+                   "The blue frame is the output CANVAS: whatever falls outside is cropped. Drag the trim to see the cut frame."),
             FontSize = 10,
             Foreground = Brushes.Gray,
             TextWrapping = TextWrapping.Wrap,
@@ -129,7 +129,7 @@ public sealed class InspectorPanel : ContentControl
         IsEnabled = cue is not null;
         if (cue is null)
         {
-            _header.Text = "— sin cue seleccionado —";
+            _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
             return;
         }
 
@@ -272,26 +272,26 @@ public sealed class InspectorPanel : ContentControl
         var (scroll, panel) = Page();
         var cols = Columns(panel, 3);
 
-        Header(cols[0], "IDENTIDAD");
-        Txt(cols[0], "number", "Número:", c => c.Number);
-        _nameBox = Txt(cols[0], "name", "Nombre:", c => c.Name);
+        Header(cols[0], Loc.T("IDENTIDAD", "IDENTITY"));
+        Txt(cols[0], "number", Loc.T("Número:", "Number:"), c => c.Number);
+        _nameBox = Txt(cols[0], "name", Loc.T("Nombre:", "Name:"), c => c.Name);
         ColorSwatches(cols[0]);
         var armedRow = ChkRow(cols[0]);
         Chk(armedRow, "armed", "Armado", c => c.Armed);
         Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
-        TxtMultiline(cols[0], "notes", "Notas (se muestran en standby):",
+        TxtMultiline(cols[0], "notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
             c => c.Notes);
 
-        Header(cols[1], "TEMPORIZACIÓN");
-        Cmb(cols[1], "continue_mode", "Al terminar:", c => c.ContinueMode.ToString(),
+        Header(cols[1], Loc.T("TEMPORIZACIÓN", "TIMING"));
+        Cmb(cols[1], "continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
             ("None", "Nada (GO manual)"),
             ("AutoContinue", "Auto-continue (tras post-wait)"),
-            ("AutoFollow", "Auto-follow (al acabar la acción)"));
+            ("AutoFollow", Loc.T("Auto-follow (al acabar la acción)", "Auto-follow (when the action ends)")));
         TimeF(cols[1], "pre_wait", "Pre-wait:", c => c.PreWait);
         TimeF(cols[1], "duration", "Duración:", c => c.Duration);
         TimeF(cols[1], "post_wait", "Post-wait:", c => c.PostWait);
 
-        Header(cols[2], "DESTINO");
+        Header(cols[2], Loc.T("DESTINO", "TARGET"));
         FileRow(cols[2]);
 
         // Solo cues que apuntan a otro cue
@@ -303,14 +303,14 @@ public sealed class InspectorPanel : ContentControl
 
         // Solo grupos
         var groupRow = Conditional(cols[2], c => c.Type == CueType.Group);
-        CmbInline(groupRow, "group_mode", "Modo de grupo:", c => c.GroupMode.ToString(),
+        CmbInline(groupRow, "group_mode", Loc.T("Modo de grupo:", "Group mode:"), c => c.GroupMode.ToString(),
             ("Enter", "ENTER — el playhead entra"),
             ("Timeline", "TIMELINE — todos a la vez"),
             ("GoNext", "GO NEXT — primer hijo"),
             ("Random", "RANDOM — aleatorio round-robin"));
 
         var stopOthersRow = ChkRow(cols[2]);
-        Chk(stopOthersRow, "stop_others", "Detener los demás al empezar (GO per-cue)",
+        Chk(stopOthersRow, "stop_others", Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
             c => c.StopOthers);
 
         return scroll;
@@ -322,38 +322,38 @@ public sealed class InspectorPanel : ContentControl
         var (scroll, panel) = Page();
         var cols = Columns(panel, 3);
 
-        Header(cols[0], "DISPARO LOCAL");
-        Txt(cols[0], "hotkey", "Hotkey (tecla):", c => c.Hotkey);
-        Cmb(cols[0], "retrigger", "Segundo disparo:", c => c.Retrigger.ToString(),
+        Header(cols[0], Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
+        Txt(cols[0], "hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
+        Cmb(cols[0], "retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
             ("None", "Ignorar"),
             ("Panic", "Panic (fade y parar)"),
             ("Stop", "Parar"),
             ("HardStop", "Parada dura"),
             ("HardRestart", "Reiniciar"));
 
-        Header(cols[0], "FUNDIR Y PARAR OTROS");
+        Header(cols[0], Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
         var foRow = ChkRow(cols[0]);
         Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
-        Num(cols[0], "fade_others_time", "Tiempo del fundido (s):", c => c.FadeOthersTime);
-        Cmb(cols[0], "fade_others_scope", "Ámbito:", c => c.FadeOthersScope.ToString(),
+        Num(cols[0], "fade_others_time", Loc.T("Tiempo del fundido (s):", "Fade time (s):"), c => c.FadeOthersTime);
+        Cmb(cols[0], "fade_others_scope", Loc.T("Ámbito:", "Scope:"), c => c.FadeOthersScope.ToString(),
             ("Peers", "PEERS — mismo nivel/grupo"),
             ("List", "LIST — toda la lista"),
             ("All", "ALL — todo"));
 
         Header(cols[1], "WALL-CLOCK (disparo por hora)");
         var wcRow = ChkRow(cols[1]);
-        Chk(wcRow, "wallclock_enabled", "Disparar a una hora del día", c => c.WallclockEnabled);
-        Txt(cols[1], "wallclock_time", "Hora (HH:MM:SS, 24h):", c => c.WallclockTime);
-        Note(cols[1], "Se dispara cada día a esa hora\nmientras el show esté abierto.");
+        Chk(wcRow, "wallclock_enabled", Loc.T("Disparar a una hora del día", "Trigger at a time of day"), c => c.WallclockEnabled);
+        Txt(cols[1], "wallclock_time", Loc.T("Hora (HH:MM:SS, 24h):", "Time (HH:MM:SS, 24h):"), c => c.WallclockTime);
+        Note(cols[1], Loc.T("Se dispara cada día a esa hora\nmientras el show esté abierto.", "Triggers every day at that time\nwhile the show is open."));
 
         Header(cols[2], "MIDI (backend en fase 6)");
         var midiRow = ChkRow(cols[2]);
         Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
-        Cmb(cols[2], "midi_type", "Tipo de mensaje:", c => c.MidiType.ToString(),
+        Cmb(cols[2], "midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
             ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
             ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
-        Int(cols[2], "midi_channel", "Canal:", c => c.MidiChannel);
-        Int(cols[2], "midi_note", "Nota / CC:", c => c.MidiNote);
+        Int(cols[2], "midi_channel", Loc.T("Canal:", "Channel:"), c => c.MidiChannel);
+        Int(cols[2], "midi_note", Loc.T("Nota / CC:", "Note / CC:"), c => c.MidiNote);
         Int(cols[2], "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
 
         return scroll;
@@ -370,20 +370,20 @@ public sealed class InspectorPanel : ContentControl
 
         var cols = Columns(top, 2);
 
-        Header(cols[0], "REPRODUCCIÓN");
+        Header(cols[0], Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         var loopRow = ChkRow(cols[0]);
         Chk(loopRow, "loop", "Loop infinito (hasta STOP)", c => c.Loop);
-        Int(cols[0], "play_count", "Repeticiones (play count):", c => c.PlayCount);
-        Num(cols[0], "rate", "Velocidad (1.0 = normal):", c => c.Rate);
+        Int(cols[0], "play_count", Loc.T("Repeticiones (play count):", "Repeats (play count):"), c => c.PlayCount);
+        Num(cols[0], "rate", Loc.T("Velocidad (1.0 = normal):", "Speed (1.0 = normal):"), c => c.Rate);
         var pitchRow = ChkRow(cols[0]);
         Chk(pitchRow, "preserve_pitch", "Mantener tono al cambiar velocidad",
             c => c.PreservePitch);
 
-        Header(cols[1], "FUNDIDOS Y RECORTE");
+        Header(cols[1], Loc.T("FUNDIDOS Y RECORTE", "FADES & TRIM"));
         TimeF(cols[1], "fade_in", "Fade in:", c => c.FadeIn);
         TimeF(cols[1], "fade_out", "Fade out:", c => c.FadeOut);
-        TimeF(cols[1], "trim_start", "Trim: inicio:", c => c.TrimStart);
-        TimeF(cols[1], "trim_end", "Trim: fin (0 = final):", c => c.TrimEnd);
+        TimeF(cols[1], "trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
+        TimeF(cols[1], "trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
 
         Header(top, "BARRA DE TRIM — arrastra los manejadores");
         _wave.Margin = new Thickness(0, 4, 0, 0);
@@ -437,7 +437,7 @@ public sealed class InspectorPanel : ContentControl
         };
         root.Children.Add(_geoCanvas);
 
-        Header(controls, "MODO");
+        Header(controls, Loc.T("MODO", "MODE"));
         _rbFull = new RadioButton
         {
             Content = "Superficie completa — llena el canvas",
@@ -446,7 +446,7 @@ public sealed class InspectorPanel : ContentControl
         };
         _rbCustom = new RadioButton
         {
-            Content = "Posición manual — escala, posición y giro",
+            Content = Loc.T("Posición manual — escala, posición y giro", "Manual position — scale, position and rotation"),
             GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
             Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
         };
@@ -459,22 +459,22 @@ public sealed class InspectorPanel : ContentControl
         _fullPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
         controls.Children.Add(_fullPanel);
         var aspectRow = ChkRow(_fullPanel);
-        Chk(aspectRow, "preserve_aspect", "Mantener relación de aspecto",
+        Chk(aspectRow, "preserve_aspect", Loc.T("Mantener relación de aspecto", "Keep aspect ratio"),
             c => c.PreserveAspect);
-        SliderF(_fullPanel, "scale", "Escala (%):", 10, 400, c => c.Scale, "0");
+        SliderF(_fullPanel, "scale", Loc.T("Escala (%):", "Scale (%):"), 10, 400, c => c.Scale, "0");
 
         // ── Panel CUSTOM ────────────────────────────────────────────────
         _customPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
         controls.Children.Add(_customPanel);
-        SliderF(_customPanel, "scale_x", "Escala (×):", 0.1, 4.0, c => c.ScaleX, "0.00");
-        SliderF(_customPanel, "translate_x", "Posición X (px):", -960, 960, c => c.TranslateX, "0");
-        SliderF(_customPanel, "translate_y", "Posición Y (px):", -540, 540, c => c.TranslateY, "0");
+        SliderF(_customPanel, "scale_x", Loc.T("Escala (×):", "Scale (×):"), 0.1, 4.0, c => c.ScaleX, "0.00");
+        SliderF(_customPanel, "translate_x", Loc.T("Posición X (px):", "Position X (px):"), -960, 960, c => c.TranslateX, "0");
+        SliderF(_customPanel, "translate_y", Loc.T("Posición Y (px):", "Position Y (px):"), -540, 540, c => c.TranslateY, "0");
 
         var rotRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
         rotRow.Children.Add(new TextBlock
         {
-            Text = "Rotación:", Width = 112,
+            Text = Loc.T("Rotación:", "Rotation:"), Width = 112,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
         });
@@ -501,7 +501,7 @@ public sealed class InspectorPanel : ContentControl
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
         var btnCenter = new Button { Content = "⌖ Centrar", Padding = new Thickness(10, 4, 10, 4) };
         var btnReset = new Button
-        { Content = "↺ Restablecer", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
+        { Content = Loc.T("↺ Restablecer", "↺ Reset"), Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
         btnCenter.Click += (_, _) =>
         {
             Commit("translate_x", 0.0);
@@ -526,7 +526,7 @@ public sealed class InspectorPanel : ContentControl
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         compRow.Children.Add(new TextBlock
         {
-            Text = "Opacidad %:", VerticalAlignment = VerticalAlignment.Center,
+            Text = Loc.T("Opacidad %:", "Opacity %:"), VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
             Margin = new Thickness(0, 0, 4, 0),
         });
@@ -542,12 +542,12 @@ public sealed class InspectorPanel : ContentControl
             System.Globalization.CultureInfo.InvariantCulture);
 
         // ── Salida de vídeo del cue (multi-monitor estilo Watchout) ─────
-        Header(controls, "SALIDA");
+        Header(controls, Loc.T("SALIDA", "OUTPUT"));
         var outRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         outRow.Children.Add(new TextBlock
         {
-            Text = "Salida:", VerticalAlignment = VerticalAlignment.Center,
+            Text = Loc.T("Salida:", "Output:"), VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
             Margin = new Thickness(0, 0, 4, 0),
         });
@@ -568,7 +568,7 @@ public sealed class InspectorPanel : ContentControl
         controls.Children.Add(outRow);
         var outNote = new TextBlock
         {
-            Text = "El monitor de cada salida se asigna en Settings → Vídeo.",
+            Text = Loc.T("El monitor de cada salida se asigna en Settings → Vídeo.", "Each output's monitor is set in Settings → Video."),
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
@@ -576,8 +576,9 @@ public sealed class InspectorPanel : ContentControl
         controls.Children.Add(outNote);
         var canvasNote = new TextBlock
         {
-            Text = "MODO CANVAS activo: el cue se coloca en el canvas y cada " +
-                   "salida muestra su recorte (Settings → Vídeo).",
+            Text = Loc.T(
+                "MODO CANVAS activo: el cue se coloca en el canvas y cada salida muestra su recorte (Settings → Vídeo).",
+                "CANVAS MODE active: the cue is placed on the canvas and each output shows its crop (Settings → Video)."),
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
@@ -751,8 +752,7 @@ public sealed class InspectorPanel : ContentControl
             Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)),
         };
         infoCol.Children.Add(label);
-        Note(infoCol, "Se aplica EN VIVO si el cue está sonando.\n" +
-                      "El VU muestra el nivel real de ESTE cue.");
+        Note(infoCol, Loc.T("Se aplica EN VIVO si el cue está sonando.\nEl VU muestra el nivel real de ESTE cue.", "Applied LIVE if the cue is playing.\nThe VU shows THIS cue's real level."));
 
         slider.ValueChanged += (_, e) =>
         {
@@ -769,11 +769,11 @@ public sealed class InspectorPanel : ContentControl
         panel = infoCol;
 
         // ── Salida de audio por cue ─────────────────────────────────────
-        Header(panel, "SALIDA DE AUDIO DE ESTE CUE");
+        Header(panel, Loc.T("SALIDA DE AUDIO DE ESTE CUE", "AUDIO OUTPUT FOR THIS CUE"));
         var outRow = Conditional(panel, c => c.Type == CueType.Audio);
         outRow.Children.Add(new TextBlock
         {
-            Text = "Dispositivo:", Width = 210,
+            Text = Loc.T("Dispositivo:", "Device:"), Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
         });
@@ -810,14 +810,13 @@ public sealed class InspectorPanel : ContentControl
         var audRow = Conditional(panel, c => c.Type == CueType.Audio);
         var audBtn = new Button
         {
-            Content = "🎧 Audición (cascos)",
+            Content = Loc.T("🎧 Audición (cascos)", "🎧 Audition (headphones)"),
             Margin = new Thickness(0, 8, 0, 0),
             Padding = new Thickness(12, 5, 12, 5),
         };
         audBtn.Click += (_, _) => AuditionRequested?.Invoke();
         audRow.Children.Add(audBtn);
-        Note(panel, "Reproduce este cue por el dispositivo de audición " +
-                    "(Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.");
+        Note(panel, Loc.T("Reproduce este cue por el dispositivo de audición (Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.", "Plays this cue on the audition device (Settings → Audio) without going to the room. Press again to stop."));
 
         return scroll;
     }
@@ -1064,7 +1063,7 @@ public sealed class InspectorPanel : ContentControl
 
     private void ColorSwatches(StackPanel panel)
     {
-        var row = LabeledRow(panel, "Color:");
+        var row = LabeledRow(panel, Loc.T("Color:", "Color:"));
         foreach (var (name, hex) in CueConstants.CueColors)
         {
             var btn = new Button
@@ -1090,7 +1089,7 @@ public sealed class InspectorPanel : ContentControl
             c => c.IsMedia() || c.Type == CueType.Script);
         row.Children.Add(new TextBlock
         {
-            Text = "Archivo:", Width = 210,
+            Text = Loc.T("Archivo:", "File:"), Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
         });
@@ -1115,7 +1114,7 @@ public sealed class InspectorPanel : ContentControl
     {
         row.Children.Add(new TextBlock
         {
-            Text = "Cue objetivo:", Width = 210,
+            Text = Loc.T("Cue objetivo:", "Target cue:"), Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
         });

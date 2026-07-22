@@ -1,12 +1,13 @@
 // =============================================================================
-// Loc.cs — Idioma de la interfaz (ES / EN)
+// Loc.cs — Idioma de la interfaz (ES / EN), compartido por toda la solución
 // =============================================================================
-// Traducción inline: cada punto de la UI da las DOS cadenas — Loc.T(es, en) —
-// así no hay catálogo aparte que se desincronice. El idioma se lee de settings
-// (ui_language) al arrancar y se aplica al reiniciar la app.
+// Vive en Core para que TODAS las capas (App, Controller, …) puedan traducir
+// sus cadenas visibles. Traducción inline: cada sitio da las dos versiones —
+// Loc.T(es, en) — así no hay catálogo aparte que se desincronice. El idioma
+// se lee de settings (ui_language) al arrancar y se aplica al reiniciar.
 // =============================================================================
 
-namespace WinCue.App;
+namespace WinCue.Core;
 
 public static class Loc
 {

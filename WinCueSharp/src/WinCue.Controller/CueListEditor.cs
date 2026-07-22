@@ -61,7 +61,7 @@ public sealed class CueListEditor
         if (json is null)
             return;
         _clipboard = json;
-        _view.FlashStatus("Cues copiados");
+        _view.FlashStatus(Loc.T("Cues copiados", "Cues copied"));
     }
 
     /// <summary>Pega el portapapeles debajo de la fila dada, con ids nuevos.</summary>
@@ -136,7 +136,7 @@ public sealed class CueListEditor
             _model.InsertCue(insertAt + i, cues[i]);
         _view.ReloadTable();
         _setPlayhead(insertAt);
-        _view.FlashStatus($"{cues.Count} cue(s) pegados");
+        _view.FlashStatus(Loc.T($"{cues.Count} cue(s) pegados", $"{cues.Count} cue(s) pasted"));
     }
 
     /// <summary>Mueve un cue de fila (drag &amp; drop de la tabla o del timeline).
@@ -252,7 +252,7 @@ public sealed class CueListEditor
         for (int i = 0; i < _model.Count; i++)
             _model.Cues[i].Number = (i + 1).ToString();
         _view.ReloadTable();
-        _view.FlashStatus($"Renumerados {_model.Count} cues (1..{_model.Count})");
+        _view.FlashStatus(Loc.T($"Renumerados {_model.Count} cues (1..{_model.Count})", $"Renumbered {_model.Count} cues (1..{_model.Count})"));
     }
 
     private static string Capitalize(CueType t)
@@ -313,7 +313,7 @@ public sealed class CueListEditor
         _view.ReloadTable();
         int gi = _model.IndexOfId(gid);
         _setPlayhead(gi >= 0 ? gi : 0);
-        _view.FlashStatus($"{selCues.Count} cue(s) agrupados");
+        _view.FlashStatus(Loc.T($"{selCues.Count} cue(s) agrupados", $"{selCues.Count} cue(s) grouped"));
     }
 
     /// <summary>Deshace un grupo: promueve sus hijos directos y elimina el GROUP.</summary>
@@ -330,7 +330,7 @@ public sealed class CueListEditor
         _view.ReloadTable();
         int count = _model.Count;
         _setPlayhead(count > 0 ? Math.Min(row, count - 1) : 0);
-        _view.FlashStatus("Grupo deshecho");
+        _view.FlashStatus(Loc.T("Grupo deshecho", "Group ungrouped"));
     }
 
     /// <summary>Contrae/expande un grupo (oculta/muestra sus descendientes).</summary>
@@ -373,7 +373,7 @@ public sealed class CueListEditor
         {
             _view.ReloadTable();
             _setPlayhead(Math.Min(insertAt, _model.Count - 1));
-            _view.FlashStatus($"{created} cue(s) creado(s) desde archivo.");
+            _view.FlashStatus(Loc.T($"{created} cue(s) creado(s) desde archivo.", $"{created} cue(s) created from files."));
         }
     }
 }

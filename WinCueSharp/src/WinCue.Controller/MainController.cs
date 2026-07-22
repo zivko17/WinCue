@@ -217,7 +217,7 @@ public class MainController
     {
         Log("STOP ALL");
         StopEverything(fade: 0.0);
-        _view.FlashStatus("■ STOP ALL — todos los cues detenidos");
+        _view.FlashStatus(Loc.T("■ STOP ALL — todos los cues detenidos", "■ STOP ALL — all cues stopped"));
     }
 
     /// <summary>Panic: fundido de salida global y parada de todo.</summary>
@@ -225,7 +225,7 @@ public class MainController
     {
         Log("PANIC");
         StopEverything(fade: PanicFade);
-        _view.FlashStatus($"⚠ PANIC — fundido de {PanicFade:F0}s y parada");
+        _view.FlashStatus(Loc.T($"⚠ PANIC — fundido de {PanicFade:F0}s y parada", $"⚠ PANIC — {PanicFade:F0}s fade and stop"));
     }
 
     /// <summary>FADE ALL: fundido elegante de todo (distinto del PANIC de
@@ -235,7 +235,7 @@ public class MainController
         double t = Math.Max(0.1, _settings.Get("fade_all_seconds", 5.0));
         Log($"FADE ALL ({t:0.#}s)");
         StopEverything(fade: t);
-        _view.FlashStatus($"◢ FADE ALL — fundido de {t:0.#}s");
+        _view.FlashStatus(Loc.T($"◢ FADE ALL — fundido de {t:0.#}s", $"◢ FADE ALL — {t:0.#}s fade"));
     }
 
     /// <summary>Id reservado para la audición local (nunca colisiona con cues).</summary>
@@ -252,13 +252,13 @@ public class MainController
         {
             _audio.Stop(AuditionCueId);
             _auditionSourceCueId = -1;
-            _view.FlashStatus("🎧 Audición detenida");
+            _view.FlashStatus(Loc.T("🎧 Audición detenida", "🎧 Audition stopped"));
             return;
         }
         var cue = _model.GetCue(row);
         if (cue is null || cue.Type != CueType.Audio || cue.FilePath.Length == 0)
         {
-            _view.FlashStatus("Audición: selecciona un cue de AUDIO con archivo");
+            _view.FlashStatus(Loc.T("Audición: selecciona un cue de AUDIO con archivo", "Audition: select an AUDIO cue with a file"));
             return;
         }
         _auditionSourceCueId = cue.Id;
@@ -266,7 +266,7 @@ public class MainController
             Volume: cue.Volume, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
             OutputDevice: _settings.Get("audition_device_name", ""),
             Eq: EqFor(cue)));
-        _view.FlashStatus($"🎧 Audición: {cue.Name}");
+        _view.FlashStatus(Loc.T($"🎧 Audición: {cue.Name}", $"🎧 Audition: {cue.Name}"));
     }
 
     /// <summary>Cadena de EQ del cue para el motor (ganancia + filtros).</summary>
@@ -333,7 +333,7 @@ public class MainController
             // Congelar el timer de duración (si lo hay)
             foreach (var t in run.Timers) t.Dispose();
             run.Timers.Clear();
-            _view.FlashStatus($"⏸ {cue.DisplayNumber} en pausa");
+            _view.FlashStatus(Loc.T($"⏸ {cue.DisplayNumber} en pausa", $"⏸ {cue.DisplayNumber} paused"));
         }
         else
         {
@@ -355,7 +355,7 @@ public class MainController
                 double remaining = Math.Max(0.0, run.Duration - elapsed);
                 Schedule(run, (int)(remaining * 1000), () => DurationElapsed(cue.Id));
             }
-            _view.FlashStatus($"▶ {cue.DisplayNumber} reanudado");
+            _view.FlashStatus(Loc.T($"▶ {cue.DisplayNumber} reanudado", $"▶ {cue.DisplayNumber} resumed"));
         }
     }
 
@@ -1001,7 +1001,7 @@ public class MainController
         var target = cue.TargetId is int tid ? _model.GetById(tid) : null;
         if (target is null)
         {
-            _view.FlashStatus("FADE sin objetivo válido — ignorado");
+            _view.FlashStatus(Loc.T("FADE sin objetivo válido — ignorado", "FADE without a valid target — ignored"));
             return;
         }
         bool stopAfter = cue.FadeStopOnDone && cue.Volume <= 0.0001;
@@ -1020,7 +1020,7 @@ public class MainController
         }
         else
         {
-            _view.FlashStatus($"FADE → cue {target.DisplayNumber} no está sonando");
+            _view.FlashStatus(Loc.T($"FADE → cue {target.DisplayNumber} no está sonando", $"FADE → cue {target.DisplayNumber} is not playing"));
         }
     }
 
@@ -1028,13 +1028,13 @@ public class MainController
     {
         if (cue.TargetId is not int tid)
         {
-            _view.FlashStatus("START sin objetivo — ignorado");
+            _view.FlashStatus(Loc.T("START sin objetivo — ignorado", "START without a target — ignored"));
             return;
         }
         int tgtIdx = _model.IndexOfId(tid);
         if (tgtIdx < 0)
         {
-            _view.FlashStatus("START: objetivo inexistente — ignorado");
+            _view.FlashStatus(Loc.T("START: objetivo inexistente — ignorado", "START: target does not exist — ignored"));
             return;
         }
         Trigger(tgtIdx, advanceChain: false);
@@ -1057,7 +1057,7 @@ public class MainController
         string path = cue.FilePath.Trim();
         if (path.Length == 0)
         {
-            _view.FlashStatus("SCRIPT sin archivo — ignorado");
+            _view.FlashStatus(Loc.T("SCRIPT sin archivo — ignorado", "SCRIPT without a file — ignored"));
             return;
         }
         try
@@ -1072,11 +1072,11 @@ public class MainController
                 _ => new ProcessStartInfo(path) { UseShellExecute = true },
             };
             Process.Start(psi);
-            _view.FlashStatus($"SCRIPT lanzado: {Path.GetFileName(path)}");
+            _view.FlashStatus(Loc.T($"SCRIPT lanzado: {Path.GetFileName(path)}", $"SCRIPT launched: {Path.GetFileName(path)}"));
         }
         catch (Exception exc)
         {
-            _view.FlashStatus($"SCRIPT falló: {exc.Message}");
+            _view.FlashStatus(Loc.T($"SCRIPT falló: {exc.Message}", $"SCRIPT failed: {exc.Message}"));
         }
     }
 
@@ -1195,7 +1195,7 @@ public class MainController
             _view.RefreshRow(idx);
         }
         _running.Remove(cueId);
-        _view.FlashStatus($"Audio: {message}");
+        _view.FlashStatus(Loc.T($"Audio: {message}", $"Audio: {message}"));
     }
 
     private void OnVideoError(int cueId, string message)
@@ -1212,7 +1212,7 @@ public class MainController
             _view.RefreshRow(idx);
         }
         _running.Remove(cueId);
-        _view.FlashStatus($"Vídeo: {message}");
+        _view.FlashStatus(Loc.T($"Vídeo: {message}", $"Video: {message}"));
     }
 
 

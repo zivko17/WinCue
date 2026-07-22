@@ -78,32 +78,32 @@ public partial class SettingsWindow : Window
     {
         var root = new StackPanel();
 
-        var dev = Group(root, "DISPOSITIVO DE SALIDA");
-        _audioDevices = Combo("audio_device_name", dev, "Dispositivo:");
+        var dev = Group(root, Loc.T("DISPOSITIVO DE SALIDA", "OUTPUT DEVICE"));
+        _audioDevices = Combo("audio_device_name", dev, Loc.T("Dispositivo:", "Device:"));
         RefreshAudioDevices();
         var refreshRow = Row(dev, "");
-        var btnRefresh = new Button { Content = "↻ Refrescar dispositivos" };
+        var btnRefresh = new Button { Content = Loc.T("↻ Refrescar dispositivos", "↻ Refresh devices") };
         btnRefresh.Click += (_, _) => RefreshAudioDevices();
         refreshRow.Children.Add(btnRefresh);
-        Combo("audio_driver", dev, "Driver:",
+        Combo("audio_driver", dev, Loc.T("Driver:", "Driver:"),
             ("wasapi", "WASAPI"), ("asio", "ASIO"), ("directsound", "DirectSound"));
 
-        var q = Group(root, "CALIDAD");
-        Combo("audio_sample_rate", q, "Frecuencia de muestreo:",
+        var q = Group(root, Loc.T("CALIDAD", "QUALITY"));
+        Combo("audio_sample_rate", q, Loc.T("Frecuencia de muestreo:", "Sample rate:"),
             (44100, "44100 Hz"), (48000, "48000 Hz"), (96000, "96000 Hz"));
-        Combo("audio_buffer_size", q, "Tamaño de buffer:",
+        Combo("audio_buffer_size", q, Loc.T("Tamaño de buffer:", "Buffer size:"),
             (128, "128 samples"), (256, "256"), (512, "512"), (1024, "1024"), (2048, "2048"));
-        Note(q, "El cambio de frecuencia de muestreo se aplica al reiniciar la app.");
+        Note(q, Loc.T("El cambio de frecuencia de muestreo se aplica al reiniciar la app.", "Sample-rate change applies after restarting the app."));
 
-        var vol = Group(root, "VOLUMEN");
-        Spin("master_volume", vol, "Volumen master (%):", 0, 100);
+        var vol = Group(root, Loc.T("VOLUMEN", "VOLUME"));
+        Spin("master_volume", vol, Loc.T("Volumen master (%):", "Master volume (%):"), 0, 100);
 
-        var aud = Group(root, "AUDICIÓN (PREVIEW LOCAL)");
-        var audCombo = Combo("audition_device_name", aud, "Dispositivo de audición:");
-        audCombo.Items.Add(new ComboBoxItem { Content = "(salida principal)", Tag = "" });
+        var aud = Group(root, Loc.T("AUDICIÓN (PREVIEW LOCAL)", "AUDITION (LOCAL PREVIEW)"));
+        var audCombo = Combo("audition_device_name", aud, Loc.T("Dispositivo de audición:", "Audition device:"));
+        audCombo.Items.Add(new ComboBoxItem { Content = Loc.T("(salida principal)", "(main output)"), Tag = "" });
         foreach (var audDev in AudioEngine.ListDevices())
             audCombo.Items.Add(new ComboBoxItem { Content = audDev.Name, Tag = audDev.Name });
-        Note(aud, "Los cues se pre-escuchan por aquí (cascos) sin salir a la sala.");
+        Note(aud, Loc.T("Los cues se pre-escuchan por aquí (cascos) sin salir a la sala.", "Cues are pre-listened here (headphones) without going to the room."));
 
         return root;
     }
@@ -112,33 +112,31 @@ public partial class SettingsWindow : Window
     {
         var root = new StackPanel();
 
-        var scr = Group(root, "SALIDAS DE VÍDEO (monitor por salida)");
+        var scr = Group(root, Loc.T("SALIDAS DE VÍDEO (monitor por salida)", "VIDEO OUTPUTS (monitor per output)"));
         var screens = System.Windows.Forms.Screen.AllScreens
             .Select((s, i) => ((object)i,
-                $"Pantalla {i}{(s.Primary ? " (principal)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}"))
+                Loc.T($"Pantalla {i}{(s.Primary ? " (principal)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}", $"Screen {i}{(s.Primary ? " (main)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}")))
             .ToArray();
-        Combo("video_output_screen", scr, "Salida 1 (principal):", screens);
-        Combo("video_output_screen2", scr, "Salida 2:", screens);
-        Combo("video_output_screen3", scr, "Salida 3:", screens);
-        Combo("video_output_screen4", scr, "Salida 4:", screens);
-        Note(scr, "Cada cue de vídeo elige su salida en el inspector (Geometry). " +
-                  "Las ventanas de salida se abren solas al usarlas un cue.");
-        Check("video_fullscreen_output", scr, "Salidas a pantalla completa (blackout)");
-        Note(scr, "Desmárcalo solo para probar en ventanas con bordes.");
-        Spin("blackout_fade", scr, "Fundido del blackout (s, tecla B):", 0, 30);
-        Check("video_compositor", scr, "Compositor GPU (opacidad real entre capas)");
-        Note(scr, "Las pistas se funden según su Opacidad % (Geometry). Requiere " +
-                  "driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.");
+        Combo("video_output_screen", scr, Loc.T("Salida 1 (principal):", "Output 1 (main):"), screens);
+        Combo("video_output_screen2", scr, Loc.T("Salida 2:", "Output 2:"), screens);
+        Combo("video_output_screen3", scr, Loc.T("Salida 3:", "Output 3:"), screens);
+        Combo("video_output_screen4", scr, Loc.T("Salida 4:", "Output 4:"), screens);
+        Note(scr, Loc.T("Cada cue de vídeo elige su salida en el inspector (Geometry). Las ventanas de salida se abren solas al usarlas un cue.",
+                  "Each video cue picks its output in the inspector (Geometry). Output windows open on their own when a cue uses them."));
+        Check("video_fullscreen_output", scr, Loc.T("Salidas a pantalla completa (blackout)", "Full-screen outputs (blackout)"));
+        Note(scr, Loc.T("Desmárcalo solo para probar en ventanas con bordes.", "Uncheck only to test in bordered windows."));
+        Spin("blackout_fade", scr, Loc.T("Fundido del blackout (s, tecla B):", "Blackout fade (s, key B):"), 0, 30);
+        Check("video_compositor", scr, Loc.T("Compositor GPU (opacidad real entre capas)", "GPU compositor (real per-layer opacity)"));
+        Note(scr, Loc.T("Las pistas se funden según su Opacidad % (Geometry). Requiere driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.",
+                  "Layers blend by their Opacity % (Geometry). Requires a driver with OpenGL↔DirectX interop; if it fails, it falls back to classic mode."));
 
         // ── CANVAS (estilo Watchout): recortes por salida ───────────────
-        var canvas = Group(root, "CANVAS (las salidas recortan un lienzo común)");
+        var canvas = Group(root, Loc.T("CANVAS (las salidas recortan un lienzo común)", "CANVAS (outputs crop a shared canvas)"));
         Check("video_canvas_mode", canvas,
-            "Modo canvas: los cues se colocan en el canvas y cada salida " +
-            "muestra su recorte");
-        Note(canvas, "Requiere el compositor GPU. Un vídeo puede cruzar varias " +
-                     "salidas con sincronía perfecta (un solo render). En este " +
-                     "modo la \"Salida\" del inspector se ignora: el vídeo vive " +
-                     "en el canvas.");
+            Loc.T("Modo canvas: los cues se colocan en el canvas y cada salida muestra su recorte",
+            "Canvas mode: cues are placed on the canvas and each output shows its crop"));
+        Note(canvas, Loc.T("Requiere el compositor GPU. Un vídeo puede cruzar varias salidas con sincronía perfecta (un solo render). En este modo la \"Salida\" del inspector se ignora: el vídeo vive en el canvas.",
+                     "Requires the GPU compositor. A video can span several outputs with perfect sync (a single render). In this mode the inspector's \"Output\" is ignored: the video lives on the canvas."));
         var editor = new CanvasEditorControl { Margin = new Thickness(0, 6, 0, 0) };
         canvas.Children.Add(editor);
         _fields["surface_width"] = (
@@ -160,9 +158,9 @@ public partial class SettingsWindow : Window
                     v => editor.SetEnabled(idx, AsBool(v)));
         }
 
-        var pb = Group(root, "REPRODUCCIÓN");
+        var pb = Group(root, Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
-        Check("video_loop_default", pb, "Loop por defecto en cues nuevos");
+        Check("video_loop_default", pb, Loc.T("Loop por defecto en cues nuevos", "Loop by default on new cues"));
 
         return root;
     }
@@ -171,11 +169,11 @@ public partial class SettingsWindow : Window
     {
         var root = new StackPanel();
 
-        var osc = Group(root, "OSC (Open Sound Control)");
-        Check("osc_enabled", osc, "Habilitar OSC (backend en fase 6)");
-        Spin("osc_listen_port", osc, "Puerto de escucha:", 1, 65535);
-        Text("osc_send_host", osc, "Host de envío:");
-        Spin("osc_send_port", osc, "Puerto de envío:", 1, 65535);
+        var osc = Group(root, Loc.T("OSC (Open Sound Control)", "OSC (Open Sound Control)"));
+        Check("osc_enabled", osc, Loc.T("Habilitar OSC (backend en fase 6)", "Enable OSC (backend in phase 6)"));
+        Spin("osc_listen_port", osc, Loc.T("Puerto de escucha:", "Listen port:"), 1, 65535);
+        Text("osc_send_host", osc, Loc.T("Host de envío:", "Send host:"));
+        Spin("osc_send_port", osc, Loc.T("Puerto de envío:", "Send port:"), 1, 65535);
         var testRow = Row(osc, "");
         var btnPing = new Button { Content = "Enviar ping de prueba" };
         btnPing.Click += OnOscTest;
@@ -185,11 +183,11 @@ public partial class SettingsWindow : Window
         testRow.Children.Add(_oscTestResult);
 
         var midi = Group(root, "MIDI");
-        Check("midi_enabled", midi, "Habilitar disparo por MIDI (backend en fase 6)");
-        _midiDevices = Combo("midi_device_name", midi, "Dispositivo de entrada:");
+        Check("midi_enabled", midi, Loc.T("Habilitar disparo por MIDI (backend en fase 6)", "Enable MIDI triggering (backend in phase 6)"));
+        _midiDevices = Combo("midi_device_name", midi, Loc.T("Dispositivo de entrada:", "Input device:"));
         RefreshMidiDevices();
-        var goNote = Spin("midi_go_note", midi, "Nota MIDI para GO:", 0, 127);
-        var stopNote = Spin("midi_stop_note", midi, "Nota MIDI para STOP:", 0, 127);
+        var goNote = Spin("midi_go_note", midi, Loc.T("Nota MIDI para GO:", "MIDI note for GO:"), 0, 127);
+        var stopNote = Spin("midi_stop_note", midi, Loc.T("Nota MIDI para STOP:", "MIDI note for STOP:"), 0, 127);
         _midiNotes = (goNote, stopNote);
         var learnRow = Row(midi, "");
         var btnLearnGo = new Button { Content = "🎹 Learn GO (5 s)" };
@@ -217,27 +215,27 @@ public partial class SettingsWindow : Window
             "El cambio de idioma se aplica al reiniciar la aplicación.",
             "The language change takes effect after restarting the app."));
 
-        var go = Group(root, "COMPORTAMIENTO DE GO");
-        Combo("go_mode", go, "Al disparar un media:",
-            ("concurrent", "Concurrente (QLab): los audios se solapan"),
-            ("sequential", "Secuencial: cada GO detiene los demás"),
+        var go = Group(root, Loc.T("COMPORTAMIENTO DE GO", "GO BEHAVIOUR"));
+        Combo("go_mode", go, Loc.T("Al disparar un media:", "When triggering media:"),
+            ("concurrent", Loc.T("Concurrente (QLab): los audios se solapan", "Concurrent (QLab): audios overlap")),
+            ("sequential", Loc.T("Secuencial: cada GO detiene los demás", "Sequential: each GO stops the others")),
             ("per_cue", "Por cue: según la casilla \"detener los demás\""));
-        Spin("go_min_interval_ms", go, "Anti doble-GO (ms; 0 = desactivado):", 0, 2000);
-        Spin("fade_all_seconds", go, "Duración del FADE ALL (s):", 1, 60);
+        Spin("go_min_interval_ms", go, Loc.T("Anti doble-GO (ms; 0 = desactivado):", "Anti double-GO (ms; 0 = off):"), 0, 2000);
+        Spin("fade_all_seconds", go, Loc.T("Duración del FADE ALL (s):", "FADE ALL duration (s):"), 1, 60);
 
-        var ui = Group(root, "VISTA");
-        Check("show_latency_column", ui, "Mostrar columna de latencia");
-        Check("show_next_cue_label", ui, "Mostrar etiqueta del siguiente cue");
-        Check("confirm_last_cue", ui, "Confirmar al llegar al último cue");
-        Spin("ui_font_scale", ui, "Escala de fuente de la lista (%):", 80, 200);
-        Note(ui, "Agranda la tabla de cues y las tarjetas EN REPRODUCCIÓN " +
-                 "(FOH a oscuras). Se aplica al guardar.");
+        var ui = Group(root, Loc.T("VISTA", "VIEW"));
+        Check("show_latency_column", ui, Loc.T("Mostrar columna de latencia", "Show latency column"));
+        Check("show_next_cue_label", ui, Loc.T("Mostrar etiqueta del siguiente cue", "Show next-cue label"));
+        Check("confirm_last_cue", ui, Loc.T("Confirmar al llegar al último cue", "Confirm when reaching the last cue"));
+        Spin("ui_font_scale", ui, Loc.T("Escala de fuente de la lista (%):", "List font scale (%):"), 80, 200);
+        Note(ui, Loc.T("Agranda la tabla de cues y las tarjetas EN REPRODUCCIÓN (FOH a oscuras). Se aplica al guardar.",
+                 "Enlarges the cue table and the PLAYING cards (dark FOH). Applied on save."));
 
-        var kb = Group(root, "ATAJOS DE TECLADO");
+        var kb = Group(root, Loc.T("ATAJOS DE TECLADO", "KEYBOARD SHORTCUTS"));
         Text("keyboard_go", kb, "GO:");
-        Text("keyboard_stop", kb, "Stop seleccionado:");
-        Text("keyboard_prev", kb, "Cue anterior:");
-        Note(kb, "Nombres de tecla WPF: Space, S, Left, F1… Se aplican al guardar.");
+        Text("keyboard_stop", kb, Loc.T("Stop seleccionado:", "Stop selected:"));
+        Text("keyboard_prev", kb, Loc.T("Cue anterior:", "Previous cue:"));
+        Note(kb, Loc.T("Nombres de tecla WPF: Space, S, Left, F1… Se aplican al guardar.", "WPF key names: Space, S, Left, F1… Applied on save."));
 
         return root;
     }
@@ -245,7 +243,7 @@ public partial class SettingsWindow : Window
     private UIElement BuildPaths()
     {
         var root = new StackPanel();
-        var grp = Group(root, "RUTAS POR DEFECTO");
+        var grp = Group(root, Loc.T("RUTAS POR DEFECTO", "DEFAULT PATHS"));
         PathField("default_show_path", grp, "Carpeta de shows:", folder: true);
         PathField("default_media_path", grp, "Carpeta de media:", folder: true);
         PathField("ffmpeg_path", grp, "Ejecutable de FFmpeg (vacío = PATH):", folder: false);
@@ -373,7 +371,7 @@ public partial class SettingsWindow : Window
     private void RefreshAudioDevices()
     {
         _audioDevices.Items.Clear();
-        _audioDevices.Items.Add(new ComboBoxItem { Content = "(dispositivo por defecto)", Tag = "" });
+        _audioDevices.Items.Add(new ComboBoxItem { Content = Loc.T("(dispositivo por defecto)", "(default device)"), Tag = "" });
         foreach (var dev in AudioEngine.ListDevices())
             _audioDevices.Items.Add(new ComboBoxItem
             {

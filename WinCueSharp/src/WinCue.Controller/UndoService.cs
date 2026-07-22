@@ -72,7 +72,7 @@ public sealed class UndoService
         var (json, playhead) = _undoStack[^1];
         _undoStack.RemoveAt(_undoStack.Count - 1);
         RestoreSnapshot(json, playhead);
-        _view.FlashStatus("↶ Deshacer");
+        _view.FlashStatus(Loc.T("↶ Deshacer", "↶ Undo"));
     }
 
     public void Redo()
@@ -83,7 +83,7 @@ public sealed class UndoService
         var (json, playhead) = _redoStack[^1];
         _redoStack.RemoveAt(_redoStack.Count - 1);
         RestoreSnapshot(json, playhead);
-        _view.FlashStatus("↷ Rehacer");
+        _view.FlashStatus(Loc.T("↷ Rehacer", "↷ Redo"));
     }
 
     private void RestoreSnapshot(string json, int playhead)

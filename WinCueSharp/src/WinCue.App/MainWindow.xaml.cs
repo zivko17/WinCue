@@ -655,7 +655,7 @@ public partial class MainWindow : Window, IShowView
         if (e.ClickCount == 2)
         {
             _showStartTicks = null;   // reiniciar el cronómetro del show
-            FlashStatus("Reloj del show reiniciado.");
+            FlashStatus(Loc.T("Reloj del show reiniciado.", "Show clock reset."));
         }
         else
         {
@@ -708,7 +708,7 @@ public partial class MainWindow : Window, IShowView
 
     private void OnShowMode(object sender, RoutedEventArgs e)
     {
-        ModeToggle.Content = "Modo: SHOW";
+        ModeToggle.Content = Loc.T("Modo: SHOW", "Mode: SHOW");
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x7e, 0x34));
         ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
@@ -734,7 +734,7 @@ public partial class MainWindow : Window, IShowView
             _modeReverting = false;
             return;
         }
-        ModeToggle.Content = "Modo: EDIT";
+        ModeToggle.Content = Loc.T("Modo: EDIT", "Mode: EDIT");
         ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
         ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
@@ -754,7 +754,7 @@ public partial class MainWindow : Window, IShowView
             return;
         }
         VideoOutButton.Foreground = Brushes.White;
-        VideoOutButton.Content = "🖵 Salida vídeo ▾";
+        VideoOutButton.Content = Loc.T("🖵 Salida vídeo ▾", "🖵 Video output ▾");
         VideoOutButton.Background = new SolidColorBrush(active
             ? Color.FromRgb(0x1e, 0x7e, 0x34)
             : Color.FromRgb(0x7e, 0x1e, 0x1e));
@@ -798,7 +798,7 @@ public partial class MainWindow : Window, IShowView
 
             var show = new MenuItem
             {
-                Header = w is { IsVisible: true } ? "Ocultar" : "Mostrar",
+                Header = w is { IsVisible: true } ? Loc.T("Ocultar", "Hide") : Loc.T("Mostrar", "Show"),
                 Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
             };
             show.Click += (_, _) =>
@@ -818,7 +818,7 @@ public partial class MainWindow : Window, IShowView
 
             var ident = new MenuItem
             {
-                Header = "Identificar",
+                Header = Loc.T("Identificar", "Identify"),
                 Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
             };
             ident.Click += (_, _) => IdentifyOutput(idx);
@@ -827,10 +827,10 @@ public partial class MainWindow : Window, IShowView
             sub.Items.Add(new Separator());
             foreach (var (pattern, label) in new[]
             {
-                (TestPattern.None, "Sin patrón"),
-                (TestPattern.Grid, "Patrón: rejilla"),
-                (TestPattern.Bars, "Patrón: barras"),
-                (TestPattern.Border, "Patrón: borde"),
+                (TestPattern.None, Loc.T("Sin patrón", "No pattern")),
+                (TestPattern.Grid, Loc.T("Patrón: rejilla", "Pattern: grid")),
+                (TestPattern.Bars, Loc.T("Patrón: barras", "Pattern: bars")),
+                (TestPattern.Border, Loc.T("Patrón: borde", "Pattern: border")),
             })
             {
                 var item = new MenuItem
@@ -854,7 +854,7 @@ public partial class MainWindow : Window, IShowView
 
         menu.Items.Add(new Separator());
 
-        var identAll = new MenuItem { Header = "Identificar salidas visibles" };
+        var identAll = new MenuItem { Header = Loc.T("Identificar salidas visibles", "Identify visible outputs") };
         identAll.Click += (_, _) =>
         {
             for (int s = 0; s < _videoOutputs.Length; s++)
@@ -863,7 +863,7 @@ public partial class MainWindow : Window, IShowView
         };
         menu.Items.Add(identAll);
 
-        var clearPatterns = new MenuItem { Header = "Quitar todos los patrones" };
+        var clearPatterns = new MenuItem { Header = Loc.T("Quitar todos los patrones", "Clear all patterns") };
         clearPatterns.Click += (_, _) =>
         {
             foreach (var w in _videoOutputs)
@@ -881,7 +881,7 @@ public partial class MainWindow : Window, IShowView
         menu.Items.Add(blackout);
 
         menu.Items.Add(new Separator());
-        var hideAll = new MenuItem { Header = "Ocultar todas las salidas" };
+        var hideAll = new MenuItem { Header = Loc.T("Ocultar todas las salidas", "Hide all outputs") };
         hideAll.Click += (_, _) =>
         {
             foreach (var w in _videoOutputs)
@@ -912,8 +912,8 @@ public partial class MainWindow : Window, IShowView
                 w.SetBlackout(_blackout, fade);
         UpdateVideoOutButton();
         FlashStatus(_blackout
-            ? "BLACKOUT — salidas fundidas a negro (B para levantar)."
-            : "Blackout levantado.");
+            ? Loc.T("BLACKOUT — salidas fundidas a negro (B para levantar).", "BLACKOUT — outputs faded to black (B to release).")
+            : Loc.T("Blackout levantado.", "Blackout released."));
     }
 
     /// <summary>Acerca de: versión + atribuciones de terceros (auditoría 05).
@@ -953,7 +953,7 @@ public partial class MainWindow : Window, IShowView
             for (int s = 0; s < _videoOutputs.Length; s++)
                 if (_videoOutputs[s] is { IsVisible: true })
                     PlaceVideoOutput(s);   // recolocar en la pantalla elegida
-            FlashStatus("Configuración guardada y aplicada.");
+            FlashStatus(Loc.T("Configuración guardada y aplicada.", "Settings saved and applied."));
         };
         dlg.ShowDialog();
     }

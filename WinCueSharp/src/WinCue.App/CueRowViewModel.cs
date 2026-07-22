@@ -32,13 +32,13 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
     public string TypeLabel => _cue.Type switch
     {
         CueType.Audio => "♪ AUDIO",
-        CueType.Video => "▣ VÍDEO",
-        CueType.Wait => "⏱ ESPERA",
-        CueType.Fade => "◢ FUNDIDO",
-        CueType.Start => "▶ INICIAR",
-        CueType.Stop => "■ PARAR",
+        CueType.Video => Loc.T("▣ VÍDEO", "▣ VIDEO"),
+        CueType.Wait => Loc.T("⏱ ESPERA", "⏱ WAIT"),
+        CueType.Fade => Loc.T("◢ FUNDIDO", "◢ FADE"),
+        CueType.Start => Loc.T("▶ INICIAR", "▶ START"),
+        CueType.Stop => Loc.T("■ PARAR", "■ STOP"),
         CueType.Script => "⚙ SCRIPT",
-        CueType.Memo => "✎ NOTA",
+        CueType.Memo => Loc.T("✎ NOTA", "✎ MEMO"),
         CueType.Group => "▸ GRUPO",
         _ => TypeText,
     };
