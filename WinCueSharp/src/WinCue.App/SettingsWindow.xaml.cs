@@ -58,10 +58,10 @@ public partial class SettingsWindow : Window
     private void BuildPages()
     {
         Tabs.Items.Add(MakeTab("Audio", BuildAudio()));
-        Tabs.Items.Add(MakeTab("Vídeo", BuildVideo()));
-        Tabs.Items.Add(MakeTab("Red / Control", BuildNetwork()));
-        Tabs.Items.Add(MakeTab("Interfaz", BuildInterface()));
-        Tabs.Items.Add(MakeTab("Rutas", BuildPaths()));
+        Tabs.Items.Add(MakeTab(Loc.T("Vídeo", "Video"), BuildVideo()));
+        Tabs.Items.Add(MakeTab(Loc.T("Red / Control", "Network / Control"), BuildNetwork()));
+        Tabs.Items.Add(MakeTab(Loc.T("Interfaz", "Interface"), BuildInterface()));
+        Tabs.Items.Add(MakeTab(Loc.T("Rutas", "Paths"), BuildPaths()));
     }
 
     private static TabItem MakeTab(string title, UIElement content) => new()
@@ -208,6 +208,14 @@ public partial class SettingsWindow : Window
     private UIElement BuildInterface()
     {
         var root = new StackPanel();
+
+        var lang = Group(root, Loc.T("IDIOMA", "LANGUAGE"));
+        Combo("ui_language", lang, Loc.T("Idioma de la interfaz:", "Interface language:"),
+            ("es", "Español"),
+            ("en", "English"));
+        Note(lang, Loc.T(
+            "El cambio de idioma se aplica al reiniciar la aplicación.",
+            "The language change takes effect after restarting the app."));
 
         var go = Group(root, "COMPORTAMIENTO DE GO");
         Combo("go_mode", go, "Al disparar un media:",

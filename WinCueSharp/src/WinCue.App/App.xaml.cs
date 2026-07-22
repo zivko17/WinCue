@@ -45,6 +45,8 @@ public partial class App : Application
 
         Action<Action> dispatch = action => Dispatcher.BeginInvoke(action);
         var settings = SettingsManager.Instance;
+        // Idioma de la UI (ES/EN) ANTES de construir la ventana
+        Loc.SetFromCode(settings.Get("ui_language", "es"));
         var model = new CueModel();
         var window = new MainWindow();
         MainWindow = window;
