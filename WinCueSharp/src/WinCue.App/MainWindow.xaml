@@ -102,12 +102,12 @@
                            Foreground="{StaticResource FgDim}"/>
                 <Button Click="OnAddCue" Tag="AUDIO" Content="♪ Audio"/>
                 <Button Click="OnAddCue" Tag="VIDEO" Content="▣ Vídeo"/>
-                <Button Click="OnAddCue" Tag="WAIT" Content="⏱ Wait"/>
-                <Button Click="OnAddCue" Tag="FADE" Content="◢ Fade"/>
-                <Button Click="OnAddCue" Tag="START" Content="▶ Start"/>
-                <Button Click="OnAddCue" Tag="STOP" Content="■ Stop"/>
+                <Button Click="OnAddCue" Tag="WAIT" Content="⏱ Espera"/>
+                <Button Click="OnAddCue" Tag="FADE" Content="◢ Fundido"/>
+                <Button Click="OnAddCue" Tag="START" Content="▶ Iniciar"/>
+                <Button Click="OnAddCue" Tag="STOP" Content="■ Parar"/>
                 <Button Click="OnAddCue" Tag="SCRIPT" Content="⚙ Script"/>
-                <Button Click="OnAddCue" Tag="MEMO" Content="✎ Memo"/>
+                <Button Click="OnAddCue" Tag="MEMO" Content="✎ Nota"/>
                 <Button Click="OnAddCue" Tag="GROUP" Content="▸ Grupo"/>
                 <Separator Width="14" Background="Transparent"/>
                 <Button Click="OnImportFiles" Content="＋ Importar archivos…"/>
@@ -141,8 +141,9 @@
         <!-- ═══════════ PANEL IZQ (redimensionable) + CENTRO ═══════════ -->
         <Grid>
             <Grid.ColumnDefinitions>
-                <!-- Arrastrar el separador agranda monitores PGM/PVW (16:9) -->
-                <ColumnDefinition Width="260" MinWidth="200" MaxWidth="700"/>
+                <!-- Arrastrar el separador agranda monitores PGM/PVW (16:9).
+                     Ancho por defecto: PGM/PVW grandes al abrir. -->
+                <ColumnDefinition Width="455" MinWidth="200" MaxWidth="760"/>
                 <ColumnDefinition Width="Auto"/>
                 <ColumnDefinition Width="*" MinWidth="400"/>
             </Grid.ColumnDefinitions>
@@ -251,6 +252,21 @@
                     </Style.Triggers>
                 </Style>
             </DataGrid.RowStyle>
+            <!-- Selección LEGIBLE: azul oscuro (antes el resaltado blanco del
+                 sistema hacía el texto claro ilegible) -->
+            <DataGrid.CellStyle>
+                <Style TargetType="DataGridCell">
+                    <Setter Property="Background" Value="Transparent"/>
+                    <Setter Property="BorderThickness" Value="0"/>
+                    <Style.Triggers>
+                        <Trigger Property="IsSelected" Value="True">
+                            <Setter Property="Background" Value="#37527a"/>
+                            <Setter Property="BorderBrush" Value="#5a80c0"/>
+                            <Setter Property="BorderThickness" Value="0,1"/>
+                        </Trigger>
+                    </Style.Triggers>
+                </Style>
+            </DataGrid.CellStyle>
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="" Width="26">
                     <DataGridTemplateColumn.CellTemplate>

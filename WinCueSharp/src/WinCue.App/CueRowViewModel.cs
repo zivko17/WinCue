@@ -33,12 +33,12 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
     {
         CueType.Audio => "♪ AUDIO",
         CueType.Video => "▣ VÍDEO",
-        CueType.Wait => "⏱ WAIT",
-        CueType.Fade => "◢ FADE",
-        CueType.Start => "▶ START",
-        CueType.Stop => "■ STOP",
+        CueType.Wait => "⏱ ESPERA",
+        CueType.Fade => "◢ FUNDIDO",
+        CueType.Start => "▶ INICIAR",
+        CueType.Stop => "■ PARAR",
         CueType.Script => "⚙ SCRIPT",
-        CueType.Memo => "✎ MEMO",
+        CueType.Memo => "✎ NOTA",
         CueType.Group => "▸ GRUPO",
         _ => TypeText,
     };

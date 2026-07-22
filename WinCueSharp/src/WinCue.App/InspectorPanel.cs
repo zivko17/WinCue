@@ -106,11 +106,11 @@ public sealed class InspectorPanel : ContentControl
                 _editPreview.Scrub(seconds);
         };
 
-        _tabs.Items.Add(Tab("Basics", BuildBasics()));
-        _tabs.Items.Add(Tab("Triggers", BuildTriggers()));
-        _tabs.Items.Add(Tab("Time & Loops", BuildTimeLoops()));
-        _tabs.Items.Add(Tab("Geometry", BuildGeometry()));
-        _tabs.Items.Add(Tab("Levels", BuildLevels()));
+        _tabs.Items.Add(Tab("Básicos", BuildBasics()));
+        _tabs.Items.Add(Tab("Disparadores", BuildTriggers()));
+        _tabs.Items.Add(Tab("Tiempo y bucles", BuildTimeLoops()));
+        _tabs.Items.Add(Tab("Geometría", BuildGeometry()));
+        _tabs.Items.Add(Tab("Niveles", BuildLevels()));
         _eqEditor.Commit = (key, value) => Commit(key, value);
         _eqEditor.SpectrumProvider = () =>
             _cue is null ? null : SpectrumProvider?.Invoke(_cue.Id);
