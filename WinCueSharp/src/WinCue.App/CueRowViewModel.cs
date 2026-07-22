@@ -98,8 +98,44 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
         ? $"{(_cue.Collapsed ? "▸" : "▾")} {_cue.Name}"
         : _cue.Name;
 
-    /// <summary>Sangría por profundidad de anidamiento en grupos.</summary>
-    public System.Windows.Thickness NameIndent => new(_model.Depth(_cue) * 18, 0, 0, 0);
+    /// <summary>Sangría por profundidad de anidamiento en grupos (+8 px de
+    /// canalón fijo donde vive la banda del grupo).</summary>
+    public System.Windows.Thickness NameIndent => new(_model.Depth(_cue) * 18 + 8, 0, 0, 0);
+
+    // ── Recuadro del grupo: banda vertical continua (cabecera + hijos) ──
+
+    /// <summary>El GROUP cuyo "recuadro" pinta esta fila: el propio cue si es
+    /// un grupo, o su grupo padre directo si está dentro de uno.</summary>
+    private Cue? BandGroup() => _cue.Type == CueType.Group
+        ? _cue
+        : _cue.ParentId is int pid ? _model.GetById(pid) : null;
+
+    /// <summary>Color de la banda: el color del grupo (si tiene) o el ámbar
+    /// de GRUPO. Transparente en filas de nivel superior sin grupo.</summary>
+    public Brush GroupBandBrush
+    {
+        get
+        {
+            var g = BandGroup();
+            if (g is null)
+                return Brushes.Transparent;
+            string hex = g.Color.Length > 0
+                && CueConstants.CueColors.TryGetValue(g.Color, out var h) && h.Length > 0
+                ? h : "#e8c000";
+            return BrushFrom(hex);
+        }
+    }
+
+    /// <summary>La banda se alinea con la sangría del GRUPO (la cabecera y
+    /// todos sus descendientes comparten X → corchete continuo).</summary>
+    public System.Windows.Thickness GroupBandMargin
+    {
+        get
+        {
+            var g = BandGroup();
+            return new(g is null ? 0 : _model.Depth(g) * 18, 0, 0, 0);
+        }
+    }
 
     public string DurationText => _cue.Duration > 0 ? FormatTime(_cue.Duration) : "—";
     public string PreWaitText => _cue.PreWait > 0 ? FormatTime(_cue.PreWait) : "";

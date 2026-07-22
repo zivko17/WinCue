@@ -283,8 +283,16 @@
                 <DataGridTemplateColumn Header="Nombre" Width="*">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
-                                       Foreground="#ddd" VerticalAlignment="Center"/>
+                            <!-- Banda del grupo (recuadro): la cabecera del
+                                 GROUP y sus hijos comparten X → línea continua -->
+                            <Grid>
+                                <Border Width="3" HorizontalAlignment="Left"
+                                        VerticalAlignment="Stretch"
+                                        Margin="{Binding GroupBandMargin}"
+                                        Background="{Binding GroupBandBrush}"/>
+                                <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
+                                           Foreground="#ddd" VerticalAlignment="Center"/>
+                            </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
