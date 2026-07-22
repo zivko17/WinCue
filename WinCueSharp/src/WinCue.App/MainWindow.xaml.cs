@@ -128,8 +128,8 @@ public partial class MainWindow : Window, IShowView
         {
             _settings.Set("timeline_auto_crossfade", on);
             FlashStatus(on
-                ? "Crossfade automático al solapar: ACTIVADO."
-                : "Crossfade automático: DESACTIVADO — el timeline no tocará los fades.");
+                ? Loc.T("Crossfade automático al solapar: ACTIVADO.", "Automatic crossfade on overlap: ON.")
+                : Loc.T("Crossfade automático: DESACTIVADO — el timeline no tocará los fades.", "Automatic crossfade: OFF — the timeline won't touch fades."));
         };
         Timeline.StopRequested = cueId =>
         {
@@ -144,10 +144,10 @@ public partial class MainWindow : Window, IShowView
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
         MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR,
-            "Nivel L/R del PROGRAMA (cues de AUDIO del mixer; el sonido de los " +
-            "vídeos sale por mpv y no es medible aquí)"));
+            Loc.T("Nivel L/R del PROGRAMA (cues de AUDIO del mixer; el sonido de los vídeos sale por mpv y no es medible aquí)",
+                  "L/R level of PROGRAM (AUDIO cues from the mixer; video sound goes through mpv and isn't measurable here)")));
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
-            "Nivel L/R de la AUDICIÓN local (🎧)"));
+            Loc.T("Nivel L/R de la AUDICIÓN local (🎧)", "L/R level of the local AUDITION (🎧)")));
         _pvw.Clear("—");
         _pgm.Clear("NEGRO");
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -213,8 +213,9 @@ public partial class MainWindow : Window, IShowView
         {
             var cue = _model.GetCue(_controller.Playhead);
             if (MessageBox.Show(this,
-                    $"Es el ÚLTIMO cue de la lista:\n\n{cue?.DisplayNumber} · {cue?.Name}\n\n¿Disparar?",
-                    "GO — último cue", MessageBoxButton.YesNo, MessageBoxImage.Question)
+                    Loc.T($"Es el ÚLTIMO cue de la lista:\n\n{cue?.DisplayNumber} · {cue?.Name}\n\n¿Disparar?",
+                          $"This is the LAST cue in the list:\n\n{cue?.DisplayNumber} · {cue?.Name}\n\nTrigger it?"),
+                    Loc.T("GO — último cue", "GO — last cue"), MessageBoxButton.YesNo, MessageBoxImage.Question)
                 != MessageBoxResult.Yes)
                 return;
         }
@@ -317,7 +318,7 @@ public partial class MainWindow : Window, IShowView
         {
             Text = _statusHistory.Count > 0
                 ? string.Join(Environment.NewLine, Enumerable.Reverse(_statusHistory))
-                : "(sin mensajes todavía)",
+                : Loc.T("(sin mensajes todavía)", "(no messages yet)"),
             IsReadOnly = true,
             TextWrapping = TextWrapping.Wrap,
             Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
@@ -561,7 +562,7 @@ public partial class MainWindow : Window, IShowView
         if (_videoOutputs[screen] is not null)
             return;
         var w = new VideoOutputWindow { Owner = this };
-        w.Title = $"WinCue — Salida de vídeo {screen + 1}";
+        w.Title = Loc.T($"WinCue — Salida de vídeo {screen + 1}", $"WinCue — Video output {screen + 1}");
         // El botón refleja si alguna salida está activa (verde) o no (rojo);
         // al ocultarse se recuerda su geometría para la próxima sesión.
         w.IsVisibleChanged += (_, _) =>
@@ -684,7 +685,7 @@ public partial class MainWindow : Window, IShowView
                 if (c.Armed)
                     total += c.PreWait + Math.Max(0.0, c.Duration);
             double remaining = Math.Max(0.0, total - elapsed);
-            ShowClockMode.Text = "SHOW · RESTANTE ▾";
+            ShowClockMode.Text = Loc.T("SHOW · RESTANTE ▾", "SHOW · REMAINING ▾");
             ShowClockText.Text = FormatClock(remaining);
             // En modo SHOW el reloj va en el verde "armado" de la salida
             // (mismo #1e7e34 aclarado para leerse sobre fondo oscuro);
@@ -697,7 +698,7 @@ public partial class MainWindow : Window, IShowView
         }
         else
         {
-            ShowClockMode.Text = "SHOW · TRANSCURRIDO ▾";
+            ShowClockMode.Text = Loc.T("SHOW · TRANSCURRIDO ▾", "SHOW · ELAPSED ▾");
             ShowClockText.Text = FormatClock(elapsed);
             ShowClockText.Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71));
         }
@@ -725,8 +726,9 @@ public partial class MainWindow : Window, IShowView
         if (!_modeReverting && _controller is not null &&
             _controller.RunningCueIds.Count > 0 &&
             MessageBox.Show(this,
-                "Hay cues EN REPRODUCCIÓN.\n\n¿Salir del modo SHOW y volver a EDIT?",
-                "WinCue — Modo SHOW", MessageBoxButton.YesNo,
+                Loc.T("Hay cues EN REPRODUCCIÓN.\n\n¿Salir del modo SHOW y volver a EDIT?",
+                      "There are cues PLAYING.\n\nExit SHOW mode and return to EDIT?"),
+                "WinCue — " + Loc.T("Modo SHOW", "SHOW mode"), MessageBoxButton.YesNo,
                 MessageBoxImage.Warning) != MessageBoxResult.Yes)
         {
             _modeReverting = true;
@@ -924,12 +926,18 @@ public partial class MainWindow : Window, IShowView
         string notices = System.IO.Path.Combine(AppContext.BaseDirectory,
             "THIRD-PARTY-NOTICES.md");
         var res = MessageBox.Show(this,
-            $"WinCue {ver} — reproductor de cues de audio y vídeo para directo.\n\n" +
-            "Este software incluye componentes de terceros (NAudio, libmpv, " +
-            "runtime de .NET); las atribuciones y licencias completas están en " +
-            "THIRD-PARTY-NOTICES.md, junto al ejecutable.\n\n" +
-            "¿Abrir el archivo de atribuciones?",
-            "Acerca de WinCue", MessageBoxButton.YesNo, MessageBoxImage.Information);
+            Loc.T(
+                $"WinCue {ver} — reproductor de cues de audio y vídeo para directo.\n\n" +
+                "Este software incluye componentes de terceros (NAudio, libmpv, " +
+                "runtime de .NET); las atribuciones y licencias completas están en " +
+                "THIRD-PARTY-NOTICES.md, junto al ejecutable.\n\n" +
+                "¿Abrir el archivo de atribuciones?",
+                $"WinCue {ver} — audio and video cue player for live shows.\n\n" +
+                "This software includes third-party components (NAudio, libmpv, " +
+                ".NET runtime); full attributions and licenses are in " +
+                "THIRD-PARTY-NOTICES.md, next to the executable.\n\n" +
+                "Open the attributions file?"),
+            Loc.T("Acerca de WinCue", "About WinCue"), MessageBoxButton.YesNo, MessageBoxImage.Information);
         if (res == MessageBoxResult.Yes)
         {
             if (System.IO.File.Exists(notices))
@@ -1088,7 +1096,7 @@ public partial class MainWindow : Window, IShowView
                 matches++;
         }
         if (q.Length > 0)
-            FlashStatus($"🔍 {matches} cue(s) coinciden con «{q}»");
+            FlashStatus(Loc.T($"🔍 {matches} cue(s) coinciden con «{q}»", $"🔍 {matches} cue(s) match «{q}»"));
     }
 
     private void OnSearchKeyDown(object sender, KeyEventArgs e)
@@ -1194,7 +1202,7 @@ public partial class MainWindow : Window, IShowView
                 () => _controller.TriggerCueId(cue.Id)));
             if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
             {
-                menu.Items.Add(Mi("🎧 Audición (cascos)", "",
+                menu.Items.Add(Mi(Loc.T("🎧 Audición (cascos)", "🎧 Audition (headphones)"), "",
                     () => _controller.AuditionToggle(row)));
                 menu.Items.Add(Mi("𝄞 Normalizar sonoridad (−16 LUFS)", "",
                     () => NormalizeLoudness(selRows), edit));
@@ -1210,14 +1218,14 @@ public partial class MainWindow : Window, IShowView
                 () => _controller.PasteCues(row), edit));
             menu.Items.Add(Mi("Duplicar", "Ctrl+D",
                 () => _controller.DuplicateCues(selRows), edit));
-            menu.Items.Add(Mi("🗑 Eliminar", "Supr", () =>
+            menu.Items.Add(Mi(Loc.T("🗑 Eliminar", "🗑 Delete"), "Supr", () =>
             {
                 foreach (int r in selRows.OrderByDescending(i => i))
                     _controller.OnDeleteCue(r);
             }, edit));
             menu.Items.Add(new Separator());
 
-            menu.Items.Add(Mi("▸ Agrupar selección", "Ctrl+G",
+            menu.Items.Add(Mi(Loc.T("▸ Agrupar selección", "▸ Group selection"), "Ctrl+G",
                 () => _controller.OnGroupSelected(selRows), edit));
             if (cue.Type == CueType.Group)
             {
@@ -1235,9 +1243,9 @@ public partial class MainWindow : Window, IShowView
             }, edit));
             menu.Items.Add(ColorSubmenu(
                 color => CommitRowField(row, "color", color), edit));
-            menu.Items.Add(Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",
+            menu.Items.Add(Mi(cue.Armed ? "✕ Desarmar" : Loc.T("✓ Armar", "✓ Arm"), "",
                 () => CommitRowField(row, "armed", !cue.Armed), edit));
-            menu.Items.Add(Mi(cue.Flagged ? "⚐ Quitar flag" : "⚑ Poner flag", "",
+            menu.Items.Add(Mi(cue.Flagged ? Loc.T("⚐ Quitar flag", "⚐ Clear flag") : Loc.T("⚑ Poner flag", "⚑ Set flag"), "",
                 () => CommitRowField(row, "flagged", !cue.Flagged), edit));
             menu.Items.Add(Mi("№ Renumerar todos (1..n)", "",
                 () => _controller.RenumberCues(), edit));
@@ -1593,12 +1601,13 @@ public partial class MainWindow : Window, IShowView
         {
             string? warning = null;
             if (_controller.RunningCueIds.Count > 0)
-                warning = "Hay cues EN REPRODUCCIÓN.";
+                warning = Loc.T("Hay cues EN REPRODUCCIÓN.", "There are cues PLAYING.");
             else if (_controller.HasUnsavedChanges)
-                warning = "Hay cambios sin guardar (el autoguardado se descarta al cerrar).";
+                warning = Loc.T("Hay cambios sin guardar (el autoguardado se descarta al cerrar).",
+                                "There are unsaved changes (autosave is discarded on close).");
             if (warning is not null && MessageBox.Show(this,
-                    $"{warning}\n\n¿Cerrar WinCue igualmente?",
-                    "WinCue — Confirmar cierre", MessageBoxButton.YesNo,
+                    Loc.T($"{warning}\n\n¿Cerrar WinCue igualmente?", $"{warning}\n\nClose WinCue anyway?"),
+                    "WinCue — " + Loc.T("Confirmar cierre", "Confirm close"), MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) != MessageBoxResult.Yes)
             {
                 e.Cancel = true;
