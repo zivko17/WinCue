@@ -58,7 +58,21 @@
                     <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
                                   Checked="OnShowMode" Unchecked="OnEditMode"
                                   Background="#c9a227" Foreground="Black"
-                                  FontWeight="Bold" Content="Modo: EDIT"/>
+                                  FontWeight="Bold" Content="Modo: EDIT">
+                        <!-- Plantilla propia: la de WPF pinta un azul-claro al
+                             estar 'checked' que tapaba el verde de SHOW -->
+                        <ToggleButton.Template>
+                            <ControlTemplate TargetType="ToggleButton">
+                                <Border Background="{TemplateBinding Background}"
+                                        BorderBrush="#555" BorderThickness="1"
+                                        CornerRadius="2">
+                                    <ContentPresenter HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      Margin="{TemplateBinding Padding}"/>
+                                </Border>
+                            </ControlTemplate>
+                        </ToggleButton.Template>
+                    </ToggleButton>
                     <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
                             Background="#7e1e1e" Content="🖵 Salida vídeo ▾"/>
                     <Button Click="OnSettingsClick" Height="44" Content="⚙ Configuración"/>

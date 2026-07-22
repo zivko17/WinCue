@@ -28,6 +28,25 @@
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,3"/>
             <Setter Property="MinWidth" Value="220"/>
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Background" Value="#2a2a2a"/>
+        </Style>
+        <!-- Opciones del desplegable LEGIBLES: texto claro sobre item oscuro,
+             resaltado azul (antes: gris tenue sobre oscuro, ilegible) -->
+        <Style TargetType="ComboBoxItem">
+            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Background" Value="#262626"/>
+            <Setter Property="Padding" Value="7,5"/>
+            <Style.Triggers>
+                <Trigger Property="IsHighlighted" Value="True">
+                    <Setter Property="Background" Value="#37527a"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+                <Trigger Property="IsSelected" Value="True">
+                    <Setter Property="Background" Value="#37527a"/>
+                    <Setter Property="Foreground" Value="White"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Background" Value="#2a2a2a"/>
