@@ -31,6 +31,20 @@ if (ctx == 0)
 }
 Mpv.mpv_initialize(ctx);
 
+// Qué DLL se ha cargado REALMENTE (sin ambigüedad: puede haber varias
+// libmpv-2.dll en el sistema con versiones/licencias distintas)
+string loadedFrom = "(no identificada)";
+foreach (System.Diagnostics.ProcessModule m in
+    System.Diagnostics.Process.GetCurrentProcess().Modules)
+{
+    if (m.ModuleName?.Contains("libmpv", StringComparison.OrdinalIgnoreCase) == true)
+    {
+        loadedFrom = m.FileName ?? m.ModuleName;
+        break;
+    }
+}
+Console.WriteLine($"DLL comprobada = {loadedFrom}");
+
 string version = Get(ctx, "mpv-version");
 string config = Get(ctx, "mpv-configuration");
 string ffmpeg = Get(ctx, "ffmpeg-version");

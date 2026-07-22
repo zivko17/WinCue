@@ -6,5 +6,8 @@
     <ImplicitUsings>enable</ImplicitUsings>
     <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
     <AssemblyName>verificar-licencia</AssemblyName>
+    <!-- Utilidad de diagnóstico: no hereda el análisis estricto del producto -->
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
   </PropertyGroup>
 </Project>
