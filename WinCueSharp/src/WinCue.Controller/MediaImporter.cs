@@ -90,6 +90,58 @@ public static class MediaImporter
         return (true, "");
     }
 
+    /// <summary>Extensiones de audio COMPRIMIDO/lossy: candidatas a convertirse
+    /// a WAV al exportar un show portable (wav/flac/aiff ya son lossless).</summary>
+    public static readonly IReadOnlySet<string> LossyAudioFormats =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase)
+        { ".mp3", ".aac", ".m4a", ".ogg", ".opus" };
+
+    /// <summary>Transcodifica el audio de src a WAV PCM 24-bit (mismo sample
+    /// rate y canales) vía ffmpeg. LENTO: no llamar en el hilo de UI con
+    /// archivos grandes sin avisar. ffmpegExe vacío → «ffmpeg» del PATH.
+    /// Devuelve false si ffmpeg no está o la conversión falla (el llamante
+    /// decide el fallback, típicamente copiar el original).</summary>
+    public static bool ConvertToWav(string src, string dest, string ffmpegExe = "")
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(
+                ffmpegExe.Length > 0 ? ffmpegExe : "ffmpeg")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-hide_banner");
+            psi.ArgumentList.Add("-nostats");
+            psi.ArgumentList.Add("-y");
+            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(src);
+            psi.ArgumentList.Add("-map"); psi.ArgumentList.Add("0:a:0");
+            psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s24le");
+            psi.ArgumentList.Add(dest);
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null)
+                return false;
+            proc.StandardError.ReadToEnd();   // drenar para no bloquear el pipe
+            if (!proc.WaitForExit(600_000))
+            {
+                try { proc.Kill(); } catch (Exception) { }
+                return false;
+            }
+            if (proc.ExitCode != 0 || !File.Exists(dest))
+            {
+                try { if (File.Exists(dest)) File.Delete(dest); } catch (Exception) { }
+                return false;
+            }
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;   // sin ffmpeg / src ilegible
+        }
+    }
+
     /// <summary>Sonoridad integrada (LUFS) del archivo vía ffmpeg loudnorm.
     /// LENTO (decodifica el archivo entero): llamar en segundo plano.
     /// null si ffmpeg no está disponible o el archivo no tiene audio.</summary>

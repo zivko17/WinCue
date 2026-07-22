@@ -92,9 +92,13 @@ public sealed class ShowFileService
     /// una carpeta «media» junto al .json de destino y guarda el show con rutas
     /// relativas (SaveShow ya relativiza lo que cae bajo su carpeta). El show de
     /// TRABAJO no se altera: sus cues siguen apuntando a los originales.
-    /// Devuelve (copiados, faltantes).</summary>
-    public (int Copied, int Missing) ExportPortable(string targetShowPath)
+    /// convertLossyAudioToWav = true → el audio comprimido (mp3, aac, ogg…) se
+    /// transcodifica a WAV PCM en la copia (ffmpeg; si falla, copia el
+    /// original tal cual). Devuelve (copiados, faltantes).</summary>
+    public (int Copied, int Missing) ExportPortable(
+        string targetShowPath, bool convertLossyAudioToWav = false)
     {
+        string ffmpegExe = SettingsManager.Instance.Get("ffmpeg_path", "");
         if (!targetShowPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
             targetShowPath += ".json";
         string dir = Path.GetDirectoryName(Path.GetFullPath(targetShowPath)) ?? "";
@@ -115,14 +119,36 @@ public sealed class ShowFileService
                 missing++;
                 continue;
             }
-            string name = Path.GetFileName(c.FilePath);
-            string candidate = name;
-            for (int n = 1; usedNames.Contains(candidate); n++)
-                candidate = $"{Path.GetFileNameWithoutExtension(name)}_{n}{Path.GetExtension(name)}";
-            usedNames.Add(candidate);
-            string dest = Path.Combine(mediaDir, candidate);
+            // Nombre único dentro de esta exportación (dos orígenes distintos
+            // con el mismo nombre no deben pisarse)
+            string UniqueDest(string fileName)
+            {
+                string candidate = fileName;
+                for (int n = 1; usedNames.Contains(candidate); n++)
+                    candidate = $"{Path.GetFileNameWithoutExtension(fileName)}_{n}{Path.GetExtension(fileName)}";
+                usedNames.Add(candidate);
+                return Path.Combine(mediaDir, candidate);
+            }
+
+            // Audio lossy con conversión activada → el destino pasa a .wav
+            bool convert = convertLossyAudioToWav && c.Type == CueType.Audio &&
+                MediaImporter.LossyAudioFormats.Contains(Path.GetExtension(c.FilePath));
             try
             {
+                if (convert)
+                {
+                    string wavDest = UniqueDest(
+                        Path.GetFileNameWithoutExtension(c.FilePath) + ".wav");
+                    if (MediaImporter.ConvertToWav(c.FilePath, wavDest, ffmpegExe))
+                    {
+                        map[c.FilePath] = wavDest;
+                        copied++;
+                        continue;
+                    }
+                    // ffmpeg no disponible o falló: copiar el original tal cual
+                    _log($"Export portable: conversión a WAV falló, se copia el original: {c.FilePath}");
+                }
+                string dest = UniqueDest(Path.GetFileName(c.FilePath));
                 if (!string.Equals(Path.GetFullPath(c.FilePath), Path.GetFullPath(dest),
                         StringComparison.OrdinalIgnoreCase))
                     File.Copy(c.FilePath, dest, overwrite: true);

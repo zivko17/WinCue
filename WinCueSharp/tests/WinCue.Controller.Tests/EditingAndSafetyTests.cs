@@ -387,6 +387,27 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void ExportPortable_WavConversionFallsBackToCopy_OnBadSource()
+    {
+        // Un «mp3» corrupto: ffmpeg (si está) fallará; sin ffmpeg falla igual.
+        // En ambos casos el export debe COPIAR el original, nunca perder media.
+        string srcDir = Path.Combine(TempDir, "origen2");
+        Directory.CreateDirectory(srcDir);
+        string media = Path.Combine(srcDir, "tema.mp3");
+        File.WriteAllText(media, "no soy un mp3");
+        AddCue(CueType.Audio, "tema", setup: c => c.FilePath = media);
+
+        string outDir = Path.Combine(TempDir, "portable2");
+        string target = Path.Combine(outDir, "show.json");
+        var (copied, missing) = Controller.ExportPortableShow(target, convertLossyAudioToWav: true);
+
+        Assert.Equal(1, copied);
+        Assert.Equal(0, missing);
+        Assert.True(File.Exists(Path.Combine(outDir, "media", "tema.mp3")));
+        Assert.False(File.Exists(Path.Combine(outDir, "media", "tema.wav")));
+    }
+
+    [Fact]
     public void LoadShow_MarksMissingMediaAsError()
     {
         var m = new CueModel();

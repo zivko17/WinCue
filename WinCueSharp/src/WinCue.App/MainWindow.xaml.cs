@@ -1113,7 +1113,27 @@ public partial class MainWindow : Window, IShowView
         };
         if (dlg.ShowDialog(this) != true)
             return;
-        var (copied, missing) = _controller.ExportPortableShow(dlg.FileName);
+        // ¿Convertir el audio comprimido a WAV en la copia? (arranque
+        // instantáneo y seek exacto en directo; los WAV/FLAC no se tocan)
+        bool convertWav = _model.Cues.Any(c => c.Type == CueType.Audio &&
+                MediaImporter.LossyAudioFormats.Contains(
+                    System.IO.Path.GetExtension(c.FilePath))) &&
+            MessageBox.Show(this,
+                Loc.T("Hay cues de audio comprimido (mp3, aac, ogg…).\n\n¿Convertirlos a WAV en la copia exportada?\n(El original no se toca; si ffmpeg no está disponible se copia tal cual.)",
+                      "There are compressed audio cues (mp3, aac, ogg…).\n\nConvert them to WAV in the exported copy?\n(The original is untouched; if ffmpeg isn't available they're copied as-is.)"),
+                Loc.T("Exportar show portable", "Export portable show"),
+                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        Mouse.OverrideCursor = Cursors.Wait;   // la conversión puede tardar
+        (int copied, int missing) result;
+        try
+        {
+            result = _controller.ExportPortableShow(dlg.FileName, convertWav);
+        }
+        finally
+        {
+            Mouse.OverrideCursor = null;
+        }
+        var (copied, missing) = result;
         if (missing > 0)
             MessageBox.Show(this,
                 Loc.T($"Se copiaron {copied} archivo(s) a «media», pero {missing} no se encontraron en disco (cues con media faltante). Reubica esos medios y vuelve a exportar.",
