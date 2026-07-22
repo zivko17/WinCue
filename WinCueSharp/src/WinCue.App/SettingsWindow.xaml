@@ -28,25 +28,34 @@
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,3"/>
             <Setter Property="MinWidth" Value="220"/>
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Foreground" Value="#e6e6e6"/>
             <Setter Property="Background" Value="#2a2a2a"/>
         </Style>
-        <!-- Opciones del desplegable LEGIBLES: texto claro sobre item oscuro,
-             resaltado azul (antes: gris tenue sobre oscuro, ilegible) -->
+        <!-- Opciones del desplegable UNIFORMES: plantilla propia porque la de
+             WPF tiene un estado 'ratón encima' que pinta blanco y mataba el
+             texto claro. Item oscuro + texto claro + resaltado azul. -->
         <Style TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
-            <Setter Property="Background" Value="#262626"/>
-            <Setter Property="Padding" Value="7,5"/>
-            <Style.Triggers>
-                <Trigger Property="IsHighlighted" Value="True">
-                    <Setter Property="Background" Value="#37527a"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </Trigger>
-                <Trigger Property="IsSelected" Value="True">
-                    <Setter Property="Background" Value="#37527a"/>
-                    <Setter Property="Foreground" Value="White"/>
-                </Trigger>
-            </Style.Triggers>
+            <Setter Property="Foreground" Value="#e6e6e6"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="ComboBoxItem">
+                        <Border x:Name="itemBg" Background="#262626"
+                                Padding="8,5" SnapsToDevicePixels="True">
+                            <ContentPresenter/>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsHighlighted" Value="True">
+                                <Setter TargetName="itemBg" Property="Background" Value="#37527a"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                            <Trigger Property="IsSelected" Value="True">
+                                <Setter TargetName="itemBg" Property="Background" Value="#2f6f4f"/>
+                                <Setter Property="Foreground" Value="White"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TextBox">
             <Setter Property="Background" Value="#2a2a2a"/>
