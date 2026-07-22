@@ -211,8 +211,8 @@ public partial class SettingsWindow : Window
 
         var lang = Group(root, Loc.T("IDIOMA", "LANGUAGE"));
         Combo("ui_language", lang, Loc.T("Idioma de la interfaz:", "Interface language:"),
-            ("es", "Español"),
-            ("en", "English"));
+            ("en", "English"),
+            ("es", "Español"));
         Note(lang, Loc.T(
             "El cambio de idioma se aplica al reiniciar la aplicación.",
             "The language change takes effect after restarting the app."));
