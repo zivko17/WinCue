@@ -117,12 +117,16 @@ public partial class SettingsWindow : Window
             .Select((s, i) => ((object)i,
                 Loc.T($"Pantalla {i}{(s.Primary ? " (principal)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}", $"Screen {i}{(s.Primary ? " (main)" : "")} — {s.Bounds.Width}×{s.Bounds.Height}")))
             .ToArray();
+        // Salidas 2-4: opción "Deshabilitada" (−1) al principio, activa por
+        // defecto → no aparecen en el botón de salidas hasta asignarles monitor.
+        (object, string) off = ((object)(-1), Loc.T("Deshabilitada", "Disabled"));
+        var screensOff = new[] { off }.Concat(screens).ToArray();
         Combo("video_output_screen", scr, Loc.T("Salida 1 (principal):", "Output 1 (main):"), screens);
-        Combo("video_output_screen2", scr, Loc.T("Salida 2:", "Output 2:"), screens);
-        Combo("video_output_screen3", scr, Loc.T("Salida 3:", "Output 3:"), screens);
-        Combo("video_output_screen4", scr, Loc.T("Salida 4:", "Output 4:"), screens);
-        Note(scr, Loc.T("Cada cue de vídeo elige su salida en el inspector (Geometry). Las ventanas de salida se abren solas al usarlas un cue.",
-                  "Each video cue picks its output in the inspector (Geometry). Output windows open on their own when a cue uses them."));
+        Combo("video_output_screen2", scr, Loc.T("Salida 2:", "Output 2:"), screensOff);
+        Combo("video_output_screen3", scr, Loc.T("Salida 3:", "Output 3:"), screensOff);
+        Combo("video_output_screen4", scr, Loc.T("Salida 4:", "Output 4:"), screensOff);
+        Note(scr, Loc.T("Cada cue de vídeo elige su salida en el inspector (Geometry). Las ventanas de salida se abren solas al usarlas un cue. Una salida «Deshabilitada» no aparece en el botón de salidas.",
+                  "Each video cue picks its output in the inspector (Geometry). Output windows open on their own when a cue uses them. A «Disabled» output doesn't appear in the outputs button."));
         Check("video_fullscreen_output", scr, Loc.T("Salidas a pantalla completa (blackout)", "Full-screen outputs (blackout)"));
         Note(scr, Loc.T("Desmárcalo solo para probar en ventanas con bordes.", "Uncheck only to test in bordered windows."));
         Spin("blackout_fade", scr, Loc.T("Fundido del blackout (s, tecla B):", "Blackout fade (s, key B):"), 0, 30);
@@ -219,7 +223,7 @@ public partial class SettingsWindow : Window
         Combo("go_mode", go, Loc.T("Al disparar un media:", "When triggering media:"),
             ("concurrent", Loc.T("Concurrente (QLab): los audios se solapan", "Concurrent (QLab): audios overlap")),
             ("sequential", Loc.T("Secuencial: cada GO detiene los demás", "Sequential: each GO stops the others")),
-            ("per_cue", "Por cue: según la casilla \"detener los demás\""));
+            ("per_cue", Loc.T("Por cue: según la casilla \"detener los demás\"", "Per cue: according to the \"stop others\" checkbox")));
         Spin("go_min_interval_ms", go, Loc.T("Anti doble-GO (ms; 0 = desactivado):", "Anti double-GO (ms; 0 = off):"), 0, 2000);
         Spin("fade_all_seconds", go, Loc.T("Duración del FADE ALL (s):", "FADE ALL duration (s):"), 1, 60);
 

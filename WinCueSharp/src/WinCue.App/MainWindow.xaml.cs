@@ -149,13 +149,18 @@ public partial class MainWindow : Window, IShowView
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
             Loc.T("Nivel L/R de la AUDICIÓN local (🎧)", "L/R level of the local AUDITION (🎧)")));
         _pvw.Clear("—");
-        _pgm.Clear("NEGRO");
+        _pgm.Clear(Loc.T("NEGRO", "BLACK"));
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
         _pgmTimer.Tick += (_, _) => UpdateProgramMonitor();
         _pgmTimer.Start();
 
         ApplyViewSettings();
         ReloadTable();
+
+        // Texto inicial localizado de los botones de cabecera (la XAML trae
+        // valores estáticos; el resto de su estado ya se refresca por evento)
+        ModeToggle.Content = Loc.T("Modo: EDIT", "Mode: EDIT");
+        UpdateVideoOutButton();
 
         // Volumen master desde settings (el fader vive en ⚙ → Audio)
         _controller.OnMasterVolume(_settings.Get("master_volume", 100));
@@ -188,7 +193,7 @@ public partial class MainWindow : Window, IShowView
     {
         var cue = _model.GetCue(_playheadIndex);
         NextCueLabel.Text = cue is null
-            ? "— fin de la lista —"
+            ? Loc.T("— fin de la lista —", "— end of list —")
             : $"{cue.DisplayNumber} · {cue.Name}";
 
         // Notas del cue en standby (el operador las lee sin abrir el inspector)
@@ -228,7 +233,7 @@ public partial class MainWindow : Window, IShowView
         if (info is null)
         {
             if (_pgm.CurrentPath.Length > 0)
-                _pgm.Clear("NEGRO");
+                _pgm.Clear(Loc.T("NEGRO", "BLACK"));
             return;
         }
         // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí
@@ -242,7 +247,7 @@ public partial class MainWindow : Window, IShowView
         if (cue is null || cue.FilePath.Length == 0 || cue.Type != CueType.Video)
         {
             if (cue is { Type: CueType.Audio, FilePath.Length: > 0 })
-                _pvw.Clear("♪ AUDIO (onda en el inspector)");
+                _pvw.Clear(Loc.T("♪ AUDIO (onda en el inspector)", "♪ AUDIO (waveform in the inspector)"));
             else if (_pvw.CurrentPath.Length > 0 || cue is null)
                 _pvw.Clear("—");
             return;
@@ -453,13 +458,17 @@ public partial class MainWindow : Window, IShowView
                 _activeRows.Add(new ActiveRowVM(rows[i]));
         }
 
-        // Progreso embebido en las filas de la tabla (estilo QLab)
-        var byId = new Dictionary<int, double>();
+        // Progreso + cuenta atrás embebidos en las filas de la tabla (estilo QLab)
+        var live = new Dictionary<int, ActiveCueInfo>();
         foreach (var r in rows)
-            if (r.Fraction is double f)
-                byId[r.Id] = f;
+            live[r.Id] = r;
         foreach (var vm in _rows)
-            vm.SetProgress(byId.GetValueOrDefault(vm.CueId));
+        {
+            if (live.TryGetValue(vm.CueId, out var info))
+                vm.SetLive(info.Remaining, info.PreWaitRemaining);
+            else
+                vm.SetLive(null, null);
+        }
 
         // Cursor y progreso del timeline (posición real de los motores)
         Timeline.SetActive(rows);
@@ -583,8 +592,13 @@ public partial class MainWindow : Window, IShowView
     /// restaurando la geometría recordada en modo ventana.</summary>
     private void PlaceVideoOutput(int screen)
     {
+        // Monitor configurado; −1 (deshabilitada) o índice fuera de rango →
+        // principal, para no reventar si un cue apunta a una salida sin monitor.
+        int mon = _settings.Get(ScreenSettingKey(screen), 0);
+        if (mon < 0 || mon >= System.Windows.Forms.Screen.AllScreens.Length)
+            mon = 0;
         _videoOutputs[screen]?.PlaceOnScreen(
-            _settings.Get(ScreenSettingKey(screen), 0),
+            mon,
             _settings.Get("video_fullscreen_output", false),
             _settings.Get($"video_output_geom{screen + 1}", ""));
         // Una salida que aparece durante un blackout nace fundida a negro
@@ -623,7 +637,9 @@ public partial class MainWindow : Window, IShowView
     }
 
     public void SetOutputContent(string? videoName) =>
-        TallyLabel.Text = videoName is null ? "SALIDA: NEGRO" : $"SALIDA: ▣ {videoName}";
+        TallyLabel.Text = videoName is null
+            ? Loc.T("SALIDA: NEGRO", "OUTPUT: BLACK")
+            : Loc.T($"SALIDA: ▣ {videoName}", $"OUTPUT: ▣ {videoName}");
 
     public void SetOutputDetails(string details)
     {
@@ -790,10 +806,14 @@ public partial class MainWindow : Window, IShowView
         for (int s = 0; s < _videoOutputs.Length; s++)
         {
             int idx = s;
+            // Salida deshabilitada en Settings (monitor −1): no se ofrece en el
+            // menú, así no se lanza sin querer sobre el monitor principal.
+            if (_settings.Get(ScreenSettingKey(s), s == 0 ? 0 : -1) < 0)
+                continue;
             var w = _videoOutputs[s];
             var sub = new MenuItem
             {
-                Header = $"Salida {s + 1}",
+                Header = Loc.T($"Salida {s + 1}", $"Output {s + 1}"),
                 Foreground = new SolidColorBrush(CanvasEditorControl.OutColors[s]),
                 FontWeight = FontWeights.Bold,
             };
@@ -944,8 +964,11 @@ public partial class MainWindow : Window, IShowView
                 System.Diagnostics.Process.Start(
                     new System.Diagnostics.ProcessStartInfo(notices) { UseShellExecute = true });
             else
-                FlashStatus("THIRD-PARTY-NOTICES.md no está junto al ejecutable " +
-                    "(se incluye al publicar con publish.ps1).");
+                FlashStatus(Loc.T(
+                    "THIRD-PARTY-NOTICES.md no está junto al ejecutable " +
+                    "(se incluye al publicar con publish.ps1).",
+                    "THIRD-PARTY-NOTICES.md is not next to the executable " +
+                    "(it's included when publishing with publish.ps1)."));
         }
     }
 
@@ -972,10 +995,22 @@ public partial class MainWindow : Window, IShowView
 
     private void OnAddCue(object sender, RoutedEventArgs e)
     {
-        if (sender is Button { Tag: string tag } &&
+        // Sirve desde botón o MenuItem (ambos FrameworkElement con Tag)
+        if (sender is FrameworkElement { Tag: string tag } &&
             Enum.TryParse<CueType>(Pascal(tag), out var type))
         {
             _controller.OnInsertCue(type, CueGrid.SelectedIndex);
+        }
+    }
+
+    /// <summary>Abre el menú desplegable del botón «Añadir» (tipos de cue).</summary>
+    private void OnAddMenuClick(object sender, RoutedEventArgs e)
+    {
+        if (sender is Button { ContextMenu: { } menu } b)
+        {
+            menu.PlacementTarget = b;
+            menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+            menu.IsOpen = true;
         }
     }
 

@@ -89,7 +89,7 @@
                     <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
                                   Checked="OnShowMode" Unchecked="OnEditMode"
                                   Background="#c9a227" Foreground="Black"
-                                  FontWeight="Bold" Content="Modo: EDIT">
+                                  FontWeight="Bold" Content="{local:Loc Es=Modo: EDIT, En=Mode: EDIT}">
                         <!-- Plantilla propia: la de WPF pinta un azul-claro al
                              estar 'checked' que tapaba el verde de SHOW -->
                         <ToggleButton.Template>
@@ -105,7 +105,7 @@
                         </ToggleButton.Template>
                     </ToggleButton>
                     <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
-                            Background="#7e1e1e" Content="🖵 Salida vídeo ▾"/>
+                            Background="#7e1e1e" Content="{local:Loc Es=🖵 Salida vídeo ▾, En=🖵 Video output ▾}"/>
                     <Button Click="OnSettingsClick" Height="44"
                             Content="{local:Loc Es=⚙ Configuración, En=⚙ Settings}"/>
                     <Button Click="OnAboutClick" Height="44" Width="34" Content="ⓘ"
@@ -148,17 +148,22 @@
                         ToolTip="{local:Loc Es=Hay cues con archivos NO encontrados: buscar los medios en otra carpeta,
                                             En=Some cues have missing files: locate the media in another folder}"/>
                 <Separator Width="14" Background="Transparent"/>
-                <TextBlock Text="{local:Loc Es=Añadir:, En=Add:}" VerticalAlignment="Center"
-                           Margin="0,0,4,0" Foreground="{StaticResource FgDim}"/>
-                <Button Click="OnAddCue" Tag="AUDIO" Content="♪ Audio"/>
-                <Button Click="OnAddCue" Tag="VIDEO" Content="{local:Loc Es=▣ Vídeo, En=▣ Video}"/>
-                <Button Click="OnAddCue" Tag="WAIT" Content="{local:Loc Es=⏱ Espera, En=⏱ Wait}"/>
-                <Button Click="OnAddCue" Tag="FADE" Content="{local:Loc Es=◢ Fundido, En=◢ Fade}"/>
-                <Button Click="OnAddCue" Tag="START" Content="{local:Loc Es=▶ Iniciar, En=▶ Start}"/>
-                <Button Click="OnAddCue" Tag="STOP" Content="{local:Loc Es=■ Parar, En=■ Stop}"/>
-                <Button Click="OnAddCue" Tag="SCRIPT" Content="⚙ Script"/>
-                <Button Click="OnAddCue" Tag="MEMO" Content="{local:Loc Es=✎ Nota, En=✎ Memo}"/>
-                <Button Click="OnAddCue" Tag="GROUP" Content="{local:Loc Es=▸ Grupo, En=▸ Group}"/>
+                <Button x:Name="AddButton" Click="OnAddMenuClick"
+                        Content="{local:Loc Es=➕ Añadir ▾, En=➕ Add ▾}">
+                    <Button.ContextMenu>
+                        <ContextMenu>
+                            <MenuItem Click="OnAddCue" Tag="AUDIO" Header="♪ Audio"/>
+                            <MenuItem Click="OnAddCue" Tag="VIDEO" Header="{local:Loc Es=▣ Vídeo, En=▣ Video}"/>
+                            <MenuItem Click="OnAddCue" Tag="WAIT" Header="{local:Loc Es=⏱ Espera, En=⏱ Wait}"/>
+                            <MenuItem Click="OnAddCue" Tag="FADE" Header="{local:Loc Es=◢ Fundido, En=◢ Fade}"/>
+                            <MenuItem Click="OnAddCue" Tag="START" Header="{local:Loc Es=▶ Iniciar, En=▶ Start}"/>
+                            <MenuItem Click="OnAddCue" Tag="STOP" Header="{local:Loc Es=■ Parar, En=■ Stop}"/>
+                            <MenuItem Click="OnAddCue" Tag="SCRIPT" Header="⚙ Script"/>
+                            <MenuItem Click="OnAddCue" Tag="MEMO" Header="{local:Loc Es=✎ Nota, En=✎ Memo}"/>
+                            <MenuItem Click="OnAddCue" Tag="GROUP" Header="{local:Loc Es=▸ Grupo, En=▸ Group}"/>
+                        </ContextMenu>
+                    </Button.ContextMenu>
+                </Button>
                 <Separator Width="14" Background="Transparent"/>
                 <Button Click="OnImportFiles"
                         Content="{local:Loc Es=＋ Importar archivos…, En=＋ Import files…}"/>
@@ -299,8 +304,9 @@
             <DataGrid.RowStyle>
                 <Style TargetType="DataGridRow">
                     <Setter Property="Visibility" Value="{Binding RowVisibility}"/>
-                    <!-- Progreso del cue embebido en la fila (estilo QLab) -->
-                    <Setter Property="Background" Value="{Binding RowBrush}"/>
+                    <!-- Transparente para que se vea el fondo oscuro del grid
+                         (sin esto, DataGridRow cae al blanco por defecto) -->
+                    <Setter Property="Background" Value="Transparent"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
                             <Setter Property="Background" Value="{StaticResource PlayheadBg}"/>
@@ -323,6 +329,15 @@
                     </Style.Triggers>
                 </Style>
             </DataGrid.CellStyle>
+            <DataGrid.Resources>
+                <!-- Texto de columnas numéricas: centrado vertical (las columnas
+                     de plantilla ya centran; sin esto quedaban arriba y todo se
+                     veía desalineado respecto al punto de estado y al Nombre) -->
+                <Style x:Key="NumCell" TargetType="TextBlock">
+                    <Setter Property="VerticalAlignment" Value="Center"/>
+                    <Setter Property="Margin" Value="5,0,0,0"/>
+                </Style>
+            </DataGrid.Resources>
             <DataGrid.Columns>
                 <DataGridTemplateColumn Header="" Width="26">
                     <DataGridTemplateColumn.CellTemplate>
@@ -336,8 +351,9 @@
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
                             <Border Background="{Binding LabelBrush}" CornerRadius="3"
-                                    Padding="4,1">
-                                <TextBlock Text="{Binding Number}" Foreground="#ddd"/>
+                                    Padding="4,1" VerticalAlignment="Center">
+                                <TextBlock Text="{Binding Number}" Foreground="#ddd"
+                                           VerticalAlignment="Center"/>
                             </Border>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
@@ -368,14 +384,32 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTextColumn Header="Pre" Binding="{Binding PreWaitText}" Width="56"/>
-                <DataGridTextColumn Header="Dur" Binding="{Binding DurationText}" Width="64"/>
-                <DataGridTextColumn Header="Post" Binding="{Binding PostWaitText}" Width="56"/>
-                <DataGridTextColumn Header="{local:Loc Es=Sigue, En=Follow}" Binding="{Binding ContinueText}" Width="72"/>
+                <DataGridTextColumn Header="Pre" Binding="{Binding PreWaitText}" Width="56"
+                                    ElementStyle="{StaticResource NumCell}"/>
+                <DataGridTemplateColumn Header="Dur" Width="64">
+                    <DataGridTemplateColumn.CellTemplate>
+                        <DataTemplate>
+                            <Border Background="{Binding DurationBoxBrush}" CornerRadius="3"
+                                    Padding="5,1" HorizontalAlignment="Left"
+                                    VerticalAlignment="Center">
+                                <TextBlock Text="{Binding DurationText}"
+                                           Foreground="{Binding DurationTextBrush}"
+                                           FontFamily="Consolas" FontWeight="SemiBold"/>
+                            </Border>
+                        </DataTemplate>
+                    </DataGridTemplateColumn.CellTemplate>
+                </DataGridTemplateColumn>
+                <DataGridTextColumn Header="Post" Binding="{Binding PostWaitText}" Width="56"
+                                    ElementStyle="{StaticResource NumCell}"/>
+                <DataGridTextColumn Header="{local:Loc Es=Sigue, En=Follow}" Binding="{Binding ContinueText}" Width="72"
+                                    ElementStyle="{StaticResource NumCell}"/>
                 <DataGridTextColumn x:Name="LatColumn" Header="Lat"
-                                    Binding="{Binding LatencyText}" Width="60"/>
-                <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"/>
-                <DataGridTextColumn Header="✕" Binding="{Binding ArmedText}" Width="28"/>
+                                    Binding="{Binding LatencyText}" Width="60"
+                                    ElementStyle="{StaticResource NumCell}"/>
+                <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"
+                                    ElementStyle="{StaticResource NumCell}"/>
+                <DataGridTextColumn Header="✕" Binding="{Binding ArmedText}" Width="28"
+                                    ElementStyle="{StaticResource NumCell}"/>
             </DataGrid.Columns>
         </DataGrid>
 

@@ -57,40 +57,25 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
         _ => "#dddddd",
     });
 
-    // ── Progreso dentro de la fila (estilo QLab) ───────────────────────
-    private double _progress;   // 0 = sin progreso visible
+    // ── Cuenta atrás en la fila (caja en la columna Duración, estilo QLab) ─
+    private double? _liveRemaining;        // s restantes mientras suena
+    private double? _preWaitRemaining;     // s restantes de pre_wait (viene)
 
-    /// <summary>Fracción reproducida del cue (la fija la vista en cada tick).</summary>
-    public void SetProgress(double fraction)
+    /// <summary>La vista fija los tiempos en vivo en cada tick del controlador.
+    /// remaining/preWaitRemaining = null cuando el cue no está en curso.</summary>
+    public void SetLive(double? remaining, double? preWaitRemaining)
     {
-        if (Math.Abs(fraction - _progress) < 0.005)
-            return;
-        _progress = fraction;
-        OnChanged(nameof(RowBrush));
-    }
-
-    /// <summary>Fondo de la fila: barra de progreso embebida (verde translúcido).</summary>
-    public Brush RowBrush
-    {
-        get
+        // Redondeo a 0,1 s: la lectura muestra una décima, así no notificamos
+        // en cada tick de 80 ms sin cambio visible.
+        double? rq = remaining is double r ? Math.Round(Math.Max(0.0, r), 1) : null;
+        double? pq = preWaitRemaining is double p ? Math.Round(Math.Max(0.0, p), 1) : null;
+        if (rq != _liveRemaining || pq != _preWaitRemaining)
         {
-            if (_progress <= 0.0)
-                return Brushes.Transparent;
-            double f = Math.Clamp(_progress, 0.0, 1.0);
-            var brush = new LinearGradientBrush
-            {
-                StartPoint = new System.Windows.Point(0, 0),
-                EndPoint = new System.Windows.Point(1, 0),
-                GradientStops =
-                {
-                    new GradientStop(Color.FromArgb(70, 0x1e, 0x7e, 0x34), 0.0),
-                    new GradientStop(Color.FromArgb(70, 0x1e, 0x7e, 0x34), f),
-                    new GradientStop(Colors.Transparent, f),
-                    new GradientStop(Colors.Transparent, 1.0),
-                },
-            };
-            brush.Freeze();
-            return brush;
+            _liveRemaining = rq;
+            _preWaitRemaining = pq;
+            OnChanged(nameof(DurationText));
+            OnChanged(nameof(DurationBoxBrush));
+            OnChanged(nameof(DurationTextBrush));
         }
     }
 
@@ -137,7 +122,39 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
         }
     }
 
-    public string DurationText => _cue.Duration > 0 ? FormatTime(_cue.Duration) : "—";
+    /// <summary>En reposo: duración fija. Sonando: cuenta atrás (verde). En
+    /// pre_wait: cuenta atrás de la espera (ámbar). El color lo da DurationBrush.</summary>
+    public string DurationText
+    {
+        get
+        {
+            if (_preWaitRemaining is double p)
+                return $"-{p:0.0}s";
+            if (_liveRemaining is double r)
+                return $"-{TimeSpan.FromSeconds(r):m\\:ss\\.f}";
+            return _cue.Duration > 0 ? FormatTime(_cue.Duration) : "—";
+        }
+    }
+
+    private static readonly Brush DurBoxNone = Brushes.Transparent;
+    private static readonly Brush DurBoxPlaying = BrushFrom("#2ecc71");
+    private static readonly Brush DurBoxPreWait = BrushFrom("#e8c000");
+    private static readonly Brush DurTextIdle = BrushFrom("#dddddd");
+    private static readonly Brush DurTextBoxed = BrushFrom("#101010");
+
+    /// <summary>Fondo de la caja de la columna Duración: verde sonando, ámbar en
+    /// pre_wait, transparente (sin caja) en reposo.</summary>
+    public Brush DurationBoxBrush =>
+        _preWaitRemaining is not null ? DurBoxPreWait
+        : _liveRemaining is not null ? DurBoxPlaying
+        : DurBoxNone;
+
+    /// <summary>Texto de la columna Duración: oscuro sobre la caja de color en
+    /// vivo (contraste), gris normal en reposo.</summary>
+    public Brush DurationTextBrush =>
+        _preWaitRemaining is not null || _liveRemaining is not null
+            ? DurTextBoxed : DurTextIdle;
+
     public string PreWaitText => _cue.PreWait > 0 ? FormatTime(_cue.PreWait) : "";
     public string PostWaitText => _cue.PostWait > 0 ? FormatTime(_cue.PostWait) : "";
 

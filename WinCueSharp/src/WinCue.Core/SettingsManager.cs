@@ -30,8 +30,14 @@ public class SettingsManager
     // Valores de fábrica (espejo de DEFAULTS en settings_manager.py)
     // ------------------------------------------------------------------
 
+    /// <summary>Versión del esquema de settings. Se sube al introducir cambios
+    /// de default que requieren migrar archivos antiguos (ver Migrate).</summary>
+    private const int CurrentSchema = 2;
+
     public static JsonObject CreateDefaults() => new()
     {
+        ["settings_schema"] = CurrentSchema,
+
         // ── Audio ────────────────────────────────────────────────────
         ["audio_device_index"] = -1,
         ["audio_device_name"]  = "",
@@ -54,10 +60,12 @@ public class SettingsManager
         ["surface_width"]           = 0,         // tamaño del CANVAS (0 = 1920)
         ["surface_height"]          = 0,         // tamaño del CANVAS (0 = 1080)
         ["blackout_fade"]           = 1,         // s del fundido del blackout (tecla B)
-        // Monitores de las salidas 2-4 (C#-only; la 1 usa video_output_screen)
-        ["video_output_screen2"]    = 0,
-        ["video_output_screen3"]    = 0,
-        ["video_output_screen4"]    = 0,
+        // Monitores de las salidas 2-4 (C#-only; la 1 usa video_output_screen).
+        // -1 = DESHABILITADA: no aparece en el botón de salidas de la UI y no se
+        // puede lanzar (evita mandar una salida al monitor principal sin querer).
+        ["video_output_screen2"]    = -1,
+        ["video_output_screen3"]    = -1,
+        ["video_output_screen4"]    = -1,
 
         // ── Red / Control externo ────────────────────────────────────
         ["osc_enabled"]       = false,
@@ -173,11 +181,18 @@ public class SettingsManager
             {
                 var loaded = JsonNode.Parse(File.ReadAllText(_settingsPath)) as JsonObject
                     ?? throw new JsonException("settings.json no es un objeto JSON");
+                // Versión del archivo ANTES de fusionar (los archivos previos a
+                // la introducción del esquema no tienen la clave → v1).
+                int fileSchema = 1;
+                if (loaded["settings_schema"] is JsonValue sv && sv.TryGetValue(out int parsed))
+                    fileSchema = parsed;
                 // Combinar: defaults como base, luego valores guardados encima.
                 // Así las claves nuevas (versiones futuras) tienen su default.
                 _data = CreateDefaults();
                 foreach (var (key, value) in loaded)
                     _data[key] = value?.DeepClone();
+                if (fileSchema < CurrentSchema)
+                    Migrate(fileSchema);
             }
             catch (Exception exc) when (exc is JsonException or IOException)
             {
@@ -191,6 +206,24 @@ public class SettingsManager
             _data = CreateDefaults();
             Save();
         }
+    }
+
+    /// <summary>Migra settings de esquemas antiguos. Se llama en Load cuando el
+    /// archivo tiene una versión inferior a CurrentSchema.
+    /// v1→v2: las salidas de vídeo 2-4 pasan del default histórico «0 = monitor
+    /// principal» (sin sentido para una salida secundaria y causa de lanzarlas
+    /// sin querer sobre el operador) a «-1 = deshabilitada». Solo se tocan las
+    /// que siguen en 0; si ya tienen un monitor asignado, se respetan.</summary>
+    private void Migrate(int fileSchema)
+    {
+        if (fileSchema < 2)
+            foreach (var key in new[]
+                { "video_output_screen2", "video_output_screen3", "video_output_screen4" })
+                if (Get<int>(key, -1) == 0)
+                    _data[key] = -1;
+
+        _data["settings_schema"] = CurrentSchema;
+        Save();
     }
 
     /// <summary>Escribe settings.json de forma atómica (escritura + rename).</summary>
