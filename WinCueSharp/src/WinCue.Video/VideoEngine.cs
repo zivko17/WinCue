@@ -162,6 +162,22 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     // API pública — carga / reproducción (main thread)
     // ------------------------------------------------------------------
 
+    /// <summary>Traza de diagnóstico del ciclo de vida GPU (attach/detach/
+    /// release/play). Solo escribe si WINCUE_MPV_LOG está definido — mismo
+    /// interruptor que los logs de mpv, para correlacionar por timestamp.</summary>
+    internal static void Trace(string msg)
+    {
+        string? dir = Environment.GetEnvironmentVariable("WINCUE_MPV_LOG");
+        if (string.IsNullOrEmpty(dir))
+            return;
+        try
+        {
+            File.AppendAllText(Path.Combine(dir, "engine-trace.log"),
+                $"[{DateTime.Now:HH:mm:ss.fff}] {msg}\r\n");
+        }
+        catch (Exception) { }
+    }
+
     /// <summary>Inicia verificación asíncrona del archivo (→ LOADING).</summary>
     public void Load(int cueId, string filePath)
     {
@@ -523,6 +539,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         int layer = Math.Clamp(p.Layer, 0, 7);
         bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null
             && !p.ForceClassicPath;
+        Trace($"StartPlayback cue={cueId} gpu={gpu} standby={_standby?.CueId.ToString() ?? "none"}");
         // MODO CANVAS: solo con compositor GPU (varias vistas de un render).
         // Sin compositor, el cue cae al modo clásico sobre su salida Screen.
         bool canvas = gpu && p.CanvasOutputs is { Count: > 0 };
@@ -698,10 +715,18 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             });
         };
 
+        var thisPlayer = player;
         player.EndFile += () => Post(() =>
         {
-            // Fin natural de archivo (no parada manual: esa retira el player antes)
-            if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
+            // Fin natural de archivo (no parada manual: esa retira el player
+            // antes). OJO: verificar que el evento viene del player ACTUAL del
+            // cue — el EndFile PÓSTUMO de una instancia anterior (p. ej. un
+            // standby descartado, que emite EndFile al disponerse) llegaba
+            // encolado y TERMINABA al player nuevo en pleno arranque ("No
+            // render context set" en el compositor).
+            if (GetState(cueId) == MediaCueState.Playing &&
+                _players.TryGetValue(cueId, out var cur) &&
+                ReferenceEquals(cur, thisPlayer))
             {
                 SetState(cueId, MediaCueState.Stopped);   // publicar ANTES del Dispose
                 TerminatePlayer(cueId);
@@ -874,9 +899,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 (int)geo.SurfW, (int)geo.SurfH, canvas ? p.CanvasOutputs : null);
             slot.Pipeline.AttachPlayer(player);
 
+            var thisPlayer = player;
             player.EndFile += () => Post(() =>
             {
-                if (GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId))
+                // Solo si ESTE player (promovido) sigue siendo el del cue — su
+                // EndFile póstumo tras un descarte no debe tocar al sucesor
+                if (GetState(cueId) == MediaCueState.Playing &&
+                    _players.TryGetValue(cueId, out var cur) &&
+                    ReferenceEquals(cur, thisPlayer))
                 {
                     SetState(cueId, MediaCueState.Stopped);
                     TerminatePlayer(cueId);
@@ -914,6 +944,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         if (_standby is not { } sb || (cueId >= 0 && sb.CueId != cueId))
             return;
+        Trace($"DiscardStandby cue={sb.CueId}");
         _standby = null;
         ReleaseGpuSlot(sb.CueId);
         sb.Player.Dispose();
@@ -1009,6 +1040,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         var slot = _gpuPool.FirstOrDefault(s => s.BusyCueId == cueId);
         if (slot is null)
             return;
+        Trace($"ReleaseGpuSlot cue={cueId} (detach)");
         bool ok = slot.Pipeline.DetachPlayer();
         foreach (var s in slot.Sinks)
             s.ReleaseCue(cueId);
