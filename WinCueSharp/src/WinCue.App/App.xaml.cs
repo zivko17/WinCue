@@ -136,9 +136,12 @@ public partial class App : Application
         if (!smokeMode && File.Exists(_autosavePath) && new FileInfo(_autosavePath).Length > 10)
         {
             if (MessageBox.Show(window,
-                    "Se encontró un autoguardado de una sesión que no se cerró " +
-                    "correctamente.\n\n¿Recuperar ese show?",
-                    "WinCue — Recuperación", MessageBoxButton.YesNo,
+                    Loc.T(
+                        "Se encontró un autoguardado de una sesión que no se cerró " +
+                        "correctamente.\n\n¿Recuperar ese show?",
+                        "An autosave was found from a session that didn't close " +
+                        "properly.\n\nRecover that show?"),
+                    Loc.T("WinCue — Recuperación", "WinCue — Recovery"), MessageBoxButton.YesNo,
                     MessageBoxImage.Warning) == MessageBoxResult.Yes)
             {
                 _controller.LoadShow(_autosavePath);

@@ -78,7 +78,7 @@ public sealed class EqEditorControl : ContentControl
         var gainPanel = new DockPanel { Margin = new Thickness(0, 0, 10, 0) };
         var gainTitle = new TextBlock
         {
-            Text = "GANANCIA",
+            Text = Loc.T("GANANCIA", "GAIN"),
             FontSize = 9,
             Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
             HorizontalAlignment = HorizontalAlignment.Center,
@@ -130,7 +130,7 @@ public sealed class EqEditorControl : ContentControl
         };
 
         // ── HERRAMIENTA 1: ECUALIZADOR — parámetros en columna + gráfica ─
-        _eqOn = MakeCheck("EQ activa", "eq_enabled");
+        _eqOn = MakeCheck(Loc.T("EQ activa", "EQ active"), "eq_enabled");
         _hpfOn = MakeCheck("HPF", "hpf_on");
         _hpfFreq = MakeFreqBox("hpf_freq");
         _lpfOn = MakeCheck("LPF", "lpf_on");
@@ -195,7 +195,7 @@ public sealed class EqEditorControl : ContentControl
             Value = EqCurveCanvas.RtaGainDb,
             Width = 80,
             VerticalAlignment = VerticalAlignment.Center,
-            ToolTip = "Ganancia de visualización del analizador (solo pantalla)",
+            ToolTip = Loc.T("Ganancia de visualización del analizador (solo pantalla)", "Analyzer display gain (screen only)"),
         };
         var rtaLabel = new TextBlock
         {
@@ -224,7 +224,7 @@ public sealed class EqEditorControl : ContentControl
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 190,
-            Text = "arrastrar punto = frec/gan · rueda = Q",
+            Text = Loc.T("arrastrar punto = frec/gan · rueda = Q", "drag point = freq/gain · wheel = Q"),
         };
         eqPars.Children.Add(_readout);
 
@@ -243,14 +243,14 @@ public sealed class EqEditorControl : ContentControl
 
         // ── HERRAMIENTA 2: COMPRESOR — parámetros en columna + gráfica ──
         var compPars = new StackPanel { Margin = new Thickness(14, 0, 8, 0) };
-        _compOn = MakeCheck("Compresor", "comp_enabled");
+        _compOn = MakeCheck(Loc.T("Compresor", "Compressor"), "comp_enabled");
         compPars.Children.Add(_compOn);
         _compThr = MakeNumBox("comp_threshold", -60, 0);
-        compPars.Children.Add(CompRow("Umbral", _compThr, "dB"));
+        compPars.Children.Add(CompRow(Loc.T("Umbral", "Threshold"), _compThr, "dB"));
         _compRatio = MakeNumBox("comp_ratio", 1, 20);
         compPars.Children.Add(CompRow("Ratio", _compRatio, ":1"));
         _compAtt = MakeNumBox("comp_attack", 0.1, 200);
-        compPars.Children.Add(CompRow("Ataque", _compAtt, "ms"));
+        compPars.Children.Add(CompRow(Loc.T("Ataque", "Attack"), _compAtt, "ms"));
         _compRel = MakeNumBox("comp_release", 5, 2000);
         compPars.Children.Add(CompRow("Release", _compRel, "ms"));
         _compMakeup = MakeNumBox("comp_makeup", 0, 24);
@@ -263,7 +263,7 @@ public sealed class EqEditorControl : ContentControl
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
             MaxWidth = 130,
-            Text = "arrastrar = umbral · rueda = ratio · GR = reducción en vivo",
+            Text = Loc.T("arrastrar = umbral · rueda = ratio · GR = reducción en vivo", "drag = threshold · wheel = ratio · GR = live reduction"),
         });
         var compParsScroll = new ScrollViewer
         {
@@ -279,7 +279,7 @@ public sealed class EqEditorControl : ContentControl
 
         _noAudio = new TextBlock
         {
-            Text = "La EQ paramétrica es para cues de AUDIO.",
+            Text = Loc.T("La EQ paramétrica es para cues de AUDIO.", "The parametric EQ is for AUDIO cues."),
             Foreground = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,

@@ -277,18 +277,18 @@ public sealed class InspectorPanel : ContentControl
         _nameBox = Txt(cols[0], "name", Loc.T("Nombre:", "Name:"), c => c.Name);
         ColorSwatches(cols[0]);
         var armedRow = ChkRow(cols[0]);
-        Chk(armedRow, "armed", "Armado", c => c.Armed);
+        Chk(armedRow, "armed", Loc.T("Armado", "Armed"), c => c.Armed);
         Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
         TxtMultiline(cols[0], "notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
             c => c.Notes);
 
         Header(cols[1], Loc.T("TEMPORIZACIÓN", "TIMING"));
         Cmb(cols[1], "continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
-            ("None", "Nada (GO manual)"),
-            ("AutoContinue", "Auto-continue (tras post-wait)"),
+            ("None", Loc.T("Nada (GO manual)", "None (manual GO)")),
+            ("AutoContinue", Loc.T("Auto-continue (tras post-wait)", "Auto-continue (after post-wait)")),
             ("AutoFollow", Loc.T("Auto-follow (al acabar la acción)", "Auto-follow (when the action ends)")));
         TimeF(cols[1], "pre_wait", "Pre-wait:", c => c.PreWait);
-        TimeF(cols[1], "duration", "Duración:", c => c.Duration);
+        TimeF(cols[1], "duration", Loc.T("Duración:", "Duration:"), c => c.Duration);
         TimeF(cols[1], "post_wait", "Post-wait:", c => c.PostWait);
 
         Header(cols[2], Loc.T("DESTINO", "TARGET"));
@@ -298,16 +298,17 @@ public sealed class InspectorPanel : ContentControl
         var targetRow = Conditional(cols[2], c => c.TargetsOther());
         TargetCombo(targetRow);
         var fadeStopRow = Conditional(cols[2], c => c.Type == CueType.Fade);
-        Chk(fadeStopRow, "fade_stop_on_done", "Detener el objetivo al llegar a 0",
+        Chk(fadeStopRow, "fade_stop_on_done",
+            Loc.T("Detener el objetivo al llegar a 0", "Stop the target when it reaches 0"),
             c => c.FadeStopOnDone);
 
         // Solo grupos
         var groupRow = Conditional(cols[2], c => c.Type == CueType.Group);
         CmbInline(groupRow, "group_mode", Loc.T("Modo de grupo:", "Group mode:"), c => c.GroupMode.ToString(),
-            ("Enter", "ENTER — el playhead entra"),
-            ("Timeline", "TIMELINE — todos a la vez"),
-            ("GoNext", "GO NEXT — primer hijo"),
-            ("Random", "RANDOM — aleatorio round-robin"));
+            ("Enter", Loc.T("ENTER — el playhead entra", "ENTER — the playhead enters")),
+            ("Timeline", Loc.T("TIMELINE — todos a la vez", "TIMELINE — all at once")),
+            ("GoNext", Loc.T("GO NEXT — primer hijo", "GO NEXT — first child")),
+            ("Random", Loc.T("RANDOM — aleatorio round-robin", "RANDOM — round-robin random")));
 
         var stopOthersRow = ChkRow(cols[2]);
         Chk(stopOthersRow, "stop_others", Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
@@ -325,36 +326,38 @@ public sealed class InspectorPanel : ContentControl
         Header(cols[0], Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
         Txt(cols[0], "hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
         Cmb(cols[0], "retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
-            ("None", "Ignorar"),
-            ("Panic", "Panic (fade y parar)"),
-            ("Stop", "Parar"),
-            ("HardStop", "Parada dura"),
-            ("HardRestart", "Reiniciar"));
+            ("None", Loc.T("Ignorar", "Ignore")),
+            ("Panic", Loc.T("Panic (fade y parar)", "Panic (fade and stop)")),
+            ("Stop", Loc.T("Parar", "Stop")),
+            ("HardStop", Loc.T("Parada dura", "Hard stop")),
+            ("HardRestart", Loc.T("Reiniciar", "Restart")));
 
         Header(cols[0], Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
         var foRow = ChkRow(cols[0]);
-        Chk(foRow, "fade_others", "Al dispararse, funde y para otros cues", c => c.FadeOthers);
+        Chk(foRow, "fade_others",
+            Loc.T("Al dispararse, funde y para otros cues", "On trigger, fade and stop other cues"),
+            c => c.FadeOthers);
         Num(cols[0], "fade_others_time", Loc.T("Tiempo del fundido (s):", "Fade time (s):"), c => c.FadeOthersTime);
         Cmb(cols[0], "fade_others_scope", Loc.T("Ámbito:", "Scope:"), c => c.FadeOthersScope.ToString(),
-            ("Peers", "PEERS — mismo nivel/grupo"),
-            ("List", "LIST — toda la lista"),
-            ("All", "ALL — todo"));
+            ("Peers", Loc.T("PEERS — mismo nivel/grupo", "PEERS — same level/group")),
+            ("List", Loc.T("LIST — toda la lista", "LIST — the whole list")),
+            ("All", Loc.T("ALL — todo", "ALL — everything")));
 
-        Header(cols[1], "WALL-CLOCK (disparo por hora)");
+        Header(cols[1], Loc.T("WALL-CLOCK (disparo por hora)", "WALL-CLOCK (time-of-day trigger)"));
         var wcRow = ChkRow(cols[1]);
         Chk(wcRow, "wallclock_enabled", Loc.T("Disparar a una hora del día", "Trigger at a time of day"), c => c.WallclockEnabled);
         Txt(cols[1], "wallclock_time", Loc.T("Hora (HH:MM:SS, 24h):", "Time (HH:MM:SS, 24h):"), c => c.WallclockTime);
         Note(cols[1], Loc.T("Se dispara cada día a esa hora\nmientras el show esté abierto.", "Triggers every day at that time\nwhile the show is open."));
 
-        Header(cols[2], "MIDI (backend en fase 6)");
+        Header(cols[2], Loc.T("MIDI (backend en fase 6)", "MIDI (backend in phase 6)"));
         var midiRow = ChkRow(cols[2]);
-        Chk(midiRow, "midi_enabled", "Disparo por MIDI", c => c.MidiEnabled);
+        Chk(midiRow, "midi_enabled", Loc.T("Disparo por MIDI", "MIDI trigger"), c => c.MidiEnabled);
         Cmb(cols[2], "midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
             ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
             ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
         Int(cols[2], "midi_channel", Loc.T("Canal:", "Channel:"), c => c.MidiChannel);
         Int(cols[2], "midi_note", Loc.T("Nota / CC:", "Note / CC:"), c => c.MidiNote);
-        Int(cols[2], "midi_velocity", "Velocity (-1 = cualquiera):", c => c.MidiVelocity);
+        Int(cols[2], "midi_velocity", Loc.T("Velocity (-1 = cualquiera):", "Velocity (-1 = any):"), c => c.MidiVelocity);
 
         return scroll;
     }
@@ -372,11 +375,12 @@ public sealed class InspectorPanel : ContentControl
 
         Header(cols[0], Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         var loopRow = ChkRow(cols[0]);
-        Chk(loopRow, "loop", "Loop infinito (hasta STOP)", c => c.Loop);
+        Chk(loopRow, "loop", Loc.T("Loop infinito (hasta STOP)", "Infinite loop (until STOP)"), c => c.Loop);
         Int(cols[0], "play_count", Loc.T("Repeticiones (play count):", "Repeats (play count):"), c => c.PlayCount);
         Num(cols[0], "rate", Loc.T("Velocidad (1.0 = normal):", "Speed (1.0 = normal):"), c => c.Rate);
         var pitchRow = ChkRow(cols[0]);
-        Chk(pitchRow, "preserve_pitch", "Mantener tono al cambiar velocidad",
+        Chk(pitchRow, "preserve_pitch",
+            Loc.T("Mantener tono al cambiar velocidad", "Keep pitch when changing speed"),
             c => c.PreservePitch);
 
         Header(cols[1], Loc.T("FUNDIDOS Y RECORTE", "FADES & TRIM"));
@@ -385,7 +389,7 @@ public sealed class InspectorPanel : ContentControl
         TimeF(cols[1], "trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
         TimeF(cols[1], "trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
 
-        Header(top, "BARRA DE TRIM — arrastra los manejadores");
+        Header(top, Loc.T("BARRA DE TRIM — arrastra los manejadores", "TRIM BAR — drag the handles"));
         _wave.Margin = new Thickness(0, 4, 0, 0);
         _wave.MinHeight = 64;   // sin altura fija: llena el resto de la pestaña
         _wave.MarkersChanged += (start, end) =>
@@ -440,7 +444,7 @@ public sealed class InspectorPanel : ContentControl
         Header(controls, Loc.T("MODO", "MODE"));
         _rbFull = new RadioButton
         {
-            Content = "Superficie completa — llena el canvas",
+            Content = Loc.T("Superficie completa — llena el canvas", "Full surface — fills the canvas"),
             GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
             Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
         };
@@ -499,7 +503,7 @@ public sealed class InspectorPanel : ContentControl
 
         var btnRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        var btnCenter = new Button { Content = "⌖ Centrar", Padding = new Thickness(10, 4, 10, 4) };
+        var btnCenter = new Button { Content = Loc.T("⌖ Centrar", "⌖ Center"), Padding = new Thickness(10, 4, 10, 4) };
         var btnReset = new Button
         { Content = Loc.T("↺ Restablecer", "↺ Reset"), Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
         btnCenter.Click += (_, _) =>
@@ -521,7 +525,7 @@ public sealed class InspectorPanel : ContentControl
         // (El campo legacy "layer" top/bottom del Python se retiró de la UI:
         // la capa REAL es timeline_layer/📌 — dos conceptos de capa a la
         // vista solo provocaban errores. El JSON lo conserva por compat.)
-        Header(controls, "COMPOSITOR");
+        Header(controls, Loc.T("COMPOSITOR", "COMPOSITOR"));
         var compRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         compRow.Children.Add(new TextBlock
@@ -555,7 +559,9 @@ public sealed class InspectorPanel : ContentControl
         for (int s = 0; s < 4; s++)
             screenCombo.Items.Add(new ComboBoxItem
             {
-                Content = s == 0 ? "Salida 1 (principal)" : $"Salida {s + 1}",
+                Content = s == 0
+                    ? Loc.T("Salida 1 (principal)", "Output 1 (main)")
+                    : Loc.T($"Salida {s + 1}", $"Output {s + 1}"),
                 Tag = s,
             });
         screenCombo.SelectionChanged += (_, _) =>

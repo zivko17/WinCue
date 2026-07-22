@@ -124,7 +124,7 @@ public sealed class TimelinePanel : Border
 
         var title = new TextBlock
         {
-            Text = "⏱ TIMELINE DEL SHOW",
+            Text = Loc.T("⏱ TIMELINE DEL SHOW", "⏱ SHOW TIMELINE"),
             FontWeight = FontWeights.Bold,
             Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)),
             VerticalAlignment = VerticalAlignment.Center,
@@ -135,34 +135,46 @@ public sealed class TimelinePanel : Border
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         _chkXfade = new CheckBox
         {
-            Content = "🔀 Crossfade al solapar",
+            Content = Loc.T("🔀 Crossfade al solapar", "🔀 Crossfade on overlap"),
             IsChecked = true,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 10, 0),
             Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
             FontSize = 11,
-            ToolTip = "ACTIVADO: dos medias consecutivas de la MISMA capa que se " +
-                      "solapan se cruzan (fade out/in = solape; el vídeo funde " +
-                      "por opacidad con el compositor GPU) y al separarlas se " +
-                      "quita. Las capas distintas son independientes: nunca se " +
-                      "funden solas — usa clic derecho → \"Crossfade con…\" " +
-                      "para linkarlas.\n" +
-                      "DESACTIVADO: el timeline no toca ningún fade (todo a mano " +
-                      "en el inspector).",
+            ToolTip = Loc.T(
+                "ACTIVADO: dos medias consecutivas de la MISMA capa que se " +
+                "solapan se cruzan (fade out/in = solape; el vídeo funde " +
+                "por opacidad con el compositor GPU) y al separarlas se " +
+                "quita. Las capas distintas son independientes: nunca se " +
+                "funden solas — usa clic derecho → \"Crossfade con…\" " +
+                "para linkarlas.\n" +
+                "DESACTIVADO: el timeline no toca ningún fade (todo a mano " +
+                "en el inspector).",
+                "ON: two consecutive clips on the SAME layer that overlap " +
+                "crossfade (fade out/in = overlap; the video fades by " +
+                "opacity with the GPU compositor) and separating them " +
+                "removes it. Different layers are independent: they never " +
+                "fade on their own — use right-click → \"Crossfade with…\" " +
+                "to link them.\n" +
+                "OFF: the timeline touches no fade (all by hand in the " +
+                "inspector)."),
         };
         _chkXfade.Checked += (_, _) => OnXfadeToggle(true);
         _chkXfade.Unchecked += (_, _) => OnXfadeToggle(false);
         right.Children.Add(_chkXfade);
         right.Children.Add(HeaderButton("−", () => _canvas.ZoomStep(1 / 1.4)));
         right.Children.Add(HeaderButton("＋", () => _canvas.ZoomStep(1.4)));
-        right.Children.Add(HeaderButton("Ajustar", () => _canvas.ZoomToFit()));
+        right.Children.Add(HeaderButton(Loc.T("Ajustar", "Fit"), () => _canvas.ZoomToFit()));
         DockPanel.SetDock(right, Dock.Right);
         header.Children.Add(right);
 
         var hint = new TextBlock
         {
-            Text = "arrastrar: tiempo · sobre el anterior = SOLAPAR (paralelo) · " +
-                   "vertical: pista · Ctrl+rueda: zoom · ▸GO = disparo manual",
+            Text = Loc.T(
+                "arrastrar: tiempo · sobre el anterior = SOLAPAR (paralelo) · " +
+                "vertical: pista · Ctrl+rueda: zoom · ▸GO = disparo manual",
+                "drag: time · over the previous = OVERLAP (parallel) · " +
+                "vertical: track · Ctrl+wheel: zoom · ▸GO = manual trigger"),
             Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)),
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,

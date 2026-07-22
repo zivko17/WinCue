@@ -15,6 +15,7 @@ using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
 using WinCue.Audio;
+using WinCue.Core;
 
 namespace WinCue.App;
 
@@ -46,7 +47,7 @@ public sealed class WaveformControl : FrameworkElement
     private float[]? _mins, _maxs;
     private double _duration;
     private double _start, _end;
-    private string _msg = "— sin media —";
+    private string _msg = Loc.T("— sin media —", "— no media —");
     private bool _isAudio = true;
     private int _generation;          // cancela tareas de carga viejas
     private string? _drag;            // "start" | "end" | null
@@ -117,12 +118,12 @@ public sealed class WaveformControl : FrameworkElement
         InvalidateVisual();
     }
 
-    public void Clear(string msg = "— sin media —")
+    public void Clear(string? msg = null)
     {
         _generation++;
         _mins = _maxs = null;
         _duration = 0.0;
-        _msg = msg;
+        _msg = msg ?? Loc.T("— sin media —", "— no media —");
         InvalidateVisual();
     }
 
