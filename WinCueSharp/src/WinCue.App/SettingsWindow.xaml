@@ -130,11 +130,34 @@
             <Setter Property="Padding" Value="4,3"/>
             <Setter Property="Margin" Value="0,3"/>
         </Style>
+        <!-- GroupBox moderno: título en acento + línea fina, contenido sobre
+             una tarjeta sutil (la caja completa por defecto es puro WinForms) -->
         <Style TargetType="GroupBox">
             <Setter Property="Foreground" Value="{StaticResource FgDim}"/>
-            <Setter Property="BorderBrush" Value="#333"/>
-            <Setter Property="Margin" Value="0,4,0,10"/>
-            <Setter Property="Padding" Value="10,6"/>
+            <Setter Property="Margin" Value="0,4,0,12"/>
+            <Setter Property="Padding" Value="12,8"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="GroupBox">
+                        <StackPanel>
+                            <DockPanel Margin="2,0,2,5">
+                                <ContentPresenter DockPanel.Dock="Left"
+                                                  ContentSource="Header"
+                                                  TextElement.Foreground="{StaticResource Accent}"
+                                                  TextElement.FontWeight="SemiBold"
+                                                  TextElement.FontSize="11.5"
+                                                  Margin="0,0,10,0"/>
+                                <Border Height="1" Background="#333333"
+                                        VerticalAlignment="Center"/>
+                            </DockPanel>
+                            <Border Background="#222224" CornerRadius="4"
+                                    Padding="{TemplateBinding Padding}">
+                                <ContentPresenter/>
+                            </Border>
+                        </StackPanel>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
         </Style>
         <Style TargetType="TabItem">
             <Setter Property="Padding" Value="14,6"/>

@@ -28,18 +28,34 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
 
     public string TypeText => _cue.Type.ToString().ToUpperInvariant();
 
-    /// <summary>Icono + tipo, coloreado (escaneable de reojo).</summary>
-    public string TypeLabel => _cue.Type switch
+    /// <summary>Icono del tipo, en hueco de ancho fijo en la columna (los
+    /// glifos miden distinto y desalineaban el texto).</summary>
+    public string TypeIcon => _cue.Type switch
     {
-        CueType.Audio => "♪ AUDIO",
-        CueType.Video => Loc.T("▣ VÍDEO", "▣ VIDEO"),
-        CueType.Wait => Loc.T("⏱ ESPERA", "⏱ WAIT"),
-        CueType.Fade => Loc.T("◢ FUNDIDO", "◢ FADE"),
-        CueType.Start => Loc.T("▶ INICIAR", "▶ START"),
-        CueType.Stop => Loc.T("■ PARAR", "■ STOP"),
-        CueType.Script => "⚙ SCRIPT",
-        CueType.Memo => Loc.T("✎ NOTA", "✎ MEMO"),
-        CueType.Group => "▸ GRUPO",
+        CueType.Audio => "♪",
+        CueType.Video => "▣",
+        CueType.Wait => "⏱",
+        CueType.Fade => "◢",
+        CueType.Start => "▶",
+        CueType.Stop => "■",
+        CueType.Script => "⚙",
+        CueType.Memo => "✎",
+        CueType.Group => "▸",
+        _ => "•",
+    };
+
+    /// <summary>Nombre del tipo, coloreado (escaneable de reojo).</summary>
+    public string TypeName => _cue.Type switch
+    {
+        CueType.Audio => "AUDIO",
+        CueType.Video => Loc.T("VÍDEO", "VIDEO"),
+        CueType.Wait => Loc.T("ESPERA", "WAIT"),
+        CueType.Fade => Loc.T("FUNDIDO", "FADE"),
+        CueType.Start => Loc.T("INICIAR", "START"),
+        CueType.Stop => Loc.T("PARAR", "STOP"),
+        CueType.Script => "SCRIPT",
+        CueType.Memo => Loc.T("NOTA", "MEMO"),
+        CueType.Group => "GRUPO",
         _ => TypeText,
     };
 

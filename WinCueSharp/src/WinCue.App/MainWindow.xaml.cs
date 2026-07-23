@@ -64,6 +64,10 @@ public partial class MainWindow : Window, IShowView
         CueGrid.ItemsSource = _rows;
         ActiveList.ItemsSource = _activeRows;
 
+        // Aviso de lista vacía (con la pista de drag&drop): solo sin cues
+        _rows.CollectionChanged += (_, _) => EmptyListHint.Visibility =
+            _rows.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
+
         _statusTimer = new DispatcherTimer { Interval = TimeSpan.FromSeconds(4) };
         _statusTimer.Tick += (_, _) => { StatusLabel.Text = ""; _statusTimer.Stop(); };
 
@@ -208,7 +212,7 @@ public partial class MainWindow : Window, IShowView
         CueGrid.FontSize = 13.0 * scale;
         CueGrid.RowHeight = 30.0 * scale;
         ActiveList.FontSize = 12.0 * scale;
-        NextCueLabel.FontSize = 14.0 * scale;
+        NextCueLabel.FontSize = 17.0 * scale;
     }
 
     private void UpdateNextCueLabel()
@@ -699,10 +703,29 @@ public partial class MainWindow : Window, IShowView
         return (1920.0, 1080.0);
     }
 
-    public void SetOutputContent(string? videoName) =>
-        TallyLabel.Text = videoName is null
-            ? Loc.T("SALIDA: NEGRO", "OUTPUT: BLACK")
-            : Loc.T($"SALIDA: ▣ {videoName}", $"OUTPUT: ▣ {videoName}");
+    private static readonly System.Windows.Media.Brush TallyOffBg = FrozenBrush("#2f2f31");
+    private static readonly System.Windows.Media.Brush TallyOffFg = FrozenBrush("#888888");
+    private static readonly System.Windows.Media.Brush TallyOnBg = FrozenBrush("#7e1e1e");
+    private static readonly System.Windows.Media.Brush TallyOnFg = FrozenBrush("#ffd8d8");
+
+    private static System.Windows.Media.Brush FrozenBrush(string hex)
+    {
+        var b = new System.Windows.Media.SolidColorBrush(
+            (System.Windows.Media.Color)System.Windows.Media.ColorConverter.ConvertFromString(hex));
+        b.Freeze();
+        return b;
+    }
+
+    /// <summary>Tally de programa: chip gris en NEGRO, rojo "on air" con contenido.</summary>
+    public void SetOutputContent(string? videoName)
+    {
+        bool onAir = videoName is not null;
+        TallyLabel.Text = onAir
+            ? Loc.T($"SALIDA: ▣ {videoName}", $"OUTPUT: ▣ {videoName}")
+            : Loc.T("SALIDA: NEGRO", "OUTPUT: BLACK");
+        TallyChip.Background = onAir ? TallyOnBg : TallyOffBg;
+        TallyLabel.Foreground = onAir ? TallyOnFg : TallyOffFg;
+    }
 
     public void SetOutputDetails(string details)
     {
@@ -1186,9 +1209,16 @@ public partial class MainWindow : Window, IShowView
     private void OnDeleteCue(object sender, RoutedEventArgs e)
     {
         int row = CueGrid.SelectedIndex;
-        if (row >= 0)
-            _controller.OnDeleteCue(row);
+        if (row < 0)
+            return;
+        _controller.OnDeleteCue(row);
+        FlashDeleteUndoHint();
     }
+
+    /// <summary>Borrar es frecuente en edición: sin modal, pero recordando
+    /// que hay red de seguridad (undo).</summary>
+    private void FlashDeleteUndoHint() => FlashStatus(
+        Loc.T("🗑 Cue eliminado — Ctrl+Z deshace", "🗑 Cue deleted — Ctrl+Z undoes"));
 
     private void OnImportFiles(object sender, RoutedEventArgs e)
     {
@@ -1519,6 +1549,7 @@ public partial class MainWindow : Window, IShowView
             {
                 foreach (int r in selRows.OrderByDescending(i => i))
                     _controller.OnDeleteCue(r);
+                FlashDeleteUndoHint();
             }, edit));
             menu.Items.Add(new Separator());
 
@@ -1813,6 +1844,7 @@ public partial class MainWindow : Window, IShowView
                 if (CueGrid.SelectedIndex >= 0 && DeleteButton.IsEnabled)
                 {
                     _controller.OnDeleteCue(CueGrid.SelectedIndex);
+                    FlashDeleteUndoHint();
                     e.Handled = true;
                 }
                 break;

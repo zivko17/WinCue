@@ -63,9 +63,17 @@
         <Border x:Name="TopBar" DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
-                            Background="#1e7e34" FontSize="20" FontWeight="Bold"
-                            Content="GO ▶" ToolTip="Espacio"/>
+                    <!-- GO: el botón más importante de la app — más grande que el
+                         resto del transporte y con el atajo a la vista -->
+                    <Button x:Name="GoButton" Click="OnGoClick" Width="150" Height="48"
+                            Background="#1e7e34" ToolTip="Espacio">
+                        <StackPanel>
+                            <TextBlock Text="GO ▶" FontSize="20" FontWeight="Bold"
+                                       HorizontalAlignment="Center"/>
+                            <TextBlock Text="{local:Loc Es=ESPACIO, En=SPACE}" FontSize="8.5"
+                                       Foreground="#9fd8ae" HorizontalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
                             Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
                     <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
@@ -80,10 +88,11 @@
                             Background="#7e1e1e" Content="⚠ PANIC"
                             ToolTip="{local:Loc Es=Fundido rápido y parada · doble pulsación: corte duro · clic derecho: opciones,
                                                 En=Quick fade and stop · double press: hard cut · right-click: options}"/>
-                    <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
+                    <!-- El siguiente cue es LA información del operador: grande -->
+                    <StackPanel VerticalAlignment="Center" Margin="12,0,0,0" MaxWidth="340">
                         <TextBlock Text="{local:Loc Es=SIGUIENTE, En=NEXT}" FontSize="9"
                                    Foreground="{StaticResource FgDim}"/>
-                        <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14"
+                        <TextBlock x:Name="NextCueLabel" Text="—" FontSize="17"
                                    FontWeight="Bold" TextTrimming="CharacterEllipsis"
                                    Foreground="#e8c000"/>
                     </StackPanel>
@@ -143,12 +152,18 @@
         <!-- ═══════════ TOOLBAR: lista ═══════════ -->
         <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
             <StackPanel Orientation="Horizontal">
+                <!-- Flechas de menú como Path: el glifo "▾" a este tamaño se
+                     renderizaba como un punto ilegible según la fuente -->
                 <Button Click="OnOpenShow" Content="{local:Loc Es=📂 Abrir, En=📂 Open}"/>
-                <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
-                        ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}"/>
+                <Button Click="OnRecentShows" Width="24" Margin="-3,0,3,0"
+                        ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}">
+                    <Path Data="M 0 0 L 8 0 L 4 5 Z" Fill="#cccccc"/>
+                </Button>
                 <Button Click="OnSaveShow" Content="{local:Loc Es=💾 Guardar, En=💾 Save}"/>
-                <Button Click="OnSaveMenu" Content="▾" Width="26" Margin="-2,0,3,0"
-                        ToolTip="{local:Loc Es=Más opciones de guardado, En=More save options}"/>
+                <Button Click="OnSaveMenu" Width="24" Margin="-3,0,3,0"
+                        ToolTip="{local:Loc Es=Más opciones de guardado, En=More save options}">
+                    <Path Data="M 0 0 L 8 0 L 4 5 Z" Fill="#cccccc"/>
+                </Button>
                 <Button x:Name="RelocateButton" Click="OnRelocateMedia"
                         Content="{local:Loc Es=🔗 Relocalizar, En=🔗 Relocate}"
                         Visibility="Collapsed"
@@ -193,9 +208,15 @@
         <!-- ═══════════ STATUS BAR ═══════════ -->
         <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
             <DockPanel>
-                <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right"
-                           Text="{local:Loc Es=SALIDA: NEGRO, En=OUTPUT: BLACK}"
-                           Foreground="{StaticResource FgDim}"/>
+                <!-- Tally de programa: chip gris en NEGRO, rojo "on air" con
+                     contenido — legible de reojo desde la cabina -->
+                <Border x:Name="TallyChip" DockPanel.Dock="Right" CornerRadius="3"
+                        Padding="8,1" Background="#2f2f31" VerticalAlignment="Center">
+                    <TextBlock x:Name="TallyLabel"
+                               Text="{local:Loc Es=SALIDA: NEGRO, En=OUTPUT: BLACK}"
+                               FontSize="11" FontWeight="SemiBold"
+                               Foreground="{StaticResource FgDim}"/>
+                </Border>
                 <Button x:Name="LogButton" DockPanel.Dock="Left" Content="🕮"
                         Click="OnShowStatusLog" Padding="4,0" Margin="0,0,8,0"
                         Background="Transparent" BorderThickness="0"
@@ -287,11 +308,12 @@
                 <RowDefinition Height="330" MinHeight="140"/>
             </Grid.RowDefinitions>
 
-        <DataGrid x:Name="CueGrid" Grid.Row="0"
+        <Grid Grid.Row="0">
+        <DataGrid x:Name="CueGrid"
                   AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" GridLinesVisibility="None"
                   Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
-                  RowHeight="30" FontSize="13"
+                  RowHeight="30" FontSize="13" AlternationCount="2"
                   BorderThickness="0" SelectionMode="Extended" SelectionUnit="FullRow"
                   CanUserAddRows="False" CanUserDeleteRows="False"
                   CanUserReorderColumns="False"
@@ -316,6 +338,11 @@
                          (sin esto, DataGridRow cae al blanco por defecto) -->
                     <Setter Property="Background" Value="Transparent"/>
                     <Style.Triggers>
+                        <!-- Zebra sutil: guía la vista a lo ancho de la fila.
+                             ANTES del trigger de playhead para que éste gane. -->
+                        <Trigger Property="ItemsControl.AlternationIndex" Value="1">
+                            <Setter Property="Background" Value="#242426"/>
+                        </Trigger>
                         <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
                             <Setter Property="Background" Value="{StaticResource PlayheadBg}"/>
                         </DataTrigger>
@@ -374,11 +401,18 @@
                 <DataGridTemplateColumn Header="{local:Loc Es=Tipo, En=Type}" Width="88">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding TypeLabel}"
-                                       Foreground="{Binding TypeBrush}"
-                                       FontWeight="SemiBold"
-                                       Margin="4,0,0,0"
-                                       VerticalAlignment="Center"/>
+                            <!-- Icono en hueco fijo: los glifos ♪▣⏱ miden
+                                 distinto y el texto quedaba "dentado" -->
+                            <StackPanel Orientation="Horizontal" Margin="4,0,0,0"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="{Binding TypeIcon}" Width="16"
+                                           TextAlignment="Center"
+                                           Foreground="{Binding TypeBrush}"
+                                           FontWeight="SemiBold"/>
+                                <TextBlock Text="{Binding TypeName}" Margin="2,0,0,0"
+                                           Foreground="{Binding TypeBrush}"
+                                           FontWeight="SemiBold"/>
+                            </StackPanel>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
@@ -426,6 +460,21 @@
                                     ElementStyle="{StaticResource NumCell}"/>
             </DataGrid.Columns>
         </DataGrid>
+
+        <!-- Estado vacío: la lista en blanco era un hueco negro sin pista.
+             IsHitTestVisible=False para no robar el drag&drop del grid. -->
+        <StackPanel x:Name="EmptyListHint" IsHitTestVisible="False"
+                    VerticalAlignment="Center" HorizontalAlignment="Center">
+            <TextBlock Text="{local:Loc Es=Lista de cues vacía, En=Empty cue list}"
+                       FontSize="22" Foreground="#555555"
+                       HorizontalAlignment="Center"/>
+            <TextBlock FontSize="13" Foreground="#666666" Margin="0,8,0,0"
+                       MaxWidth="380" TextWrapping="Wrap"
+                       HorizontalAlignment="Center" TextAlignment="Center"
+                       Text="{local:Loc Es=Arrastra aquí archivos de audio o vídeo · o usa ➕ Añadir / ＋ Importar archivos…,
+                                       En=Drag audio or video files here · or use ➕ Add / ＋ Import files…}"/>
+        </StackPanel>
+        </Grid>
 
             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
                           Background="#333333" ResizeBehavior="PreviousAndNext"/>

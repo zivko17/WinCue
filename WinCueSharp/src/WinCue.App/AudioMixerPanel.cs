@@ -262,7 +262,11 @@ public sealed class AudioMixerPanel : ContentControl
             MeterZone.Children.Add(Fader);
             if (withVu)
             {
-                VuL = new VuMeterControl(vertical: true) { Width = 7, Margin = new Thickness(6, 2, 0, 2) };
+                // Regla de dB pegada a los VUs: sin referencia, "la barra a la
+                // mitad" no dice nada. Mismos márgenes verticales que los VUs
+                // para que las marcas coincidan con las suyas.
+                MeterZone.Children.Add(new DbScale { Margin = new Thickness(6, 2, 0, 2) });
+                VuL = new VuMeterControl(vertical: true) { Width = 7, Margin = new Thickness(2, 2, 0, 2) };
                 VuR = new VuMeterControl(vertical: true) { Width = 7, Margin = new Thickness(1, 2, 0, 2) };
                 MeterZone.Children.Add(VuL);
                 MeterZone.Children.Add(VuR);
@@ -369,6 +373,34 @@ public sealed class AudioMixerPanel : ContentControl
             int model = (int)Math.Round(cue.Volume * 100.0);
             if (Math.Abs(Fader.Value - model) >= 1.0)
                 SetFaderSilent(model);
+        }
+    }
+
+    /// <summary>Regla de dB de los VUs: cifras 0/−6/−12/−24/−40 en la misma
+    /// escala −60…0 dBFS que VuMeterControl (norm = (db+60)/60).</summary>
+    private sealed class DbScale : FrameworkElement
+    {
+        private static readonly (double Db, string Label)[] Marks =
+            { (0, "0"), (-6, "6"), (-12, "12"), (-24, "24"), (-40, "40") };
+        private static readonly Typeface Font = new("Consolas");
+        private static readonly Brush TextBrush =
+            Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
+
+        public DbScale() => Width = 16;
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            double h = ActualHeight;
+            double dip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+            foreach (var (db, label) in Marks)
+            {
+                double y = h * (1.0 - (db + 60.0) / 60.0);
+                var ft = new FormattedText(label,
+                    System.Globalization.CultureInfo.InvariantCulture,
+                    FlowDirection.LeftToRight, Font, 8.5, TextBrush, dip);
+                dc.DrawText(ft, new Point(Width - 2 - ft.Width,
+                    Math.Clamp(y - ft.Height / 2, 0, Math.Max(0, h - ft.Height))));
+            }
         }
     }
 

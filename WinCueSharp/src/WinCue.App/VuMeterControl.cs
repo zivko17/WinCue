@@ -131,8 +131,9 @@ public sealed class VuMeterControl : FrameworkElement
 
         if (_vertical)
         {
-            // Marcas de escala (25/50/75 %)
-            foreach (double f in new[] { 0.25, 0.5, 0.75 })
+            // Marcas de escala en dB (−6/−12/−24/−40), alineadas con la
+            // regla del mixer: y = 1 − (db+60)/60 sobre la escala de −60…0
+            foreach (double f in new[] { 0.1, 0.2, 0.4, 2.0 / 3.0 })
                 dc.DrawLine(TickPen, new Point(1, h * f), new Point(w - 1, h * f));
 
             // Barra de abajo hacia arriba (verde abajo, rojo arriba)
