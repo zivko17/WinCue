@@ -289,7 +289,8 @@ compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
   + FrameRendered→InvalidateFrame, idéntico al pipeline mpv). **Recuperan los
   fundidos de opacidad** que la ruta clásica perdía.
 - **Audio**: el controlador arranca la pista del .mov en el **AudioEngine**
-  con un id espejo negativo (`HapAudioId(cueId) = -20000 − cueId`): EQ
+  con un id espejo negativo (`HapAudioId(cueId) = -20000 − cueId`; hoy se
+  llama `VideoAudioId` — la fase híbrida lo generalizó): EQ
   nativa, compresor, VU por cue (remapeado al cue real para el Mixer y el
   inspector, RTA y GR incluidos), limitador — el rack entero. Ese stream es
   el **RELOJ MAESTRO** del vídeo (la App inyecta
@@ -451,7 +452,116 @@ set oscila en sierra por el decode 4K, sin tendencia). Regresión:
 - Memoria estable vuelta a vuelta: working set en sierra acotada (~460–2050 MB,
   transitorio del decode 4K) sin tendencia; managed 40–200 MB; handles
   2031→2131; GC gen2 lineal (~1/vuelta). No hay fuga: el audio espejo (decode a
-  RAM) se libera al terminar el cue (`InvalidateCache`/`HapAudioId`), el pool de
+  RAM) se libera al terminar el cue (`InvalidateCache`/`VideoAudioId`), el pool de
   pipelines HAP es acotado por spec (tamaño de canvas fijo, no por resolución).
 - Los tests de `HapMediaClock` (cuenta negativa por audio espejo atrasado, ya
   arreglado antes) siguen verdes: no aparecieron primos hermanos por ese lado.
+
+# Fase híbrida — audio de los vídeos mpv por el rack nativo (paso 3b)
+
+Evolución natural del paso 3, REUTILIZANDO sus piezas: los cues de vídeo
+NO-HAP (los que reproduce mpv: H.264, ProRes…) también sacan su audio por el
+AudioEngine de WinCue (EQ nativa, compresor, VU por cue, limitador de bus,
+fades sample-accurate). mpv queda **MUDO** para esos cues (`aid=no` fijado
+antes del `loadfile` — sin pista de audio, mpv sincroniza contra su reloj de
+sistema) y su vídeo se **disciplina al reloj del audio** con un PLL suave.
+
+## Qué comparte con el paso 3 (deliberadamente TODO)
+
+- El **audio espejo** es el mismo: id `VideoAudioId(cueId) = −20000 − cueId`
+  (renombrado desde `HapAudioId` — el concepto ya no es solo HAP) y el set
+  `_mirroredAudio` (antes `_hapRouted`) gobierna los ~15 puntos de enrutado:
+  stop/StopAll/PANIC/pausa/reanudar/fades/crossfades/SetVolume/SetEq en
+  vivo/preload/InvalidateCache y el REMAP del `CueLevelReport` al cueId real.
+- El **reloj** es el provider que la App ya inyectaba para HAP
+  (`SetHapClockProvider` → `AudioEngine.GetElapsedThreadSafe`): sirve tal
+  cual — el PLL lo consume desde el hilo de su timer.
+- El **fallback HAP→mpv** del paso 3 (motor propio no puede → mpv muteado)
+  ahora también usa `ExternalAudio=true`: mudo por `aid=no` y disciplinado
+  por el PLL en vez de free-run.
+
+## Elegibilidad (la decide el controlador, `HybridAudioEligible`)
+
+Vídeo no-HAP con: no-imagen · `rate == 1.0` · duración CONOCIDA y ≤
+`video_audio_max_minutes` (setting nuevo, default 20; en Ajustes → Vídeo).
+El límite existe porque el espejo decodifica el archivo ENTERO a RAM
+(~23 MB/min estéreo 48 kHz float): un largometraje serían GB — el streaming
+llega en el paso 4. Varispeed, duración desconocida o excesiva → ruta mpv
+clásica CON audio, como siempre. Kill-switch de directo:
+`WINCUE_VIDEO_AUDIO=mpv` desactiva el híbrido entero.
+
+## Semántica del PLL (`MpvSyncPll`, lógica pura con 18 tests)
+
+El audio ES el programa; mpv es el esclavo (lo contrario del reloj HAP, donde
+el vídeo ignora al audio atrasado). Tick cada 400 ms por cue (timer patrón
+`_fadeTimers`; inerte en pausa vía `MpvPlayer.ObservedPaused`; muere en
+Stop/Terminate). Con `d = vídeo − audio`:
+
+| Situación                        | Decisión |
+|----------------------------------|----------|
+| audio null (cargando/sin pista/terminado) | speed 1.0, sin seeks (free-run; JAMÁS rebobinar por falta de reloj) |
+| \|d\| < 15 ms                    | zona muerta: no tocar |
+| 15 ms ≤ \|d\| ≤ 0,25 s           | proporcional: `clamp(1 − d·0.3, 0.98, 1.02)`; se escribe `speed` solo si cambia ≥ 0.001 |
+| vídeo adelantado 0,25–2 s (espejo TARDÍO, la lección cara del paso 3) | FRENADA suave `clamp(1 − d·0.3, 0.90, 1.0)` — converge sin seek atrás visible |
+| vídeo adelantado ≥ 2 s           | UN hard-seek atrás a la posición del audio, sostenido 2 ticks (visible una vez, lipsync perfecto) |
+| vídeo atrasado > 0,25 s          | hard-seek adelante, sostenido 2 ticks (a 1.02× tardaría >12 s; el salto adelante apenas se ve) |
+| \|d\| > min(1 s, dur/2) en cue con LOOP | guarda de frontera: esperar 3 ticks (cruce de pasada vídeo/audio se resuelve solo) |
+| tras un hard-seek                | 2 ticks de reposo (mpv asienta el seek; time-pos rancia oscilaría) |
+
+## Red de seguridad (NUNCA un cue sin audio que antes lo tenía)
+
+Si el espejo FALLA en caliente (archivo cuyo audio `AudioDecoder` no traga —
+raro, ambos son ffmpeg, pero posible), `OnAudioError` del id espejo pasa de
+tragarse el error a: log + cue fuera del set + `RestoreInternalAudio(cueId)`
+(pone `aid=auto` y `speed=1` en el player mpv vivo, apaga el PLL) + volumen
+real del cue en mpv (el fallback HAP corre con volumen 0). Para un cue HAP
+nativo (sin player mpv) es no-op y sigue con su Stopwatch, como en el paso 3.
+El strip del Mixer se recrea sin VU (el flag `ActiveCueInfo.MirrorAudio`
+cambió) — honesto con la ruta real.
+
+## UI
+
+`ActiveCueInfo.MirrorAudio` (bool, default false al final del record — no
+rompe llamadas): el Mixer da **VU real de stream** a los cues de vídeo con
+espejo — HAP e híbridos (de paso cierra el hueco del paso 3: los cues HAP
+tampoco enseñaban su VU en el strip por ser Type Video) — y reserva la nota
+«VU n/d (mpv → dispositivo)» para el vídeo sin espejo. Standby: se prepara
+con `ExternalAudio=true` (los parámetros deben coincidir o el GO instantáneo
+no promovería) y PRECALIENTA el buffer del espejo.
+
+## Soak de verificación (§ «Fase híbrida»)
+
+Show `tests/stress/estres-hibrido.json` (media de
+`generar-hibrido.ps1` + `generar-tortura.ps1`): H.264 CON audio, SIN audio
+(fallback en caliente), pcm 96 kHz grande en .mov (espejo tardío), 60 fps,
+crossfades híbrido↔HAP en la MISMA pista, loop híbrido parado por STOP.
+Corrido con `scripts/soak-hibrido.ps1` (compositor ON, watchdog
+`WINCUE_STRESS_WATCH=1`, trazas del PLL en `engine-trace.log`).
+
+**Evidencia (15 vueltas, 8 min 06 s, `artifacts\soak-hibrido\20260724-011955`):**
+
+- Watchdog **SOAK LIMPIO**: 0 remaining negativos, 0 cues colgados, 0 cadenas
+  estancadas, 0 fugas candidatas.
+- PLL: 75 sesiones (5 cues híbridos × 15 vueltas), **436 correcciones de
+  speed y 0 hard-seeks** — el drift observado se movió entre 10 y 66 ms y la
+  banda proporcional lo reabsorbió siempre (speeds usadas: 0.980–1.000).
+- Fallback: **15/15 `RestoreInternalAudio`** (el clip sin audio, una vez por
+  vuelta) sin marcar el cue en error ni colgar la cadena.
+- Memoria estable: working set vuelta 1 = 522 MB → última = 603 MB (sierra
+  del decode, sin tendencia); handles 2014 → 2004; el runner cerró solo con
+  exit 0.
+- Ajuste del watchdog con causa raíz: un cue en LOOP vive legítimamente más
+  que su duración declarada (que la elegibilidad híbrida ahora NECESITA en el
+  show) → `StressRunner` le reporta duración 0 (= sin chequeo, la convención
+  documentada del watchdog).
+
+## Límites conocidos (además de los del paso 3)
+
+- El espejo decodifica a RAM → `video_audio_max_minutes` (default 20). El
+  provider de audio en streaming es la pieza del paso 4 que lo elimina.
+- Varispeed (`rate ≠ 1`) sigue por mpv con su audio: replicar el retimado
+  (resample + pitch) en el espejo no está hecho.
+- El PLL corrige el reloj, no el género: con `aid=no` mpv pierde su A/V sync
+  interno y pasa a reloj de sistema disciplinado — en esta máquina el drift
+  real nunca pasó de 66 ms entre ticks; máquinas muy cargadas podrían ver el
+  hard-seek (está trazado en `engine-trace.log` si ocurre).
