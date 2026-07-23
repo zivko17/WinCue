@@ -50,9 +50,13 @@ public sealed class StressRunner
 
         // Watchdog de salud HAP (diagnóstico autónomo del soak): consulta la
         // duración DECLARADA de cada cue en el show para detectar cuentas
-        // negativas y cues colgados sin tocar el motor.
+        // negativas y cues colgados sin tocar el motor. Un cue en LOOP vive
+        // legítimamente más que su duración declarada (que la ruta híbrida
+        // NECESITA conocer para la elegibilidad): se reporta 0 = sin chequeo,
+        // la misma convención del watchdog para duración natural.
         if (Environment.GetEnvironmentVariable("WINCUE_STRESS_WATCH") == "1")
-            _watch = new HapWatchdog(id => model.GetById(id)?.Duration ?? 0.0);
+            _watch = new HapWatchdog(id =>
+                model.GetById(id) is { Loop: false } c ? c.Duration : 0.0);
 
         string? env = Environment.GetEnvironmentVariable("WINCUE_STRESS_CSV");
         _csvPath = env is { Length: > 0 }
