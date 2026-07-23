@@ -114,9 +114,6 @@
                             Background="#7e1e1e" Content="{local:Loc Es=🖵 Salida vídeo ▾, En=🖵 Video output ▾}"/>
                     <Button Click="OnSettingsClick" Height="44"
                             Content="{local:Loc Es=⚙ Configuración, En=⚙ Settings}"/>
-                    <Button Click="OnAboutClick" Height="44" Width="34" Content="ⓘ"
-                            ToolTip="{local:Loc Es=Acerca de WinCue (versión y licencias de terceros),
-                                                En=About WinCue (version and third-party licenses)}"/>
                 </StackPanel>
 
                 <!-- Centro: reloj del show (el countdown por cue vive en las

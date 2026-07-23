@@ -1153,39 +1153,7 @@ public partial class MainWindow : Window, IShowView
             : Loc.T("Blackout levantado.", "Blackout released."));
     }
 
-    /// <summary>Acerca de: versión + atribuciones de terceros (auditoría 05).
-    /// El archivo THIRD-PARTY-NOTICES.md se distribuye junto al exe.</summary>
-    private void OnAboutClick(object sender, RoutedEventArgs e)
-    {
-        string ver = typeof(MainWindow).Assembly.GetName().Version?.ToString(3) ?? "dev";
-        string notices = System.IO.Path.Combine(AppContext.BaseDirectory,
-            "THIRD-PARTY-NOTICES.md");
-        var res = MessageBox.Show(this,
-            Loc.T(
-                $"WinCue {ver} — reproductor de cues de audio y vídeo para directo.\n\n" +
-                "Este software incluye componentes de terceros (NAudio, libmpv, " +
-                "runtime de .NET); las atribuciones y licencias completas están en " +
-                "THIRD-PARTY-NOTICES.md, junto al ejecutable.\n\n" +
-                "¿Abrir el archivo de atribuciones?",
-                $"WinCue {ver} — audio and video cue player for live shows.\n\n" +
-                "This software includes third-party components (NAudio, libmpv, " +
-                ".NET runtime); full attributions and licenses are in " +
-                "THIRD-PARTY-NOTICES.md, next to the executable.\n\n" +
-                "Open the attributions file?"),
-            Loc.T("Acerca de WinCue", "About WinCue"), MessageBoxButton.YesNo, MessageBoxImage.Information);
-        if (res == MessageBoxResult.Yes)
-        {
-            if (System.IO.File.Exists(notices))
-                System.Diagnostics.Process.Start(
-                    new System.Diagnostics.ProcessStartInfo(notices) { UseShellExecute = true });
-            else
-                FlashStatus(Loc.T(
-                    "THIRD-PARTY-NOTICES.md no está junto al ejecutable " +
-                    "(se incluye al publicar con publish.ps1).",
-                    "THIRD-PARTY-NOTICES.md is not next to the executable " +
-                    "(it's included when publishing with publish.ps1)."));
-        }
-    }
+    // El "Acerca de" vive ahora en Configuración → ⓘ Acerca de (SettingsWindow)
 
     private void OnSettingsClick(object sender, RoutedEventArgs e)
     {

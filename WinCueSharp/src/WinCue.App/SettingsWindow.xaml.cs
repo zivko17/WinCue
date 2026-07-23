@@ -62,6 +62,64 @@ public partial class SettingsWindow : Window
         Tabs.Items.Add(MakeTab(Loc.T("Red / Control", "Network / Control"), BuildNetwork()));
         Tabs.Items.Add(MakeTab(Loc.T("Interfaz", "Interface"), BuildInterface()));
         Tabs.Items.Add(MakeTab(Loc.T("Rutas", "Paths"), BuildPaths()));
+        Tabs.Items.Add(MakeTab(Loc.T("ⓘ Acerca de", "ⓘ About"), BuildAbout()));
+    }
+
+    /// <summary>Acerca de: versión + atribuciones de terceros (antes era un
+    /// MessageBox del botón ⓘ de la barra; Andrés lo quiso dentro de Settings).
+    /// THIRD-PARTY-NOTICES.md se distribuye junto al exe (publish.ps1).</summary>
+    private static UIElement BuildAbout()
+    {
+        var root = new StackPanel();
+        string ver = typeof(SettingsWindow).Assembly.GetName().Version?.ToString(3) ?? "dev";
+
+        var app = Group(root, "WINCUE");
+        app.Children.Add(new TextBlock
+        {
+            Text = $"WinCue {ver}",
+            FontSize = 20, FontWeight = FontWeights.Bold,
+            Margin = new Thickness(0, 2, 0, 4),
+        });
+        app.Children.Add(new TextBlock
+        {
+            Text = Loc.T("Reproductor de cues de audio y vídeo para directo.",
+                         "Audio and video cue player for live shows."),
+            Margin = new Thickness(0, 0, 0, 4),
+        });
+
+        var lic = Group(root, Loc.T("LICENCIAS DE TERCEROS", "THIRD-PARTY LICENSES"));
+        Note(lic, Loc.T(
+            "Este software incluye componentes de terceros (NAudio, libmpv, runtime de .NET); las atribuciones y licencias completas están en THIRD-PARTY-NOTICES.md, junto al ejecutable.",
+            "This software includes third-party components (NAudio, libmpv, .NET runtime); full attributions and licenses are in THIRD-PARTY-NOTICES.md, next to the executable."));
+        var btnRow = Row(lic, "");
+        var btn = new Button
+        {
+            Content = Loc.T("📄 Abrir atribuciones", "📄 Open attributions"),
+            Padding = new Thickness(12, 5, 12, 5),
+        };
+        var status = new TextBlock
+        {
+            Foreground = System.Windows.Media.Brushes.Gray,
+            FontStyle = FontStyles.Italic,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        btn.Click += (_, _) =>
+        {
+            string notices = System.IO.Path.Combine(AppContext.BaseDirectory,
+                "THIRD-PARTY-NOTICES.md");
+            if (System.IO.File.Exists(notices))
+                System.Diagnostics.Process.Start(
+                    new System.Diagnostics.ProcessStartInfo(notices) { UseShellExecute = true });
+            else
+                status.Text = Loc.T(
+                    "THIRD-PARTY-NOTICES.md no está junto al ejecutable (se incluye al publicar con publish.ps1).",
+                    "THIRD-PARTY-NOTICES.md is not next to the executable (it's included when publishing with publish.ps1).");
+        };
+        btnRow.Children.Add(btn);
+        lic.Children.Add(status);
+
+        return root;
     }
 
     private static TabItem MakeTab(string title, UIElement content) => new()
