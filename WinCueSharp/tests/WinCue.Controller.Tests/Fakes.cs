@@ -211,6 +211,11 @@ public sealed class FakeVideoEngine : IVideoEngine
 
     public void SetVolume(int cueId, double volume) => Volumes[cueId] = volume;
 
+    /// <summary>Cues a los que se les recuperó el audio por mpv (fallback de
+    /// la ruta híbrida: el espejo de audio falló en caliente).</summary>
+    public readonly List<int> RestoredInternalAudio = new();
+    public void RestoreInternalAudio(int cueId) => RestoredInternalAudio.Add(cueId);
+
     public readonly List<(int CueId, AudioEqParams? Eq)> Eqs = new();
     public void SetEq(int cueId, AudioEqParams? eq) => Eqs.Add((cueId, eq));
 

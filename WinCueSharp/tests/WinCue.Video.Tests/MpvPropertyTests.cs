@@ -97,6 +97,29 @@ public class MpvPropertyTests : IClassFixture<MediaFixture>
     }
 
     [Fact]
+    public void ExternalAudio_DejaAidEnNo_YRestoreLaDevuelveAAuto()
+    {
+        if (!Ready) return;
+        var (engine, playerOf) = MakeEngine();
+        using var _ = engine;
+
+        // RUTA HÍBRIDA: mpv debe nacer SIN pista de audio (aid=no fijado
+        // antes del loadfile) — el audio del cue lo pone el AudioEngine.
+        engine.Play(1, _media.Mp4OneSecond,
+            new VideoPlayParams(Loop: true, ExternalAudio: true));
+        Assert.True(WaitFor(() => engine.IsPlaying(1), 10_000));
+
+        var player = playerOf(1)!;
+        Assert.Equal("no", player.GetPropertyString("aid"));
+
+        // Red de seguridad (el espejo falló): el audio vuelve a mpv en vivo
+        engine.RestoreInternalAudio(1);
+        Assert.True(WaitFor(() => player.GetPropertyString("aid") != "no", 3_000),
+            $"aid no volvió a auto (aid={player.GetPropertyString("aid")})");
+        engine.Stop(1);
+    }
+
+    [Fact]
     public void Rate_SetsSpeedProperty()
     {
         if (!Ready) return;
