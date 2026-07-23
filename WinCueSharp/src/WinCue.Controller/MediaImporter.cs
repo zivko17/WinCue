@@ -54,6 +54,12 @@ public static class MediaImporter
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool>
         _unsupportedVideoCache = new(StringComparer.OrdinalIgnoreCase);
 
+    /// <summary>SOLO TESTS: siembra la caché de sondeo para simular un archivo
+    /// HAP sin ffprobe ni archivo real (los tests del controlador con motores
+    /// falsos necesitan disparar el enrutado HAP de forma determinista).</summary>
+    internal static void SeedUnsupportedCodecCache(string filePath, bool unsupported) =>
+        _unsupportedVideoCache[Path.GetFullPath(filePath)] = unsupported;
+
     /// <summary>Códec del primer stream de vídeo (minúsculas) vía ffprobe;
     /// "" si no hay vídeo o no se puede leer.</summary>
     public static string VideoCodec(string filePath)

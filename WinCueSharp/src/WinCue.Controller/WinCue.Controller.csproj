@@ -10,4 +10,9 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <ItemGroup>
+    <!-- Los tests siembran la caché de sondeo HAP (SeedUnsupportedCodecCache) -->
+    <InternalsVisibleTo Include="WinCue.Controller.Tests" />
+  </ItemGroup>
+
 </Project>

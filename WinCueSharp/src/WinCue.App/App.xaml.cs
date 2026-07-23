@@ -111,6 +111,14 @@ public partial class App : Application
 
         _video = new VideoEngine(() => 0, dispatch);   // el controlador fija el provider
 
+        // RELOJ MAESTRO del motor HAP propio: el elapsed del stream de audio
+        // espejo del cue (id negativo del controlador), o null si no suena.
+        // OJO hilos: se consulta desde el hilo de presentación del player —
+        // GetElapsedThreadSafe lee un mapa concurrente + Volatile.Read (no
+        // toca el estado del main thread del AudioEngine).
+        _video.SetHapClockProvider(cueId =>
+            _audio.GetElapsedThreadSafe(MainController.HapAudioId(cueId)));
+
         var scheduler = new TimerScheduler(dispatch);
         _controller = new MainController(model, window, _audio, _video, scheduler, settings);
 

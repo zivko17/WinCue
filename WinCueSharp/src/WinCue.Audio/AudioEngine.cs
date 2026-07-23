@@ -79,6 +79,13 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private readonly Dictionary<int, ActiveCue> _active = new();
     private readonly HashSet<int> _loading = new();
 
+    // RELOJ para el motor de vídeo HAP: mapa CONCURRENTE en paralelo a
+    // _active (que solo toca el main thread) para poder leer el elapsed de
+    // un cue desde el hilo de presentación del vídeo sin carreras.
+    // CueSampleProvider.ElapsedSeconds ya es thread-safe (Volatile.Read).
+    private readonly System.Collections.Concurrent.ConcurrentDictionary<int, CueSampleProvider>
+        _clockProviders = new();
+
     private float _master = 1.0f;
     private bool _disposed;
 
@@ -432,6 +439,12 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public double GetElapsed(int cueId) =>
         _active.TryGetValue(cueId, out var a) ? a.Provider.ElapsedSeconds : 0.0;
 
+    /// <summary>Elapsed del cue LEÍBLE DESDE CUALQUIER HILO (reloj maestro del
+    /// motor de vídeo HAP), o null si el cue no suena. _active es del main
+    /// thread; este mapa concurrente existe justo para esta consulta.</summary>
+    public double? GetElapsedThreadSafe(int cueId) =>
+        _clockProviders.TryGetValue(cueId, out var p) ? p.ElapsedSeconds : null;
+
     public MediaCueState GetState(int cueId) =>
         _states.TryGetValue(cueId, out var s) ? s : MediaCueState.Idle;
 
@@ -528,6 +541,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
         var input = AdaptToMixerFormat(provider, p.Rate);
         _active[cueId] = new ActiveCue(provider, input, bus);
+        _clockProviders[cueId] = provider;
         mixer.AddMixerInput(input);
         SetState(cueId, MediaCueState.Playing);
     }
@@ -682,6 +696,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
                 if (ReferenceEquals(a.MixerInput, e.SampleProvider))
                 {
                     _active.Remove(cueId);
+                    _clockProviders.TryRemove(cueId, out _);
                     SetState(cueId, MediaCueState.Stopped);
                     break;
                 }
@@ -692,6 +707,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// <summary>Retira el cue del mixer de su bus y del registro (parada manual).</summary>
     private void StopCtx(int cueId, bool emitState)
     {
+        _clockProviders.TryRemove(cueId, out _);
         if (!_active.Remove(cueId, out var a))
             return;
         a.Provider.RequestStop();               // por si el mixer lee antes del Remove
