@@ -120,4 +120,42 @@ public class AudioDecoderTests : IDisposable
         float peak = buf.Samples.Max(MathF.Abs);
         Assert.InRange(peak, 0.6f, 1.0f);
     }
+
+    [Fact]
+    public void DecodeHapMov_ExtraeLaPistaDeAudioDelContenedorDeVideo()
+    {
+        // El motor HAP propio (paso 3) reproduce el AUDIO de los .mov HAP por
+        // el AudioEngine: verifica que AudioDecoder saca la pista de audio de
+        // un contenedor de VÍDEO (ruta FFmpeg: .mov no es extensión nativa).
+        if (!AudioDecoder.IsFFmpegAvailable)
+            return;   // sin FFmpeg no hay ruta que probar
+
+        string mov = Path.Combine(_dir, "hap.mov");
+        var psi = new System.Diagnostics.ProcessStartInfo("ffmpeg")
+        {
+            UseShellExecute = false, RedirectStandardError = true, CreateNoWindow = true,
+        };
+        psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
+        psi.ArgumentList.Add("-y");
+        psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("lavfi");
+        psi.ArgumentList.Add("-i"); psi.ArgumentList.Add("testsrc2=size=64x64:rate=30:duration=0.5");
+        psi.ArgumentList.Add("-f"); psi.ArgumentList.Add("lavfi");
+        psi.ArgumentList.Add("-i"); psi.ArgumentList.Add("sine=frequency=440:duration=0.5");
+        psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("hap");
+        psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s16le");
+        psi.ArgumentList.Add("-shortest");
+        psi.ArgumentList.Add(mov);
+        using (var proc = System.Diagnostics.Process.Start(psi)!)
+        {
+            proc.WaitForExit(30_000);
+            if (proc.ExitCode != 0)
+                return;   // ffmpeg sin encoder hap: nada que afirmar
+        }
+
+        var buf = AudioDecoder.Decode(mov);
+        Assert.InRange(buf.DurationSeconds, 0.4, 0.6);
+        float peak = buf.Samples.Max(MathF.Abs);
+        // El generador sine de lavfi emite a ~0,125 de amplitud por defecto
+        Assert.InRange(peak, 0.05f, 1.0f);   // el seno se oye, no es silencio
+    }
 }

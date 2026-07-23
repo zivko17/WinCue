@@ -273,3 +273,102 @@ vídeo al tick de WPF.
 - Audio y sincronía A/V (el paso 2 ignora la pista de audio).
 - Decidir Vortice vs P/Invoke y dónde vive el hilo de presentación en
   `WinCue.Video` (reutilizar el contrato `IVideoLayerSurface` existente).
+
+---
+
+# Paso 3 — integración en la aplicación real (src/)
+
+El núcleo del lab está PROMOCIONADO a producción en `src/WinCue.Video/Hap/`
+(namespace `WinCue.Video.Hap`); el lab de `tools/hap-lab/` queda intacto como
+banco de pruebas. Los cues de vídeo **HAP en contenedor .mov, con rate 1.0 y
+compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
+
+- **Vídeo**: `HapCuePlayer` (demux propio + decode HAP + pipeline D3D11→D3D9)
+  hacia la MISMA superficie por cue del compositor — el
+  `CompositorLayerControl` no nota la diferencia (SetSurface + SetFrameCopier
+  + FrameRendered→InvalidateFrame, idéntico al pipeline mpv). **Recuperan los
+  fundidos de opacidad** que la ruta clásica perdía.
+- **Audio**: el controlador arranca la pista del .mov en el **AudioEngine**
+  con un id espejo negativo (`HapAudioId(cueId) = -20000 − cueId`): EQ
+  nativa, compresor, VU por cue (remapeado al cue real para el Mixer y el
+  inspector, RTA y GR incluidos), limitador — el rack entero. Ese stream es
+  el **RELOJ MAESTRO** del vídeo (la App inyecta
+  `AudioEngine.GetElapsedThreadSafe` vía `VideoEngine.SetHapClockProvider`).
+- **Cualquier otro caso** (HAP en avi/mkv, rate≠1, modo clásico, modo canvas,
+  geometría CUSTOM, demux imposible) sigue EXACTAMENTE por la ruta mpv de
+  siempre. `WINCUE_HAP_ENGINE=0` desactiva el motor propio en caliente.
+
+## Decisiones y semánticas elegidas
+
+- **Reloj (HapMediaClock, puro y testeado)**: el audio manda mientras
+  entregue elapsed — cada valor nuevo re-ancla y entre búferes se extrapola
+  con el monotónico; desviaciones > 0,25 s cuentan como *resync* (traza). Si
+  el externo devuelve null (vídeo sin pista de audio, audio terminado antes
+  que el vídeo, espejo caído) se **congela el último anclaje y se sigue con
+  Stopwatch desde ahí** — el vídeo nunca se detiene por perder su reloj.
+- **Loop**: el límite de pasada lo marca el RESET del elapsed de audio (salto
+  atrás > 0,5 s con la pasada avanzada); red de seguridad: envolvido por
+  tiempo si el audio calla, con guarda anti-doble-pasada. `trimStart`/`trimEnd`
+  y `playCount` son aritmética de índices (todo intra): el `HapFrameSource`
+  decodifica índices LÓGICOS `start + (L % seg)`.
+- **Fin de cue**: el fin NATURAL lo marca el VÍDEO (pacer `Finished` en la
+  última pasada → `Ended` → mismo camino que el EndFile de mpv, con la misma
+  guarda anti-eventos-póstumos). Si el audio acaba antes, congelar-y-seguir.
+- **Fallback sin audio doble**: si `StartHapPlayback` falla (demux/GPU), el
+  engine cae a mpv clásico **MUTEADO** — el audio del cue ya suena por el
+  espejo del AudioEngine; sincronía aproximada pero el directo no se queda a
+  negro. Un `.mov` sin pista de audio no es error: `OnAudioError` traga los
+  ids espejo (queda en el log del show) y el vídeo va con Stopwatch.
+- **Pool HAP persistente** (lección auditoría 05): pipeline por (salida,
+  pista, spec de superficie) vivo toda la sesión; por cue solo Assign/Release
+  del sink y una `HapVideoSession` (ring de 3 texturas BC — recursos
+  corrientes, sin interop). Subida `Map WRITE_DISCARD` con fallback
+  `UpdateSubresource` si el driver rechaza BC dinámico. El RT compartido es
+  del tamaño de la SUPERFICIE (no del vídeo): el shader pinta el rectángulo
+  destino (aspecto + escala del cue) sobre fondo negro → los slots se
+  reutilizan entre clips de tamaños distintos. mpv y HAP se sustituyen entre
+  sí en la misma pista (`_playerSlots` unificado); crossfades con
+  `HandoverSeconds` funcionan (segundo slot del pool).
+- **Standby**: sin precarga en pausa para HAP (documentado): el GO paga solo
+  demux del moov + primer frame (~ms). SÍ se precalienta el buffer del audio
+  espejo al poner el playhead (evita el resync inicial del reloj).
+- **Vortice 3.6.2 (MIT) en producción**: decisión REVISABLE anotada en el
+  csproj — la superficie de API usada es pequeña y portable a P/Invoke crudo
+  (estilo `D3D9Minimal`) si se quiere cero dependencias. Snappier fijado a
+  1.3.1 (advisory GHSA-pggp-6c3x-2xmx).
+- **D3D9Ex sin ventana de foco** (`CreateDeviceEx(..., 0, ...)`): igual que
+  `D3D9Minimal.CreateDevice(0)` del interop mpv, probado en producción — el
+  lab usaba el hwnd de la ventana, innecesario para un device de superficies.
+
+## Tests (312 → 342, todos en verde; build a cero warnings)
+
+- Controlador (14 nuevos, `HapRoutingTests`, motores falsos + caché de códec
+  sembrada): enrutado con/sin compositor, rate≠1, kill-switch, audio espejo
+  con params correctos, Stop/PANIC/pausa/fin natural arrastran el espejo,
+  volumen/EQ en vivo al espejo, VU remapeado, error del espejo tragado,
+  standby precalienta el audio, FADE cues funden el espejo.
+- Vídeo (15 nuevos): `HapMediaClockTests` (reloj puro: extrapolación,
+  congelar-y-seguir, pasadas por audio y por tiempo, guarda anti-doble,
+  pausa, resyncs) y `HapCoreTests` (demux/decode con media ffmpeg real,
+  `HapFrameSource` con trim+pasadas verificado contra decode independiente,
+  FramePacer promocionado).
+- Audio (1 nuevo): `AudioDecoder` extrae la pista de audio de un `.mov` HAP
+  real vía FFmpeg (la ruta que usa el espejo).
+- Smoke `--smoke`: exit 0.
+
+## Límites conocidos / paso 4
+
+- El motor propio NO cubre: modo canvas (multi-salida de un render), rate ≠ 1,
+  geometría CUSTOM (translate/rotate), HAP en avi/mkv — todos caen a la ruta
+  clásica actual. HapM/Hap7/HapH tampoco (el parser los rechaza → fallback).
+- El AudioEngine decodifica el buffer ENTERO a RAM (float32): vídeos muy
+  largos (>1 h) pagan cientos de MB — límite heredado de la arquitectura de
+  audio, aceptable para clips de directo; revisar si aparece el caso.
+- Validación en vivo pendiente con contenido real (bitrates 10-30× testsrc2)
+  y varias capas HAP simultáneas + crossfades largos; la telemetría está
+  (drops/resyncs en engine-trace.log con WINCUE_MPV_LOG).
+- Si el driver no da `EnumAdapterByGpuPreference` o el shared handle no abre,
+  el fallback es por cue (mpv muteado): probar en máquinas solo-iGPU.
+- Futuro: precarga en pausa real para HAP (primer frame ya subido), P/Invoke
+  para quitar Vortice si se quiere, y quizá mover también los códecs
+  «normales» al motor propio (fase «motor de vídeo» completa).

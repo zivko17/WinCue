@@ -124,6 +124,9 @@ public sealed class FakeAudioEngine : IAudioEngine
     public void PauseCue(int cueId) => PausedCues.Add(cueId);
     public void ResumeCue(int cueId) => PausedCues.Remove(cueId);
     public bool IsPlaying(int cueId) => Playing.Contains(cueId);
+
+    public readonly List<(int CueId, AudioEqParams Eq)> Eqs = new();
+    public void SetEq(int cueId, AudioEqParams eq) => Eqs.Add((cueId, eq));
     public double GetDuration(int cueId) => Durations.GetValueOrDefault(cueId);
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
     public void InvalidateCache(int cueId) => Invalidated.Add(cueId);
