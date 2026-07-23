@@ -1708,11 +1708,12 @@ public class MainController
 
     /// <summary>Exporta un show PORTÁTIL: copia los medios a una carpeta «media»
     /// junto al .json de destino y guarda con rutas relativas. El show de
-    /// trabajo no se altera. convertLossyAudioToWav → el audio comprimido se
-    /// transcodifica a WAV en la copia. Devuelve (copiados, faltantes).</summary>
+    /// trabajo no se altera. convertLossyAudioToWav → audio comprimido a WAV;
+    /// convertVideoToHap → vídeos a HAP .mov. Devuelve (copiados, faltantes).</summary>
     public (int Copied, int Missing) ExportPortableShow(
-        string path, bool convertLossyAudioToWav = false) =>
-        _files.ExportPortable(path, convertLossyAudioToWav);
+        string path, bool convertLossyAudioToWav = false,
+        bool convertVideoToHap = false) =>
+        _files.ExportPortable(path, convertLossyAudioToWav, convertVideoToHap);
 
     /// <summary>Carga un show: resuelve rutas relativas contra la carpeta del
     /// .json y marca en ERROR los cues cuyo media no existe.</summary>

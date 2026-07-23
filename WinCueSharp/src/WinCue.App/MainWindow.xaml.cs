@@ -1222,11 +1222,22 @@ public partial class MainWindow : Window, IShowView
                       "There are compressed audio cues (mp3, aac, ogg…).\n\nConvert them to WAV in the exported copy?\n(The original is untouched; if ffmpeg isn't available they're copied as-is.)"),
                 Loc.T("Exportar show portable", "Export portable show"),
                 MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
+        // ¿Convertir los vídeos a HAP? (decode baratísimo en directo; ocupan
+        // MÁS disco y sus fundidos de opacidad van a corte — ruta clásica)
+        bool convertHap = _model.Cues.Any(c => c.Type == CueType.Video &&
+                c.FilePath.Length > 0 &&
+                !MediaImporter.ImageFormats.Contains(System.IO.Path.GetExtension(c.FilePath)) &&
+                !MediaImporter.IsUnsupportedVideoCodec(c.FilePath)) &&
+            MessageBox.Show(this,
+                Loc.T("¿Convertir los VÍDEOS a HAP en la copia exportada?\n\nHAP descomprime con mínima CPU (arranque instantáneo, scrub exacto), ideal para directo. A cambio ocupa bastante más disco y sus fundidos de opacidad entre capas van a corte.\n(El original no se toca; si ffmpeg falla se copia tal cual. Puede tardar varios minutos.)",
+                      "Convert VIDEOS to HAP in the exported copy?\n\nHAP decodes with minimal CPU (instant start, exact scrub), ideal for live use. In exchange it takes much more disk and its per-layer opacity fades become cuts.\n(The original is untouched; if ffmpeg fails it's copied as-is. May take several minutes.)"),
+                Loc.T("Exportar show portable", "Export portable show"),
+                MessageBoxButton.YesNo, MessageBoxImage.Question) == MessageBoxResult.Yes;
         Mouse.OverrideCursor = Cursors.Wait;   // la conversión puede tardar
         (int copied, int missing) result;
         try
         {
-            result = _controller.ExportPortableShow(dlg.FileName, convertWav);
+            result = _controller.ExportPortableShow(dlg.FileName, convertWav, convertHap);
         }
         finally
         {

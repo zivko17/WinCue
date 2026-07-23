@@ -212,6 +212,53 @@ public static class MediaImporter
         }
     }
 
+    /// <summary>Transcodifica el vídeo de src a HAP (contenedor .mov, audio a
+    /// PCM 16-bit) vía ffmpeg. MUY LENTO con archivos largos — no llamar en el
+    /// hilo de UI sin aviso. HAP descomprime baratísimo (intraframe DXT):
+    /// arranque instantáneo, scrub exacto y mínima CPU en directo, a cambio de
+    /// MUCHO más disco. ffmpegExe vacío → «ffmpeg» del PATH. Devuelve false si
+    /// falla (el llamante decide el fallback, típicamente copiar el original).</summary>
+    public static bool ConvertToHap(string src, string dest, string ffmpegExe = "")
+    {
+        try
+        {
+            var psi = new System.Diagnostics.ProcessStartInfo(
+                ffmpegExe.Length > 0 ? ffmpegExe : "ffmpeg")
+            {
+                UseShellExecute = false,
+                RedirectStandardOutput = true,
+                RedirectStandardError = true,
+                CreateNoWindow = true,
+            };
+            psi.ArgumentList.Add("-hide_banner");
+            psi.ArgumentList.Add("-nostats");
+            psi.ArgumentList.Add("-y");
+            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(src);
+            psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("hap");
+            psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s16le");
+            psi.ArgumentList.Add(dest);
+            using var proc = System.Diagnostics.Process.Start(psi);
+            if (proc is null)
+                return false;
+            proc.StandardError.ReadToEnd();   // drenar para no bloquear el pipe
+            if (!proc.WaitForExit(1_800_000))
+            {
+                try { proc.Kill(); } catch (Exception) { }
+                return false;
+            }
+            if (proc.ExitCode != 0 || !File.Exists(dest))
+            {
+                try { if (File.Exists(dest)) File.Delete(dest); } catch (Exception) { }
+                return false;
+            }
+            return true;
+        }
+        catch (Exception)
+        {
+            return false;   // sin ffmpeg / src ilegible
+        }
+    }
+
     /// <summary>Sonoridad integrada (LUFS) del archivo vía ffmpeg loudnorm.
     /// LENTO (decodifica el archivo entero): llamar en segundo plano.
     /// null si ffmpeg no está disponible o el archivo no tiene audio.</summary>

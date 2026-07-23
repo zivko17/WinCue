@@ -427,6 +427,28 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void ExportPortable_HapConversionFallsBackToCopy_OnBadSource()
+    {
+        // Un «mp4» corrupto: ffmpeg (si está) fallará; sin ffmpeg falla igual.
+        // El export debe COPIAR el original — nunca perder media.
+        string srcDir = Path.Combine(TempDir, "origen3");
+        Directory.CreateDirectory(srcDir);
+        string media = Path.Combine(srcDir, "clip.mp4");
+        File.WriteAllText(media, "no soy un mp4");
+        AddCue(CueType.Video, "clip", setup: c => c.FilePath = media);
+
+        string outDir = Path.Combine(TempDir, "portable3");
+        string target = Path.Combine(outDir, "show.json");
+        var (copied, missing) = Controller.ExportPortableShow(
+            target, convertLossyAudioToWav: false, convertVideoToHap: true);
+
+        Assert.Equal(1, copied);
+        Assert.Equal(0, missing);
+        Assert.True(File.Exists(Path.Combine(outDir, "media", "clip.mp4")));
+        Assert.False(File.Exists(Path.Combine(outDir, "media", "clip.mov")));
+    }
+
+    [Fact]
     public void LoadShow_MarksMissingMediaAsError()
     {
         var m = new CueModel();

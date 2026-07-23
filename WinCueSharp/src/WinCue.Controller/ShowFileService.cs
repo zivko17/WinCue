@@ -93,10 +93,15 @@ public sealed class ShowFileService
     /// relativas (SaveShow ya relativiza lo que cae bajo su carpeta). El show de
     /// TRABAJO no se altera: sus cues siguen apuntando a los originales.
     /// convertLossyAudioToWav = true → el audio comprimido (mp3, aac, ogg…) se
-    /// transcodifica a WAV PCM en la copia (ffmpeg; si falla, copia el
-    /// original tal cual). Devuelve (copiados, faltantes).</summary>
+    /// transcodifica a WAV PCM en la copia. convertVideoToHap = true → los
+    /// vídeos (no imágenes, no ya-HAP) se transcodifican a HAP .mov en la
+    /// copia (arranque instantáneo y mínima CPU en directo; más disco y sus
+    /// fundidos de opacidad van a corte por la ruta clásica). En ambos casos,
+    /// si ffmpeg falla se COPIA el original tal cual. Devuelve (copiados,
+    /// faltantes).</summary>
     public (int Copied, int Missing) ExportPortable(
-        string targetShowPath, bool convertLossyAudioToWav = false)
+        string targetShowPath, bool convertLossyAudioToWav = false,
+        bool convertVideoToHap = false)
     {
         string ffmpegExe = SettingsManager.Instance.Get("ffmpeg_path", "");
         if (!targetShowPath.EndsWith(".json", StringComparison.OrdinalIgnoreCase))
@@ -133,6 +138,10 @@ public sealed class ShowFileService
             // Audio lossy con conversión activada → el destino pasa a .wav
             bool convert = convertLossyAudioToWav && c.Type == CueType.Audio &&
                 MediaImporter.LossyAudioFormats.Contains(Path.GetExtension(c.FilePath));
+            // Vídeo (no imagen, no ya-HAP) con conversión activada → HAP .mov
+            bool toHap = convertVideoToHap && c.Type == CueType.Video &&
+                !MediaImporter.ImageFormats.Contains(Path.GetExtension(c.FilePath)) &&
+                !MediaImporter.IsUnsupportedVideoCodec(c.FilePath);
             try
             {
                 if (convert)
@@ -147,6 +156,18 @@ public sealed class ShowFileService
                     }
                     // ffmpeg no disponible o falló: copiar el original tal cual
                     _log($"Export portable: conversión a WAV falló, se copia el original: {c.FilePath}");
+                }
+                else if (toHap)
+                {
+                    string hapDest = UniqueDest(
+                        Path.GetFileNameWithoutExtension(c.FilePath) + ".mov");
+                    if (MediaImporter.ConvertToHap(c.FilePath, hapDest, ffmpegExe))
+                    {
+                        map[c.FilePath] = hapDest;
+                        copied++;
+                        continue;
+                    }
+                    _log($"Export portable: conversión a HAP falló, se copia el original: {c.FilePath}");
                 }
                 string dest = UniqueDest(Path.GetFileName(c.FilePath));
                 if (!string.Equals(Path.GetFullPath(c.FilePath), Path.GetFullPath(dest),
