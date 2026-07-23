@@ -196,6 +196,20 @@ internal sealed class HapCuePlayer : IDisposable
             long lastDropLog = 0;
             int lateSpins = 0;
 
+            // GUARDIÁN DE FIN (depuración julio 2026): el fin natural debe
+            // llegar SIEMPRE en un cue finito, haga lo que haga el reloj
+            // maestro (audio atrasado/reiniciado). Se mide tiempo de pared
+            // ACTIVO (sin pausas): si rebasa la duración total + margen, se
+            // fuerza el fin. Con el reloj sano jamás se alcanza.
+            double expectedTotal = _totalPasses == int.MaxValue
+                ? double.PositiveInfinity
+                : _segmentSeconds * _totalPasses;
+            double guardMargin = double.IsInfinity(expectedTotal)
+                ? 0.0
+                : Math.Max(1.0, expectedTotal * 0.02);
+            long tPrev = Stopwatch.GetTimestamp();
+            double activeSeconds = 0.0;
+
             while (!_stop)
             {
                 if (_source.Error is not null)
@@ -204,10 +218,23 @@ internal sealed class HapCuePlayer : IDisposable
                     break;
                 }
 
+                long tNow = Stopwatch.GetTimestamp();
+                if (!_paused)
+                    activeSeconds += (double)(tNow - tPrev) / Stopwatch.Frequency;
+                tPrev = tNow;
+
                 if (_paused)
                 {
                     Thread.Sleep(5);
                     continue;
+                }
+
+                if (activeSeconds > expectedTotal + guardMargin)
+                {
+                    _trace($"hap guardián de fin: {activeSeconds:F2}s activos > " +
+                        $"{expectedTotal:F2}s + {guardMargin:F2}s — fin forzado " +
+                        $"(resyncs {_clock.Resyncs})");
+                    break;
                 }
 
                 HapClockSample s = _clock.Now();

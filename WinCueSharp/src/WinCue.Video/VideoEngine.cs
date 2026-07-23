@@ -1091,7 +1091,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             if (_handoverTimers.Remove(cueId, out var t))
                 t.Dispose();
-            if (_players.ContainsKey(cueId) && GetState(cueId) == MediaCueState.Playing)
+            // OJO: cubre AMBOS motores — el saliente de un crossfade puede
+            // ser un player HAP (antes solo se miraba _players y el HAP
+            // quedaba vivo debajo del entrante para siempre)
+            if ((_players.ContainsKey(cueId) || _hapPlayers.ContainsKey(cueId))
+                && GetState(cueId) == MediaCueState.Playing)
             {
                 CancelFade(cueId);
                 SetState(cueId, MediaCueState.Stopped);
@@ -1256,12 +1260,15 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             {
                 // Fin natural. Igual que el EndFile de mpv: solo si ESTE
                 // player sigue siendo el del cue (un Ended póstumo de una
-                // instancia sustituida no debe tocar al sucesor).
-                if (GetState(cueId) == MediaCueState.Playing &&
-                    _hapPlayers.TryGetValue(cueId, out var cur) &&
+                // instancia sustituida no debe tocar al sucesor). La
+                // IDENTIDAD manda: aunque un estado intermedio no sea
+                // Playing, un player terminado no debe quedarse en
+                // _hapPlayers (contaminaría GetElapsed/IsPlaying del cue).
+                if (_hapPlayers.TryGetValue(cueId, out var cur) &&
                     ReferenceEquals(cur, thisPlayer))
                 {
-                    SetState(cueId, MediaCueState.Stopped);
+                    if (GetState(cueId) == MediaCueState.Playing)
+                        SetState(cueId, MediaCueState.Stopped);
                     TerminatePlayer(cueId);
                 }
             });
