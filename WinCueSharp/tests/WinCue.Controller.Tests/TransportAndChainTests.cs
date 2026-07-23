@@ -375,6 +375,47 @@ public class TransportAndChainTests : ControllerTestBase
     }
 
     [Fact]
+    public void Tick_EnPreWait_LaCuentaNoUsaElElapsedDelMotor()
+    {
+        // Depuración julio 2026: un elapsed > 0 del motor con el mismo cue id
+        // (player rezagado de un crossfade / standby) CONGELABA la cuenta
+        // visible de la espera ("espera −97,4s" clavada) aunque el timer real
+        // siguiera corriendo. En pre_wait manda el reloj de pared del run.
+        var a = AddCue(CueType.Video, duration: 10.0, setup: c => c.PreWait = 60.0);
+        Controller.OnGoPressed();
+        Video.Elapsed[a.Id] = 57.0;          // elapsed fantasma de otro player
+
+        Controller.Tick();
+
+        var row = Assert.Single(View.LastActiveCues);
+        Assert.NotNull(row.PreWaitRemaining);
+        Assert.True(row.PreWaitRemaining!.Value > 55.0,
+            $"la espera visible debe seguir el reloj de pared (quedó {row.PreWaitRemaining})");
+    }
+
+    [Fact]
+    public void AutoContinue_ConSolape_DisparaAunqueElAnteriorNoTermine()
+    {
+        // Cadena con crossfade-on-overlap: el disparo del siguiente es un
+        // timer INDEPENDIENTE (pre+post wait) — debe llegar puntual aunque el
+        // fin natural del vídeo anterior no llegue nunca (bug del reloj HAP).
+        var a = AddCue(CueType.Video, duration: 10.0, setup: c =>
+        {
+            c.ContinueMode = ContinueMode.AutoContinue;
+            c.PostWait = 5.0;                 // B entra 5 s antes del fin de A
+        });
+        var b = AddCue(CueType.Video, duration: 10.0, setup: c => c.FadeIn = 2.0);
+
+        Controller.OnGoPressed();
+        Clock.Advance(4_999);
+        Assert.DoesNotContain(Video.Plays, p => p.CueId == b.Id);
+
+        Clock.Advance(1);                     // post_wait cumplido; A sigue vivo
+        Assert.Contains(Video.Plays, p => p.CueId == b.Id);
+        Assert.True(Video.IsPlaying(a.Id));   // el solape existe (crossfade)
+    }
+
+    [Fact]
     public void PlayheadNavigation_PrevNextJumpClick()
     {
         AddCue(CueType.Memo); AddCue(CueType.Memo); AddCue(CueType.Memo);

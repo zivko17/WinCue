@@ -1563,15 +1563,19 @@ public class MainController
             }
 
             // Preferir la posición real del motor (más exacta que el reloj)
-            double elapsed = _paused
+            // — SOLO con la acción ya arrancada: en pre_wait el elapsed del
+            // motor pertenece a otra instancia (standby/player rezagado) y
+            // congelaría la cuenta visible mientras el timer real sí corre
+            double wallElapsed = _paused
                 ? Stopwatch.GetElapsedTime(run.TStartTicks, _pauseT0Ticks).TotalSeconds
                 : Stopwatch.GetElapsedTime(run.TStartTicks).TotalSeconds;
-            if (run.Kind == CueType.Audio)
+            double elapsed = wallElapsed;
+            if (run.ActionStarted && run.Kind == CueType.Audio)
             {
                 double e = _audio.GetElapsed(run.CueId);
                 if (e > 0.0) elapsed = e;
             }
-            else if (run.Kind == CueType.Video)
+            else if (run.ActionStarted && run.Kind == CueType.Video)
             {
                 double e = _video.GetElapsed(run.CueId);
                 if (e > 0.0) elapsed = e;

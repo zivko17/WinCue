@@ -301,19 +301,36 @@ compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
 ## Decisiones y semánticas elegidas
 
 - **Reloj (HapMediaClock, puro y testeado)**: el audio manda mientras
-  entregue elapsed — cada valor nuevo re-ancla y entre búferes se extrapola
-  con el monotónico; desviaciones > 0,25 s cuentan como *resync* (traza). Si
-  el externo devuelve null (vídeo sin pista de audio, audio terminado antes
-  que el vídeo, espejo caído) se **congela el último anclaje y se sigue con
-  Stopwatch desde ahí** — el vídeo nunca se detiene por perder su reloj.
+  entregue elapsed COMPATIBLE con el local — cada valor nuevo re-ancla y entre
+  búferes se extrapola con el monotónico; desviaciones > 0,25 s cuentan como
+  *resync* (traza). Si el externo devuelve null (vídeo sin pista de audio,
+  audio terminado antes que el vídeo, espejo caído) se **congela el último
+  anclaje y se sigue con Stopwatch desde ahí** — el vídeo nunca se detiene por
+  perder su reloj.
+- **Audio atrasado (depuración julio 2026)**: el espejo decodifica el `.mov`
+  entero a RAM antes de sonar — puede arrancar tarde y entregar elapsed≈0 con
+  el vídeo ya avanzado. Re-anclar hacia atrás rebobinaba el vídeo, retrasaba
+  el fin natural ese mismo tiempo (Dur "negativa" en la fila, tarjetas
+  PLAYING descuadradas) y desalineaba las cadenas AUTO_CONTINUE con
+  crossfade. Regla actual: retrocesos ≤ 1 s re-anclan (corrección de
+  sincronía legítima); un externo > 1 s POR DETRÁS de la estimación se
+  **ignora** (free-run monotónico, el fin llega a su hora) hasta que su valor
+  converja con el local ([−0,25 s, +1 s]) — entonces recupera el mando.
 - **Loop**: el límite de pasada lo marca el RESET del elapsed de audio (salto
-  atrás > 0,5 s con la pasada avanzada); red de seguridad: envolvido por
-  tiempo si el audio calla, con guarda anti-doble-pasada. `trimStart`/`trimEnd`
-  y `playCount` son aritmética de índices (todo intra): el `HapFrameSource`
-  decodifica índices LÓGICOS `start + (L % seg)`.
+  atrás > 0,5 s con la pasada avanzada, aterrizando CERCA DE 0 — un jitter a
+  media pasada no es pasada) y solo si QUEDAN pasadas (jamás en la última);
+  red de seguridad: envolvido por tiempo si el audio calla, con guarda
+  anti-doble-pasada. `trimStart`/`trimEnd` y `playCount` son aritmética de
+  índices (todo intra): el `HapFrameSource` decodifica índices LÓGICOS
+  `start + (L % seg)`.
 - **Fin de cue**: el fin NATURAL lo marca el VÍDEO (pacer `Finished` en la
-  última pasada → `Ended` → mismo camino que el EndFile de mpv, con la misma
-  guarda anti-eventos-póstumos). Si el audio acaba antes, congelar-y-seguir.
+  última pasada → `Ended` → mismo camino que el EndFile de mpv, con guarda
+  anti-eventos-póstumos POR IDENTIDAD de player). Si el audio acaba antes,
+  congelar-y-seguir. **Guardián de fin** en `HapCuePlayer`: en un cue finito,
+  si el tiempo de pared ACTIVO (sin pausas) rebasa la duración total + margen
+  (máx(1 s, 2 %)), se fuerza el `Ended` — el fin llega SIEMPRE aunque el
+  reloj maestro haga cosas raras. El kill del handover de crossfade cubre
+  también players HAP (antes solo mpv: el saliente HAP quedaba vivo debajo).
 - **Fallback sin audio doble**: si `StartHapPlayback` falla (demux/GPU), el
   engine cae a mpv clásico **MUTEADO** — el audio del cue ya suena por el
   espejo del AudioEngine; sincronía aproximada pero el directo no se queda a
