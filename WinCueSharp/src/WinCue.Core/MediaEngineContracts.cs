@@ -91,7 +91,8 @@ public sealed record VideoPlayParams(
     int Screen = 0,
     IReadOnlyList<CanvasView>? CanvasOutputs = null,
     double HandoverSeconds = 0.0,
-    bool ForceClassicPath = false);
+    bool ForceClassicPath = false,
+    bool UseHapEngine = false);
 // ForceClassicPath = true: el cue NO pasa por el compositor GPU aunque esté
 // activo — va por la ruta clásica (vo=gpu embebido en la ventana de salida).
 // Lo usa el controlador para códecs que el interop del compositor no soporta
@@ -101,6 +102,13 @@ public sealed record VideoPlayParams(
 // el vídeo que ya ocupa (Screen, Layer) NO se termina al entrar este; sigue
 // vivo ese tiempo (su propio fin/fade_out lo retira) para que ambos se vean
 // durante el fundido. En modo clásico se ignora (sustitución a corte).
+// UseHapEngine = true: el cue va por el MOTOR HAP PROPIO (sin mpv, paso 3 del
+// motor de vídeo): demux .mov + decode HAP + pipeline D3D11→D3D9 hacia la
+// superficie del compositor, con el AUDIO del cue reproducido aparte por el
+// AudioEngine (que actúa de reloj maestro del vídeo). Lo fija el CONTROLADOR
+// solo para HAP en .mov con rate 1.0 y compositor activo; si el motor propio
+// no puede (demux/GPU), el engine cae a mpv clásico MUTEADO (el audio ya
+// suena por el espejo del AudioEngine).
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine

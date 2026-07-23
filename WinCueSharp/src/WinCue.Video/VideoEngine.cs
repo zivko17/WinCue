@@ -25,6 +25,7 @@
 // =============================================================================
 
 using WinCue.Core;
+using WinCue.Video.Hap;
 
 namespace WinCue.Video;
 
@@ -95,6 +96,31 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly List<GpuSlot> _gpuPool = new();
     private int _gpuSlotSeq;
 
+    /// <summary>MOTOR HAP PROPIO (paso 3): players sin mpv de los cues
+    /// enrutados con UseHapEngine. Conviven con _players en los diccionarios
+    /// de estado; cada uno posee su slot del pool HAP mientras suena.</summary>
+    private readonly Dictionary<int, HapCuePlayer> _hapPlayers = new();
+
+    /// <summary>Pool de pipelines HAP persistentes por (salida, pista, spec)
+    /// — misma regla que _gpuPool (auditoría 05): el pipeline (devices D3D +
+    /// superficies + binding del D3DImage) vive toda la sesión; por cue solo
+    /// se Assign/Release el sink y se crea/libera la sesión de texturas.</summary>
+    private sealed class HapSlot
+    {
+        public required HapGpuPipeline Pipeline;
+        public required IVideoLayerSurface Sink;
+        public required int Screen;
+        public required int Layer;
+        public required string Spec;   // "WxH" de la superficie
+        public int? BusyCueId;
+    }
+    private readonly List<HapSlot> _hapPool = new();
+
+    /// <summary>Reloj inyectado por la App: elapsed del stream de AUDIO del
+    /// cue (id de vídeo real), o null si no suena. Se consulta desde el hilo
+    /// de presentación del player → debe ser thread-safe.</summary>
+    private Func<int, double?>? _hapClock;
+
     /// <summary>GO INSTANTÁNEO: player del cue en STANDBY ya creado y PAUSADO
     /// en su primer frame; el Play con parámetros equivalentes solo despausa.
     /// Su slot del pool queda BusyCueId=cueId (la promoción no lo toca).</summary>
@@ -153,6 +179,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         _gpuSurfaces = provider;
         _gpuFailed = false;
     }
+
+    /// <summary>RELOJ MAESTRO del motor HAP: la App inyecta un provider que
+    /// devuelve el elapsed (s desde su trim) del stream de audio espejo del
+    /// cue, o null si no suena. OJO hilos: se llama desde el hilo de
+    /// presentación del player — el provider debe ser thread-safe.</summary>
+    public void SetHapClockProvider(Func<int, double?>? provider) =>
+        _hapClock = provider;
 
     public static bool MpvAvailable => MpvPlayer.IsAvailable;
 
@@ -279,13 +312,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     public void StopAll()
     {
-        foreach (int cueId in _players.Keys.ToList())
+        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys).ToList())
             if (GetState(cueId) == MediaCueState.Playing)
                 Stop(cueId);
     }
 
     public bool IsPlaying(int cueId) =>
-        GetState(cueId) == MediaCueState.Playing && _players.ContainsKey(cueId);
+        GetState(cueId) == MediaCueState.Playing &&
+        (_players.ContainsKey(cueId) || _hapPlayers.ContainsKey(cueId));
 
     public bool AnyPlaying => _states.Values.Any(s => s == MediaCueState.Playing);
 
@@ -293,6 +327,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// la conoce). Coherente con GetElapsed: ambos son relativos al recorte.</summary>
     public double GetDuration(int cueId)
     {
+        // Motor HAP: la duración efectiva (trim aplicado) sale del demuxer
+        if (_hapPlayers.TryGetValue(cueId, out var hap))
+            return hap.GetDuration();
         if (!_players.TryGetValue(cueId, out var pl))
             return 0.0;
         double d = pl.GetPropertyDouble("duration") ?? 0.0;
@@ -310,6 +347,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// mismas semánticas que el motor de audio).</summary>
     public double GetElapsed(int cueId)
     {
+        // Motor HAP: el player cuenta desde su punto de entrada (trim) y por
+        // pasada — misma semántica que mpv con loop-file
+        if (_hapPlayers.TryGetValue(cueId, out var hap))
+            return hap.GetElapsed();
         if (!_players.TryGetValue(cueId, out var pl))
             return 0.0;
         var p = _playParams.GetValueOrDefault(cueId);
@@ -368,6 +409,29 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// Devuelve true si el cue estaba en reproducción.</summary>
     public bool FadeVolume(int cueId, double target, double duration, bool stopAfter = false)
     {
+        // Motor HAP: el vídeo no lleva audio (va aparte, por el AudioEngine
+        // espejo del controlador) — aquí solo se honra el stopAfter; el
+        // fundido audible/visual lo hacen el audio espejo y la opacidad.
+        if (_hapPlayers.ContainsKey(cueId))
+        {
+            CancelFade(cueId);
+            if (duration <= 0.0)
+            {
+                if (stopAfter)
+                    Stop(cueId);
+                return true;
+            }
+            if (stopAfter)
+            {
+                _fadeTimers[cueId] = new System.Threading.Timer(_ => Post(() =>
+                {
+                    CancelFade(cueId);
+                    Stop(cueId);
+                }), null, (int)(duration * 1000), System.Threading.Timeout.Infinite);
+            }
+            return true;
+        }
+
         if (!_players.ContainsKey(cueId))
             return false;
 
@@ -421,6 +485,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         foreach (var player in _players.Values)
             try { player.SetProperty("pause", true); } catch (Exception) { }
+        foreach (var hap in _hapPlayers.Values)
+            hap.SetPaused(true);
     }
 
     /// <summary>Reanuda todos los vídeos pausados.</summary>
@@ -429,6 +495,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         foreach (var (cueId, player) in _players)
             if (GetState(cueId) == MediaCueState.Playing)
                 try { player.SetProperty("pause", false); } catch (Exception) { }
+        foreach (var (cueId, hap) in _hapPlayers)
+            if (GetState(cueId) == MediaCueState.Playing)
+                hap.SetPaused(false);
     }
 
     /// <summary>Pausa SOLO este vídeo (congela reloj y frame).</summary>
@@ -436,12 +505,16 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         if (_players.TryGetValue(cueId, out var player))
             try { player.SetProperty("pause", true); } catch (Exception) { }
+        if (_hapPlayers.TryGetValue(cueId, out var hap))
+            hap.SetPaused(true);
     }
 
     public void ResumeCue(int cueId)
     {
         if (_players.TryGetValue(cueId, out var player))
             try { player.SetProperty("pause", false); } catch (Exception) { }
+        if (_hapPlayers.TryGetValue(cueId, out var hap))
+            hap.SetPaused(false);
     }
 
     /// <summary>Aplica la geometría a un vídeo EN REPRODUCCIÓN (en vivo).
@@ -450,6 +523,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         if (_players.TryGetValue(cueId, out var player))
             ApplyGeo(player, geo, BaseZoom(_playParams.GetValueOrDefault(cueId)));
+        if (_hapPlayers.TryGetValue(cueId, out var hap))
+            hap.ApplyGeometry(geo, _playParams.GetValueOrDefault(cueId)?.Scale ?? 100.0);
     }
 
     /// <summary>video-zoom (log2) equivalente al parámetro Scale del cue.</summary>
@@ -475,6 +550,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 s.ClearSurface();
         }
         _gpuPool.Clear();
+        foreach (var slot in _hapPool.ToList())
+        {
+            slot.Pipeline.Dispose();
+            slot.Sink.ClearSurface();
+        }
+        _hapPool.Clear();
     }
 
     public void Dispose()
@@ -601,6 +682,27 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // cambiaron): descartarlo y seguir por el camino normal
         if (_standby?.CueId == cueId)
             DiscardStandby(cueId);
+
+        // ── MOTOR HAP PROPIO (paso 3): .mov HAP con compositor activo ────
+        if (p.UseHapEngine)
+        {
+            if (gpu && !canvas && StartHapPlayback(cueId, filePath, p, screen, layer))
+                return;
+            // Fallback de emergencia: mpv clásico MUTEADO — el audio del cue
+            // ya suena por el AudioEngine (espejo del controlador); con
+            // volumen aquí sonaría doble. Sincronía aproximada (reloj libre
+            // de mpv a rate 1), pero el directo no se queda a negro.
+            _playParams[cueId] = p with
+            {
+                UseHapEngine = false,
+                ForceClassicPath = true,
+                Volume = 0.0,
+                CanvasOutputs = null,
+                HandoverSeconds = 0.0,
+            };
+            StartPlayback(cueId);
+            return;
+        }
 
         // ── Validación del HWND (modo clásico; el compositor no usa wid) ─
         nint hwnd = 0;
@@ -824,7 +926,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private void TerminateSlotOccupants(int cueId, int screen, int layer,
         bool handover, double handoverSeconds)
     {
-        foreach (int otherId in _players.Keys.ToList())
+        // _playerSlots cubre AMBOS tipos de player (mpv y HAP): un cue HAP
+        // sustituye al mpv de su pista y viceversa
+        foreach (int otherId in _playerSlots.Keys.ToList())
         {
             if (otherId == cueId) continue;
             if (_playerSlots.GetValueOrDefault(otherId, (0, 2)) != (screen, layer)) continue;
@@ -852,6 +956,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (!MpvAvailable || string.IsNullOrEmpty(filePath))
             return;
         var np = NormalizeParams(p ?? new VideoPlayParams());
+        // MOTOR HAP: sin precarga en pausa (documentado) — el GO paga solo el
+        // demux del moov + el primer frame (~ms: en HAP todo es intra). La
+        // verificación clásica deja el archivo cacheado para el Play.
+        if (np.UseHapEngine)
+        {
+            Load(cueId, filePath);
+            return;
+        }
         bool gpu = _gpuSurfaces is not null && !_gpuFailed && _forcedVo is null
             && !np.ForceClassicPath;
         if (!gpu || _players.ContainsKey(cueId))
@@ -999,6 +1111,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         ReleaseGpuSlot(cueId);
         if (_players.Remove(cueId, out var player))
             player.Dispose();
+        // Motor HAP: parar hilos y liberar la sesión ANTES de soltar el slot
+        // (el pipeline del pool sobrevive, igual que el de mpv)
+        if (_hapPlayers.Remove(cueId, out var hap))
+        {
+            Trace($"hap: terminate cue={cueId}");
+            hap.Dispose();
+            ReleaseHapSlot(cueId);
+        }
     }
 
     // ------------------------------------------------------------------
@@ -1071,6 +1191,151 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             foreach (var s in slot.Sinks)
                 s.ClearSurface();
         }
+    }
+
+    // ------------------------------------------------------------------
+    // MOTOR HAP PROPIO (paso 3): arranque, pool y ciclo de vida
+    // ------------------------------------------------------------------
+
+    /// <summary>Arranca un cue por el motor HAP propio. Devuelve false si el
+    /// demux o el pipeline GPU fallan (el llamante cae a mpv clásico muteado).
+    /// El VÍDEO va por aquí; su AUDIO lo arranca el controlador en el
+    /// AudioEngine (id espejo) y llega a este player como reloj inyectado.</summary>
+    private bool StartHapPlayback(int cueId, string filePath, VideoPlayParams p,
+        int screen, int layer)
+    {
+        MovInfo info;
+        HapTextureFormat format;
+        try
+        {
+            info = MovDemuxer.Open(filePath);
+            format = info.VideoFourcc switch
+            {
+                "Hap1" => HapTextureFormat.RgbDxt1,
+                "Hap5" => HapTextureFormat.RgbaDxt5,
+                "HapY" => HapTextureFormat.YCoCgDxt5,
+                _ => throw new InvalidDataException(
+                    $"fourcc HAP no soportado: {info.VideoFourcc}"),
+            };
+            if (info.FrameCount == 0 || info.Fps <= 1.0)
+                throw new InvalidDataException("pista de vídeo vacía o sin fps");
+        }
+        catch (Exception exc)
+        {
+            Trace($"hap: demux falló cue={cueId}: {exc.Message}");
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Motor HAP: demux falló ({exc.Message}). Fallback a mpv.");
+            return false;
+        }
+
+        TerminateSlotOccupants(cueId, screen, layer,
+            p.HandoverSeconds > 0.0, p.HandoverSeconds);
+        TerminatePlayer(cueId);
+
+        HapSlot? slot = null;
+        HapCuePlayer? player = null;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        try
+        {
+            var geo = p.Geometry ?? new VideoGeometry();
+            slot = AcquireHapSlot(cueId, screen, layer, (int)geo.SurfW, (int)geo.SurfH);
+            // CA2000: la propiedad del player se transfiere a _hapPlayers; el
+            // catch lo libera en toda ruta de error.
+#pragma warning disable CA2000
+            player = new HapCuePlayer(filePath, info, format, slot.Pipeline, p,
+                () => _hapClock?.Invoke(cueId), Trace);
+#pragma warning restore CA2000
+            var thisPlayer = player;
+            player.FirstFrame += () => Post(() =>
+            {
+                LatencyReport?.Invoke(cueId,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                FrameReady?.Invoke(cueId);
+            });
+            player.Ended += () => Post(() =>
+            {
+                // Fin natural. Igual que el EndFile de mpv: solo si ESTE
+                // player sigue siendo el del cue (un Ended póstumo de una
+                // instancia sustituida no debe tocar al sucesor).
+                if (GetState(cueId) == MediaCueState.Playing &&
+                    _hapPlayers.TryGetValue(cueId, out var cur) &&
+                    ReferenceEquals(cur, thisPlayer))
+                {
+                    SetState(cueId, MediaCueState.Stopped);
+                    TerminatePlayer(cueId);
+                }
+            });
+
+            _hapPlayers[cueId] = player;
+            _playerSlots[cueId] = (screen, layer);
+            _volumes[cueId] = p.Volume;
+            player.Start();
+        }
+        catch (Exception exc)
+        {
+            _hapPlayers.Remove(cueId);
+            _playerSlots.Remove(cueId);
+            player?.Dispose();
+            if (slot is not null)
+                ReleaseHapSlot(cueId);
+            Trace($"hap: arranque falló cue={cueId}: {exc.Message}");
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Motor HAP no disponible ({exc.Message}). Fallback a mpv.");
+            return false;
+        }
+
+        Trace($"hap: play cue={cueId} {info.Width}x{info.Height} " +
+            $"{info.VideoFourcc} fps={info.Fps:F2} frames={info.FrameCount}");
+        ErrorOccurred?.Invoke(cueId,
+            $"[AVISO] Motor HAP propio — salida {screen + 1}, pista {layer + 1}, " +
+            "reloj: audio del cue.");
+        SetState(cueId, MediaCueState.Playing);
+        return true;
+    }
+
+    /// <summary>Slot LIBRE del pool HAP para (salida, pista, spec) — o crea su
+    /// pipeline (primera vez, o crossfade que necesita un segundo en la misma
+    /// pista). El sink del compositor se cablea UNA vez, igual que en el pool
+    /// mpv: SetSurface + SetFrameCopier + FrameRendered→InvalidateFrame.</summary>
+    private HapSlot AcquireHapSlot(int cueId, int screen, int layer, int surfW, int surfH)
+    {
+        string spec = $"{Math.Max(16, surfW)}x{Math.Max(16, surfH)}";
+        var slot = _hapPool.FirstOrDefault(s =>
+            s.BusyCueId is null && s.Screen == screen && s.Layer == layer
+            && s.Spec == spec);
+        if (slot is null)
+        {
+            // CA2000: el pipeline pasa al pool (vive toda la sesión).
+#pragma warning disable CA2000
+            var pipeline = new HapGpuPipeline(surfW, surfH);
+#pragma warning restore CA2000
+            var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
+            sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+            sink.SetFrameCopier(pipeline.CopyPresent);
+            pipeline.FrameRendered += sink.InvalidateFrame;
+            slot = new HapSlot
+            {
+                Pipeline = pipeline, Sink = sink,
+                Screen = screen, Layer = layer, Spec = spec,
+            };
+            _hapPool.Add(slot);
+        }
+        slot.BusyCueId = cueId;
+        slot.Sink.AssignCue(cueId);
+        return slot;
+    }
+
+    /// <summary>Suelta el slot HAP del cue: sink oculto y pipeline LIBRE en el
+    /// pool (jamás se desmonta por cue — misma regla que ReleaseGpuSlot).
+    /// Llamar con el player YA parado (su sesión de texturas liberada).</summary>
+    private void ReleaseHapSlot(int cueId)
+    {
+        var slot = _hapPool.FirstOrDefault(s => s.BusyCueId == cueId);
+        if (slot is null)
+            return;
+        Trace($"hap: release slot cue={cueId}");
+        slot.Sink.ReleaseCue(cueId);
+        slot.BusyCueId = null;
     }
 
     // ------------------------------------------------------------------
