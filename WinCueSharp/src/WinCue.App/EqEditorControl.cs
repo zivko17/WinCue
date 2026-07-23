@@ -471,15 +471,27 @@ public sealed class EqCurveCanvas : FrameworkElement
     private static readonly Pen GridPen = FrozenPen(Color.FromRgb(0x2c, 0x2c, 0x30), 1);
     private static readonly Pen ZeroPen = FrozenPen(Color.FromRgb(0x4a, 0x4a, 0x50), 1);
     private static readonly Brush GridText = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
-    private static readonly Brush RtaBar = Frozen(new SolidColorBrush(Color.FromArgb(120, 0x2e, 0xcc, 0x71)));
-    private static readonly Brush RtaBarTop = Frozen(new SolidColorBrush(Color.FromArgb(220, 0x5f, 0xf2, 0x9e)));
+    // RTA estilo analizador pro: área con degradado + contorno + picos
+    private static readonly Brush RtaFill = FrozenGradient(
+        Color.FromArgb(0x86, 0x2e, 0xcc, 0x71), Color.FromArgb(0x10, 0x2e, 0xcc, 0x71));
+    private static readonly Pen RtaLine = FrozenPen(Color.FromArgb(0xdd, 0x5f, 0xf2, 0x9e), 1.3);
+    private static readonly Pen RtaPeakPen = FrozenPen(Color.FromArgb(0xb4, 0xd9, 0xff, 0xe9), 1);
+
+    private static Brush FrozenGradient(Color top, Color bottom)
+    {
+        var b = new LinearGradientBrush(top, bottom, 90.0);
+        b.Freeze();
+        return b;
+    }
 
     /// <summary>Ganancia de VISUALIZACIÓN del RTA en dB (compartida por
     /// sesión; solo afecta a la pantalla, nunca al audio). Solo se toca
     /// desde el hilo de UI.</summary>
     public static double RtaGainDb { get; set; } = 18.0;
-    private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
+    private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2.2);
     private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x66, 0x5e, 0x30), 1.5);
+    private static readonly Pen CurveGlowPen = FrozenPen(Color.FromArgb(0x46, 0xe8, 0xc0, 0x00), 5.5);
+    private static readonly Brush CurveFill = Frozen(new SolidColorBrush(Color.FromArgb(0x22, 0xe8, 0xc0, 0x00)));
 
     private static readonly Color[] BandColors =
     {
@@ -493,7 +505,8 @@ public sealed class EqCurveCanvas : FrameworkElement
     public event Action<string>? ReadoutChanged;
 
     private Cue? _cue;
-    private float[]? _spectrum;
+    private float[]? _smooth;     // RTA con balística (ataque directo, release suave)
+    private float[]? _peakHold;   // picos con caída lenta (peak-hold)
     private int _drag = int.MinValue;      // 0..3 banda · -2 HPF · -3 LPF
     private int _hover = int.MinValue;
 
@@ -506,13 +519,37 @@ public sealed class EqCurveCanvas : FrameworkElement
     public void SetCue(Cue? cue)
     {
         _cue = cue;
-        _spectrum = null;
+        _smooth = null;
+        _peakHold = null;
         InvalidateVisual();
     }
 
+    /// <summary>Espectro nuevo (~12 Hz). Aquí se aplica la balística de un
+    /// analizador de verdad: ataque instantáneo, release ~30 dB/s y picos con
+    /// caída lenta — sin esto las barras parpadean y se ve amateur.</summary>
     public void SetSpectrum(float[]? spectrum)
     {
-        _spectrum = spectrum;
+        if (spectrum is null)
+        {
+            _smooth = null;
+            _peakHold = null;
+        }
+        else if (_smooth is null || _smooth.Length != spectrum.Length)
+        {
+            _smooth = (float[])spectrum.Clone();
+            _peakHold = (float[])spectrum.Clone();
+        }
+        else
+        {
+            for (int i = 0; i < spectrum.Length; i++)
+            {
+                float v = spectrum[i];
+                _smooth[i] = v >= _smooth[i]
+                    ? v                                     // ataque directo
+                    : Math.Max(v, _smooth[i] - 2.4f);       // release ~30 dB/s
+                _peakHold![i] = Math.Max(v, _peakHold[i] - 0.65f);  // ~8 dB/s
+            }
+        }
         InvalidateVisual();
     }
 
@@ -574,59 +611,100 @@ public sealed class EqCurveCanvas : FrameworkElement
         }
         dc.DrawLine(ZeroPen, new Point(0, YFromDb(0)), new Point(w, YFromDb(0)));
 
-        // RTA detrás: BARRAS por banda (dBFS -90..0 + ganancia de pantalla)
-        if (_spectrum is { Length: > 0 } spec)
+        // RTA detrás: ÁREA suavizada con degradado + contorno + peak-hold
+        // (estilo analizador pro; dBFS -90..0 + ganancia de pantalla)
+        if (_smooth is { Length: > 1 } spec)
         {
-            double bw = w / spec.Length;
-            for (int i = 0; i < spec.Length; i++)
+            double YFromRta(double db) =>
+                h * (1.0 - Math.Clamp((db + 90.0) / 90.0, 0.0, 1.0));
+            var area = new StreamGeometry();
+            using (var ctx = area.Open())
             {
-                double db = spec[i] + RtaGainDb;
-                double y = h * (1.0 - Math.Clamp((db + 90.0) / 90.0, 0.0, 1.0));
-                if (h - y < 1)
-                    continue;
-                dc.DrawRectangle(RtaBar, null,
-                    new Rect(i * bw + 0.5, y, Math.Max(1, bw - 1), h - y));
-                // Remate más brillante en la punta de la barra
-                dc.DrawRectangle(RtaBarTop, null,
-                    new Rect(i * bw + 0.5, y, Math.Max(1, bw - 1), 2));
+                ctx.BeginFigure(new Point(0, h + 1), true, true);
+                ctx.LineTo(new Point(0, YFromRta(spec[0] + RtaGainDb)), false, false);
+                for (int i = 0; i < spec.Length; i++)
+                    ctx.LineTo(new Point((i + 0.5) / spec.Length * w,
+                        YFromRta(spec[i] + RtaGainDb)), true, true);
+                ctx.LineTo(new Point(w, YFromRta(spec[^1] + RtaGainDb)), true, true);
+                ctx.LineTo(new Point(w, h + 1), false, false);
             }
+            area.Freeze();
+            dc.DrawGeometry(RtaFill, RtaLine, area);
+
+            // Picos: segmento fino y brillante por banda, cayendo despacio
+            if (_peakHold is { } pk)
+                for (int i = 0; i < pk.Length; i++)
+                {
+                    double y = YFromRta(pk[i] + RtaGainDb);
+                    if (y >= h - 1)
+                        continue;
+                    double x0 = (double)i / pk.Length * w + 1;
+                    double x1 = (double)(i + 1) / pk.Length * w - 1;
+                    dc.DrawLine(RtaPeakPen, new Point(x0, y), new Point(x1, y));
+                }
         }
 
-        // Curva de respuesta de los filtros
+        // Curva de respuesta de los filtros: relleno hasta 0 dB + glow + trazo
         var eq = ParamsFrom(_cue);
-        var pen = _cue.EqEnabled || _cue.HpfOn || _cue.LpfOn ? CurvePen : CurveOffPen;
+        bool eqOn = _cue.EqEnabled || _cue.HpfOn || _cue.LpfOn;
+        var pen = eqOn ? CurvePen : CurveOffPen;
+        double y0 = YFromDb(0);
         var curve = new StreamGeometry();
+        var curveArea = new StreamGeometry();
         using (var ctx = curve.Open())
+        using (var actx = curveArea.Open())
         {
             bool started = false;
+            actx.BeginFigure(new Point(0, y0), true, true);
             for (int px = 0; px <= (int)w; px += 3)
             {
                 double db = EqChain.ResponseDb(eq, FreqFromX(px));
                 var pt = new Point(px, Math.Clamp(YFromDb(db), -20, h + 20));
                 if (!started) { ctx.BeginFigure(pt, false, false); started = true; }
                 else ctx.LineTo(pt, true, false);
+                actx.LineTo(pt, true, true);
             }
+            actx.LineTo(new Point(w, y0), true, true);
         }
         curve.Freeze();
+        curveArea.Freeze();
+        if (eqOn)
+        {
+            dc.DrawGeometry(CurveFill, null, curveArea);   // sombra ámbar de la curva
+            dc.DrawGeometry(null, CurveGlowPen, curve);    // halo
+        }
         dc.DrawGeometry(null, pen, curve);
 
         // Manejadores HPF/LPF (cuadrados en la línea de 0 dB)
         DrawFilterHandle(dc, -2, _cue.HpfFreq, _cue.HpfOn, "HPF");
         DrawFilterHandle(dc, -3, _cue.LpfFreq, _cue.LpfOn, "LPF");
 
-        // Manejadores de banda
+        // Manejadores de banda: anillo de color con centro oscuro (estilo
+        // plugin pro) y halo al pasar el ratón o arrastrar
         for (int i = 0; i < 4; i++)
         {
             var (f, g, _) = Band(i);
             var center = new Point(XFromFreq(f), YFromDb(g));
-            var fill = new SolidColorBrush(Color.FromArgb(
-                _cue.EqEnabled ? (byte)230 : (byte)90,
-                BandColors[i].R, BandColors[i].G, BandColors[i].B));
-            fill.Freeze();
-            double r = i == _drag || i == _hover ? 8 : 6;
-            dc.DrawEllipse(fill, null, center, r, r);
-            dc.DrawText(Text($"{i + 1}", Frozen(new SolidColorBrush(Colors.White)), 9),
-                new Point(center.X - 3, center.Y - 7));
+            byte alpha = _cue.EqEnabled ? (byte)235 : (byte)90;
+            var c = BandColors[i];
+            bool hot = i == _drag || i == _hover;
+            double r = hot ? 8.5 : 7;
+            if (hot)
+            {
+                var halo = new SolidColorBrush(Color.FromArgb(0x38, c.R, c.G, c.B));
+                halo.Freeze();
+                dc.DrawEllipse(halo, null, center, r + 5, r + 5);
+            }
+            var ring = new Pen(Frozen(new SolidColorBrush(
+                Color.FromArgb(alpha, c.R, c.G, c.B))), 2.4);
+            ring.Freeze();
+            var inner = new SolidColorBrush(Color.FromArgb(
+                _cue.EqEnabled ? (byte)0xdd : (byte)0x66, 0x16, 0x16, 0x19));
+            inner.Freeze();
+            dc.DrawEllipse(inner, ring, center, r, r);
+            var num = Text($"{i + 1}",
+                Frozen(new SolidColorBrush(Color.FromArgb(alpha, 0xff, 0xff, 0xff))), 9.5);
+            dc.DrawText(num, new Point(center.X - num.Width / 2, center.Y - num.Height / 2));
         }
     }
 
