@@ -110,6 +110,15 @@ public partial class MainWindow : Window, IShowView
                 _controller.OnCueEditCommitted(row,
                     new Dictionary<string, object?> { ["volume"] = vol });
         };
+        Mixer.CueStripActivated = cueId =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row < 0)
+                return;
+            CueGrid.SelectedIndex = row;      // puebla el inspector (selección)
+            BottomTabs.SelectedIndex = 1;     // pestaña del inspector
+            Inspector.ShowAudioTab();
+        };
         Mixer.SetMasterFader(_settings.Get("master_volume", 100));
         Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
         UpdateMixerDeviceInfo();

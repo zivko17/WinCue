@@ -110,13 +110,15 @@ public sealed class InspectorPanel : ContentControl
         _tabs.Items.Add(Tab(Loc.T("Disparadores", "Triggers"), BuildTriggers()));
         _tabs.Items.Add(Tab(Loc.T("Tiempo y bucles", "Time & Loops"), BuildTimeLoops()));
         _tabs.Items.Add(Tab(Loc.T("Geometría", "Geometry"), BuildGeometry()));
-        _tabs.Items.Add(Tab(Loc.T("Niveles", "Levels"), BuildLevels()));
+        // TODO el audio del cue en UNA pestaña: niveles + EQ/comp (antes eran
+        // dos, "Levels" y "EQ" — regla: Inspector = el cue, Mixer = el show)
         _eqEditor.Commit = (key, value) => Commit(key, value);
         _eqEditor.SpectrumProvider = () =>
             _cue is null ? null : SpectrumProvider?.Invoke(_cue.Id);
         _eqEditor.GainReductionProvider = () =>
             _cue is null ? 0f : GainReductionProvider?.Invoke(_cue.Id) ?? 0f;
-        _tabs.Items.Add(Tab("EQ", _eqEditor));
+        _audioTab = Tab("🔊 Audio", BuildAudioTab());
+        _tabs.Items.Add(_audioTab);
 
         IsEnabled = false;   // sin cue seleccionado
     }
@@ -706,6 +708,29 @@ public sealed class InspectorPanel : ContentControl
             _levelVu.SetLevel(rms);
     }
 
+    private TabItem _audioTab = null!;
+
+    /// <summary>Selecciona la pestaña 🔊 Audio (clic en un strip del Mixer).</summary>
+    public void ShowAudioTab() => _tabs.SelectedItem = _audioTab;
+
+    /// <summary>Pestaña 🔊 Audio: niveles del cue a la izquierda y editor de
+    /// EQ/compresor (con RTA) a la derecha — todo el audio del cue junto.</summary>
+    private UIElement BuildAudioTab()
+    {
+        var levelsHost = new Border
+        {
+            BorderBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            Child = BuildLevels(),
+            MaxWidth = 560,
+        };
+        var host = new DockPanel();
+        DockPanel.SetDock(levelsHost, Dock.Left);
+        host.Children.Add(levelsHost);
+        host.Children.Add(_eqEditor);
+        return host;
+    }
+
     private UIElement BuildLevels()
     {
         var (scroll, panel) = Page();
@@ -771,12 +796,21 @@ public sealed class InspectorPanel : ContentControl
             slider.Value = c.Volume * 100.0;
             label.Text = VolumeLabel(c.Volume);
         };
+        // El VU por cue solo existe para AUDIO (el vídeo suena por mpv)
+        _conditional.Add((vuCol, c => c.Type == CueType.Audio));
+
         // La salida por cue y la audición van en la columna de información
         panel = infoCol;
 
-        // ── Salida de audio por cue ─────────────────────────────────────
-        Header(panel, Loc.T("SALIDA DE AUDIO DE ESTE CUE", "AUDIO OUTPUT FOR THIS CUE"));
-        var outRow = Conditional(panel, c => c.Type == CueType.Audio);
+        // ── Sección SOLO AUDIO: salida por cue + audición ───────────────
+        var audioOnly = new StackPanel();
+        panel.Children.Add(audioOnly);
+        _conditional.Add((audioOnly, c => c.Type == CueType.Audio));
+
+        Header(audioOnly, Loc.T("SALIDA DE AUDIO DE ESTE CUE", "AUDIO OUTPUT FOR THIS CUE"));
+        var outRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
+        audioOnly.Children.Add(outRow);
         outRow.Children.Add(new TextBlock
         {
             Text = Loc.T("Dispositivo:", "Device:"), Width = 210,
@@ -813,16 +847,25 @@ public sealed class InspectorPanel : ContentControl
         };
 
         // ── Audición local ──────────────────────────────────────────────
-        var audRow = Conditional(panel, c => c.Type == CueType.Audio);
         var audBtn = new Button
         {
             Content = Loc.T("🎧 Audición (cascos)", "🎧 Audition (headphones)"),
             Margin = new Thickness(0, 8, 0, 0),
             Padding = new Thickness(12, 5, 12, 5),
+            HorizontalAlignment = HorizontalAlignment.Left,
         };
         audBtn.Click += (_, _) => AuditionRequested?.Invoke();
-        audRow.Children.Add(audBtn);
-        Note(panel, Loc.T("Reproduce este cue por el dispositivo de audición (Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.", "Plays this cue on the audition device (Settings → Audio) without going to the room. Press again to stop."));
+        audioOnly.Children.Add(audBtn);
+        Note(audioOnly, Loc.T("Reproduce este cue por el dispositivo de audición (Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.", "Plays this cue on the audition device (Settings → Audio) without going to the room. Press again to stop."));
+
+        // ── Sección SOLO VÍDEO: qué da (y qué no) la cadena af de mpv ───
+        var videoOnly = new StackPanel();
+        panel.Children.Add(videoOnly);
+        _conditional.Add((videoOnly, c => c.Type == CueType.Video));
+        Header(videoOnly, Loc.T("AUDIO DE ESTE VÍDEO", "THIS VIDEO'S AUDIO"));
+        Note(videoOnly, Loc.T(
+            "La EQ y el compresor se aplican EN VIVO vía mpv.\nRTA, GR y VU por cue no disponibles (mpv no expone las muestras): su nivel se ve en el MASTER del Mixer.",
+            "EQ and compressor apply LIVE via mpv.\nRTA, GR and per-cue VU unavailable (mpv does not expose samples): its level shows on the Mixer's MASTER."));
 
         return scroll;
     }

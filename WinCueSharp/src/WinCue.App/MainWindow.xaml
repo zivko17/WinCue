@@ -434,7 +434,7 @@
                 <TabItem Header="🛠 Inspector">
                     <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
                 </TabItem>
-                <TabItem Header="🎚 Audio">
+                <TabItem Header="🎚 Mixer">
                     <local:AudioMixerPanel x:Name="Mixer" Background="#252526"/>
                 </TabItem>
             </TabControl>

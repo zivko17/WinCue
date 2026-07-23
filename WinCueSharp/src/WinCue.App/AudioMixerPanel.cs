@@ -39,6 +39,9 @@ public sealed class AudioMixerPanel : ContentControl
     public Action<int, bool>? AuditionVolumeChanged;
     /// <summary>Fader de un cue activo (cueId, volumen 0..1).</summary>
     public Action<int, double>? CueVolumeCommitted;
+    /// <summary>Clic en el título de un strip de cue → abrir su edición
+    /// (la ventana selecciona el cue y muestra Inspector → 🔊 Audio).</summary>
+    public Action<int>? CueStripActivated;
     /// <summary>GR del limitador del bus master (dB ≥ 0), para el medidor.</summary>
     public Func<float>? MasterGainReductionProvider;
 
@@ -168,7 +171,8 @@ public sealed class AudioMixerPanel : ContentControl
                 continue;
             }
             var s = new CueStrip(row, resolveCue(row.Id),
-                (id, vol) => CueVolumeCommitted?.Invoke(id, vol));
+                (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
+                id => CueStripActivated?.Invoke(id));
             _cueStrips[row.Id] = s;
             _cueHost.Children.Add(s.Root);
         }
@@ -221,6 +225,7 @@ public sealed class AudioMixerPanel : ContentControl
 
         protected VuMeterControl? VuL, VuR;
         protected StackPanel MeterZone = null!;
+        protected TextBlock TitleText = null!;
         protected bool Syncing;
 
         public static Strip Build(string title, Brush accent, bool withVu,
@@ -240,13 +245,13 @@ public sealed class AudioMixerPanel : ContentControl
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
-            var titleText = new TextBlock
+            TitleText = new TextBlock
             {
                 Text = title, FontWeight = FontWeights.Bold, FontSize = 12,
                 Foreground = accent, HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 6), TextTrimming = TextTrimming.CharacterEllipsis,
             };
-            grid.Children.Add(titleText);
+            grid.Children.Add(TitleText);
 
             MeterZone = new StackPanel
             {
@@ -333,7 +338,8 @@ public sealed class AudioMixerPanel : ContentControl
     {
         public readonly int CueId;
 
-        public CueStrip(ActiveCueInfo info, Cue? cue, Action<int, double> commit)
+        public CueStrip(ActiveCueInfo info, Cue? cue,
+                        Action<int, double> commit, Action<int> activate)
         {
             CueId = info.Id;
             bool isAudio = info.Type == CueType.Audio;
@@ -342,7 +348,11 @@ public sealed class AudioMixerPanel : ContentControl
                  isAudio ? Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0x86, 0xde)))
                          : Frozen(new SolidColorBrush(Color.FromRgb(0xbe, 0x2e, 0xde))),
                  withVu: isAudio);
-            Root.ToolTip = $"{info.Number} · {info.Name}";
+            Root.ToolTip = $"{info.Number} · {info.Name}\n" + Loc.T(
+                "Clic en el título: editar en Inspector → 🔊 Audio",
+                "Click the title: edit in Inspector → 🔊 Audio");
+            TitleText.Cursor = System.Windows.Input.Cursors.Hand;
+            TitleText.MouseLeftButtonUp += (_, _) => activate(CueId);
 
             if (!isAudio)
             {
