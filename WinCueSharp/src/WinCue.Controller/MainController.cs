@@ -160,7 +160,13 @@ public class MainController
                 _video.DiscardStandby();   // los ids del show anterior ya no valen
             },
             setPlayhead: SetPlayhead,
-            invalidateAudioCache: _audio.InvalidateCache);
+            // El buffer del cue Y el de su espejo de vídeo (HAP/híbrido):
+            // ambos pueden estar precargados con el archivo antiguo
+            invalidateAudioCache: id =>
+            {
+                _audio.InvalidateCache(id);
+                _audio.InvalidateCache(VideoAudioId(id));
+            });
 
         // Edición de lista extraída (paso 2): manipulación pura del modelo.
         // Los dos únicos contactos con el estado de reproducción entran como
@@ -313,6 +319,26 @@ public class MainController
         && _settings.Get("video_compositor", false)
         && !CanvasMode
         && cue.GeoMode != GeoMode.Custom;
+
+    /// <summary>true si el cue de vídeo NO-HAP (lo reproduce mpv) es elegible
+    /// para la RUTA HÍBRIDA (paso 3b): su audio por el AudioEngine (rack
+    /// nativo) con mpv MUDO (aid=no) disciplinado por el PLL. Condiciones:
+    ///   · no es imagen (no hay audio que enrutar);
+    ///   · rate 1.0 — el varispeed retima el audio en mpv (resample+pitch);
+    ///     el espejo no lo replica → ruta clásica CON audio, como siempre;
+    ///   · duración CONOCIDA y ≤ video_audio_max_minutes (default 20): el
+    ///     espejo decodifica el archivo ENTERO a RAM (~23 MB/min estéreo
+    ///     48 kHz float) — un largometraje serían GB. El streaming llega en
+    ///     el paso 4; mientras, los largos van por mpv clásico con audio.
+    /// Kill-switch de directo: WINCUE_VIDEO_AUDIO=mpv desactiva la ruta
+    /// entera (audio por mpv como siempre).</summary>
+    private bool HybridAudioEligible(Cue cue) =>
+        Environment.GetEnvironmentVariable("WINCUE_VIDEO_AUDIO") != "mpv"
+        && !MediaImporter.ImageFormats.Contains(Path.GetExtension(cue.FilePath))
+        && Math.Abs(RateOf(cue) - 1.0) < 0.001
+        && cue.Duration > 0.0
+        && cue.Duration <=
+            Math.Max(1.0, _settings.Get("video_audio_max_minutes", 20.0)) * 60.0;
 
     // ------------------------------------------------------------------
     // Conversión a HAP desde la app (preparación de show, no de directo)
@@ -902,12 +928,12 @@ public class MainController
                 //    (rack completo) actuando de reloj maestro del vídeo.
                 //  · Si no → ruta CLÁSICA de siempre (embebido en la ventana
                 //    de salida, sin fundidos). Sondeo cacheado al cargar.
-                bool hapRouted = false;
+                bool mirrorAudio = false;
                 if (MediaImporter.IsUnsupportedVideoCodec(cue.FilePath))
                 {
                     if (HapEngineEligible(cue))
                     {
-                        hapRouted = true;
+                        mirrorAudio = true;
                         vparams = vparams with { UseHapEngine = true, CanvasOutputs = null };
                         _view.FlashStatus(Loc.T(
                             $"«{cue.Name}»: HAP → motor propio (audio por el rack).",
@@ -926,16 +952,27 @@ public class MainController
                             $"«{cue.Name}»: HAP → classic path (no opacity fades)."));
                     }
                 }
+                else if (HybridAudioEligible(cue))
+                {
+                    // RUTA HÍBRIDA (paso 3b): mpv reproduce el vídeo MUDO
+                    // (aid=no) y el audio suena por el espejo del AudioEngine
+                    // (rack completo); el PLL del engine disciplina el vídeo
+                    // al reloj del audio. Si el espejo falla en caliente,
+                    // OnAudioError recupera el audio por mpv (aid=auto).
+                    mirrorAudio = true;
+                    vparams = vparams with { ExternalAudio = true };
+                }
                 _video.SetEq(cue.Id, EqFor(cue));   // antes del Play: el player
                                                     // nace con la af aplicada
                 _video.Play(cue.Id, cue.FilePath, vparams);
-                if (hapRouted)
+                if (mirrorAudio)
                 {
-                    // AUDIO espejo del cue HAP: mismos parámetros que un cue
-                    // de audio (trims/loop/fades/EQ; rate fijo a 1.0 — la
-                    // elegibilidad lo garantiza). Si el .mov no tiene pista
-                    // de audio, el Play emite error: OnAudioError lo traga
-                    // para los ids espejo y el vídeo sigue con su Stopwatch.
+                    // AUDIO espejo del cue de vídeo (motor HAP o híbrido):
+                    // mismos parámetros que un cue de audio (trims/loop/
+                    // fades/EQ; rate fijo a 1.0 — la elegibilidad lo
+                    // garantiza). Si el archivo no tiene pista de audio, el
+                    // Play emite error: OnAudioError lo registra, saca el
+                    // cue del set y recupera el audio por mpv si procede.
                     _mirroredAudio.Add(cue.Id);
                     _audio.Play(VideoAudioId(cue.Id), cue.FilePath, new AudioPlayParams(
                         Volume: cue.Volume,
@@ -1485,12 +1522,26 @@ public class MainController
 
     private void OnAudioError(int cueId, string message)
     {
-        // Audio espejo de un cue HAP: un .mov sin pista de audio (o un fallo
-        // del espejo) NO es un error del cue — el vídeo sigue con su reloj
-        // propio (Stopwatch). Silencio deliberado, solo al log del show.
+        // Audio espejo de un cue de vídeo: un archivo sin pista de audio (o
+        // un fallo del decoder del espejo) NO es un error del cue — el vídeo
+        // sigue. RED DE SEGURIDAD: el cue sale del set espejo y, si tiene un
+        // player mpv vivo (ruta híbrida o fallback HAP→mpv), se RECUPERA su
+        // audio por mpv (aid=auto) — NUNCA un cue sin audio que lo tenía.
+        // Un cue HAP nativo no tiene mpv: RestoreInternalAudio es no-op y el
+        // vídeo sigue con su reloj propio (Stopwatch), como en el paso 3.
         if (cueId <= VideoAudioBase)
         {
-            Log($"Audio espejo HAP (cue {VideoAudioBase - cueId}): {message}");
+            int realId = VideoAudioBase - cueId;
+            Log($"Audio espejo (cue {realId}): {message}");
+            if (_mirroredAudio.Remove(realId) && _video.IsPlaying(realId))
+            {
+                Log($"Audio espejo caído → audio del cue {realId} recuperado por mpv");
+                _video.RestoreInternalAudio(realId);
+                // El fallback HAP→mpv corre con volume 0 (el espejo era quien
+                // sonaba): restaurar el volumen real del cue en mpv.
+                if (_model.GetById(realId) is Cue rc)
+                    _video.SetVolume(realId, rc.Volume);
+            }
             return;
         }
         int idx = _model.IndexOfId(cueId);
@@ -1619,7 +1670,8 @@ public class MainController
 
             rows.Add(new ActiveCueInfo(
                 run.CueId, run.Number, run.Name, run.Kind, run.Color,
-                elapsed, remaining, fraction, preWaitRemaining));
+                elapsed, remaining, fraction, preWaitRemaining,
+                MirrorAudio: _mirroredAudio.Contains(run.CueId)));
             if (remaining is double r && (primaryRemaining is null || r < primaryRemaining))
                 primaryRemaining = r;
         }
@@ -1772,12 +1824,24 @@ public class MainController
                 _audio.Preload(VideoAudioId(cue.Id), cue.FilePath);
             return;
         }
+        // RUTA HÍBRIDA: el standby se prepara con los MISMOS parámetros que
+        // usará el Play (ExternalAudio=true — si difirieran, el GO instantáneo
+        // no promovería), y el buffer del audio espejo se PRECALIENTA: el
+        // espejo decodifica a RAM y sin precarga arrancaría tarde en el GO.
+        bool hybrid = HybridAudioEligible(cue);
+        var vparams = _canvas.ParamsFor(cue, 0.0);
+        if (hybrid)
+        {
+            vparams = vparams with { ExternalAudio = true };
+            if (!_running.ContainsKey(cue.Id))
+                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath);
+        }
         bool visible = CanvasMode
             ? _view.IsVideoOutputVisible(0)
             : _view.IsVideoOutputVisible(ScreenOf(cue));
         if (visible && !_running.ContainsKey(cue.Id))
         {
-            _video.PrepareStandby(cue.Id, cue.FilePath, _canvas.ParamsFor(cue, 0.0));
+            _video.PrepareStandby(cue.Id, cue.FilePath, vparams);
             _view.SetVideoCueOpacity(cue.Id, 0.0);   // preparado ≠ en pantalla
         }
         else
@@ -1903,7 +1967,8 @@ public class MainController
         if (fileChanged)
         {
             cue.LatencyMs = null;
-            _audio.InvalidateCache(cue.Id);   // invalidar caché de audio
+            _audio.InvalidateCache(cue.Id);            // caché de audio del cue
+            _audio.InvalidateCache(VideoAudioId(cue.Id));   // y de su espejo
         }
 
         if (fields.ContainsKey("hotkey"))

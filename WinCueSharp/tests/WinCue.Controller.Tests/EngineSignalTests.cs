@@ -72,11 +72,13 @@ public class EngineSignalTests : ControllerTestBase
 
         Controller.OnGoPressed();
         Clock.Advance(2_000);                    // fin por duración → encadena
-        Assert.Single(Audio.Plays);
+        // (ids ≥ 0: el vídeo con duración conocida arranca además su audio
+        // espejo híbrido con id negativo — no cuenta como encadenado)
+        Assert.Single(Audio.Plays, p => p.CueId >= 0);
 
         Video.EndNaturally(Model.Cues[0].Id);    // eco tardío del motor
 
-        Assert.Single(Audio.Plays);              // sin doble disparo
+        Assert.Single(Audio.Plays, p => p.CueId >= 0);   // sin doble disparo
     }
 
     // ------------------------------------------------------------------

@@ -223,6 +223,10 @@ public partial class SettingsWindow : Window
         var pb = Group(root, Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
         Check("video_loop_default", pb, Loc.T("Loop por defecto en cues nuevos", "Loop by default on new cues"));
+        Spin("video_audio_max_minutes", pb,
+            Loc.T("Audio de vídeo por el rack nativo hasta (min):", "Video audio through the native rack up to (min):"), 1, 240);
+        Note(pb, Loc.T("Vídeos no-HAP de hasta esa duración sacan su audio por el motor de audio (EQ, compresor, VU por cue) con mpv mudo sincronizado. El audio se decodifica a RAM: ~23 MB/min. Más largos → audio por mpv directo.",
+                 "Non-HAP videos up to this length play their audio through the audio engine (EQ, compressor, per-cue VU) with muted, synced mpv. Audio is decoded to RAM: ~23 MB/min. Longer ones → audio via mpv directly."));
 
         return root;
     }

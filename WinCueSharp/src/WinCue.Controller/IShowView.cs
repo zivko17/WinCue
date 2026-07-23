@@ -14,7 +14,9 @@ namespace WinCue.Controller;
 
 /// <summary>Fila del panel de cues activos (countdown, barra de progreso).
 /// PreWaitRemaining != null → el cue aún está en su espera previa (pre_wait):
-/// la vista lo muestra en ámbar para que el operador sepa que "viene".</summary>
+/// la vista lo muestra en ámbar para que el operador sepa que "viene".
+/// MirrorAudio = true → cue de VÍDEO cuyo audio suena por el AudioEngine
+/// (espejo HAP o híbrido): el Mixer le pone VU real de stream.</summary>
 public sealed record ActiveCueInfo(
     int Id,
     string Number,
@@ -24,7 +26,8 @@ public sealed record ActiveCueInfo(
     double Elapsed,
     double? Remaining,
     double? Fraction,
-    double? PreWaitRemaining = null);
+    double? PreWaitRemaining = null,
+    bool MirrorAudio = false);
 
 public interface IShowView
 {

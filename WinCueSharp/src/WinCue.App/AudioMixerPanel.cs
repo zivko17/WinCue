@@ -10,9 +10,11 @@
 //                 auditado) + VU del PVW.
 //   · CUES      — un strip por cue ACTIVO: fader en vivo (misma ruta de commit
 //                 que el inspector → modelo + motor + undo) y VU real del
-//                 stream para cues de AUDIO. Los de VÍDEO no tienen VU por-cue
-//                 (mpv → dispositivo directo, el motor no ve las muestras): se
-//                 marca honesto "VU n/d" y su nivel se ve en el MASTER.
+//                 stream para cues de AUDIO y para cues de VÍDEO con AUDIO
+//                 ESPEJO (motor HAP propio o ruta híbrida: su audio pasa por
+//                 el AudioEngine y el controlador remapea su VU al cue). Solo
+//                 el vídeo SIN espejo (mpv → dispositivo directo, el motor no
+//                 ve las muestras) lleva el honesto "VU n/d" (nivel en MASTER).
 //
 // SINCRONÍA DE FADERS
 //   Los faders fijos (master/audición) emiten (valor, final): en vivo a cada
@@ -167,14 +169,22 @@ public sealed class AudioMixerPanel : ContentControl
             seen.Add(row.Id);
             if (_cueStrips.TryGetValue(row.Id, out var strip))
             {
-                strip.RefreshFromModel(resolveCue(row.Id));
+                // MirrorAudio no cambia en la vida del cue SALVO el fallback
+                // del espejo (audio recuperado por mpv): recrear el strip
+                // para que el VU y la nota reflejen la ruta real.
+                if (strip.MirrorAudio == row.MirrorAudio)
+                {
+                    strip.RefreshFromModel(resolveCue(row.Id));
+                    continue;
+                }
+                int at = _cueHost.Children.IndexOf(strip.Root);
+                _cueHost.Children.Remove(strip.Root);
+                _cueStrips.Remove(row.Id);
+                var recreated = MakeStrip(row, resolveCue);
+                _cueHost.Children.Insert(at, recreated.Root);
                 continue;
             }
-            var s = new CueStrip(row, resolveCue(row.Id),
-                (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
-                id => CueStripActivated?.Invoke(id));
-            _cueStrips[row.Id] = s;
-            _cueHost.Children.Add(s.Root);
+            _cueHost.Children.Add(MakeStrip(row, resolveCue).Root);
         }
         foreach (int id in _cueStrips.Keys.ToList())
         {
@@ -187,6 +197,15 @@ public sealed class AudioMixerPanel : ContentControl
     }
 
     // ── Interno ────────────────────────────────────────────────────────
+
+    private CueStrip MakeStrip(ActiveCueInfo row, Func<int, Cue?> resolveCue)
+    {
+        var s = new CueStrip(row, resolveCue(row.Id),
+            (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
+            id => CueStripActivated?.Invoke(id));
+        _cueStrips[row.Id] = s;
+        return s;
+    }
 
     private static void WireDebouncedFader(Strip strip, Action<int, bool> emit)
     {
@@ -332,29 +351,38 @@ public sealed class AudioMixerPanel : ContentControl
         }
     }
 
-    /// <summary>Strip de un cue activo. Audio → VU real del stream; Video →
-    /// sin VU por-cue (mpv directo al dispositivo): aviso honesto.</summary>
+    /// <summary>Strip de un cue activo. Audio → VU real del stream; Video con
+    /// AUDIO ESPEJO (motor HAP o híbrido: su audio pasa por el AudioEngine)
+    /// → también VU real (el controlador remapea el nivel del espejo al cue);
+    /// Video sin espejo → sin VU por-cue (mpv directo al dispositivo): aviso
+    /// honesto.</summary>
     private sealed class CueStrip : Strip
     {
         public readonly int CueId;
+
+        /// <summary>Con qué MirrorAudio se construyó el strip: si cambia en
+        /// vivo (fallback del espejo → audio por mpv), hay que recrearlo.</summary>
+        public readonly bool MirrorAudio;
 
         public CueStrip(ActiveCueInfo info, Cue? cue,
                         Action<int, double> commit, Action<int> activate)
         {
             CueId = info.Id;
+            MirrorAudio = info.MirrorAudio;
             bool isAudio = info.Type == CueType.Audio;
+            bool withVu = isAudio || info.MirrorAudio;
             string glyph = isAudio ? "♪" : "🎬";
             Init($"{glyph} {info.Number} · {info.Name}",
                  isAudio ? Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0x86, 0xde)))
                          : Frozen(new SolidColorBrush(Color.FromRgb(0xbe, 0x2e, 0xde))),
-                 withVu: isAudio);
+                 withVu: withVu);
             Root.ToolTip = $"{info.Number} · {info.Name}\n" + Loc.T(
                 "Clic en el título: editar en Inspector → 🔊 Audio",
                 "Click the title: edit in Inspector → 🔊 Audio");
             TitleText.Cursor = System.Windows.Input.Cursors.Hand;
             TitleText.MouseLeftButtonUp += (_, _) => activate(CueId);
 
-            if (!isAudio)
+            if (!withVu)
             {
                 Extras.Children.Add(new TextBlock
                 {

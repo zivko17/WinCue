@@ -95,14 +95,18 @@ public class HapRoutingTests : ControllerTestBase
     }
 
     [Fact]
-    public void VideoNoHap_NoTocaElAudioEspejo()
+    public void VideoNoHap_NoUsaElMotorHap()
     {
+        // Un vídeo normal jamás entra al motor HAP. (Con duración conocida sí
+        // arranca su espejo HÍBRIDO — cubierto en HybridAudioRoutingTests;
+        // aquí, duración 0 = desconocida → tampoco espejo: mpv con su audio.)
         Settings.Set("video_compositor", true);
-        var cue = AddCue(CueType.Video, "normal", duration: 5.0,
+        var cue = AddCue(CueType.Video, "normal", duration: 0.0,
             c => c.FilePath = Path.Combine(TempDir, "normal.mp4"));
         Controller.OnGoPressed();
 
         Assert.False(Video.Plays[0].P.UseHapEngine);
+        Assert.False(Video.Plays[0].P.ExternalAudio);
         Assert.Empty(Audio.Plays);
         Assert.DoesNotContain(Audio.Preloads, id => id <= MainController.VideoAudioBase);
         _ = cue;
