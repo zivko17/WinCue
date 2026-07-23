@@ -27,9 +27,10 @@
 //   · vídeo ATRASADO (d < −0,25 s) sostenido ≥ 2 ticks → hard-seek adelante
 //     (a 1.02× tardaría >12 s en recuperar 0,25 s; el salto adelante apenas
 //     se ve). El sostenimiento filtra lecturas espurias de time-pos.
-//   · GUARDA DE FRONTERA DE LOOP: |d| > min(1 s, duración/2) huele a cruce
-//     de pasada (vídeo o audio acaban de dar la vuelta y el otro aún no) →
-//     esperar 3 ticks antes de actuar; si persiste, corregir de verdad.
+//   · GUARDA DE FRONTERA DE LOOP (solo cues en loop): |d| > min(1 s,
+//     duración/2) huele a cruce de pasada (vídeo o audio acaban de dar la
+//     vuelta y el otro aún no) → esperar 3 ticks antes de actuar; si al
+//     tercero persiste, no era un cruce: corregir de verdad.
 //   · Tras un hard-seek, 2 ticks de reposo (cooldown): mpv tarda en asentar
 //     el seek y time-pos puede llegar rancia — corregir ahí oscilaría.
 // =============================================================================
@@ -63,8 +64,10 @@ public sealed class MpvSyncPll
 
     /// <summary>Un tick del PLL (~400 ms). videoPos/audioElapsed en segundos
     /// DE CONTENIDO (ya sin trim_start); null = desconocido/no suena.
-    /// durationSeconds = duración efectiva del cue (0 = desconocida).</summary>
-    public Decision Tick(double? videoPos, double? audioElapsed, double durationSeconds)
+    /// durationSeconds = duración efectiva del cue (0 = desconocida);
+    /// loop = el cue repite (activa la guarda de frontera de pasada).</summary>
+    public Decision Tick(double? videoPos, double? audioElapsed,
+        double durationSeconds, bool loop = false)
     {
         // Reposo tras un seek: dejar que mpv asiente antes de volver a medir
         if (_cooldown > 0)
@@ -96,7 +99,7 @@ public sealed class MpvSyncPll
         }
 
         // ── Drift grande: frenada, o hard-seek sostenido ─────────────────
-        bool loopSuspect = durationSeconds > 0.0
+        bool loopSuspect = loop && durationSeconds > 0.0
             && ad > Math.Min(1.0, durationSeconds / 2.0);
         bool brake = d > 0.0 && d < BrakeMaxSeconds;
         // La frenada no es un seek visible → actúa al primer tick; el seek

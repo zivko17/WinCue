@@ -1202,7 +1202,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 runner.CachedDuration = Math.Max(0.0, end - p.TrimStart);
             }
 
-            var d = runner.Pll.Tick(video, audio, runner.CachedDuration ?? 0.0);
+            var d = runner.Pll.Tick(video, audio, runner.CachedDuration ?? 0.0, p.Loop);
             if (d.HardSeekTo is double target)
             {
                 Trace($"pll: cue={cueId} HARD-SEEK → {target:F3}s " +
