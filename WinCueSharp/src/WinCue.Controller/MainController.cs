@@ -1548,8 +1548,20 @@ public class MainController
         }
         _lastHadRunning = true;
 
+        var rows = SnapshotActiveCues(out double? primaryRemaining);
+        _view.UpdateActiveCues(rows);
+        _view.UpdateCountdown(primaryRemaining);
+    }
+
+    /// <summary>Instantánea de los cues activos: EXACTAMENTE la misma información
+    /// que recibe la vista en UpdateActiveCues (elapsed/remaining/fracción por
+    /// cue) más el countdown primario. La consume el panel en vivo y también el
+    /// watchdog del soak (diagnóstico autónomo del motor HAP). Rellena de paso
+    /// la duración real de un media (0 → longitud natural del motor).</summary>
+    public IReadOnlyList<ActiveCueInfo> SnapshotActiveCues(out double? primaryRemaining)
+    {
         var rows = new List<ActiveCueInfo>();
-        double? primaryRemaining = null;
+        primaryRemaining = null;
         foreach (var run in _running.Values)
         {
             // Rellenar la duración real de un media (0 → longitud natural)
@@ -1608,8 +1620,7 @@ public class MainController
                 primaryRemaining = r;
         }
 
-        _view.UpdateActiveCues(rows);
-        _view.UpdateCountdown(primaryRemaining);
+        return rows;
     }
 
     // ==================================================================

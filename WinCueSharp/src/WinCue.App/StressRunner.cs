@@ -36,6 +36,7 @@ public sealed class StressRunner
     private readonly DispatcherTimer _drive;      // relanza la vuelta
     private readonly DispatcherTimer _sample;     // muestrea el CSV
     private readonly HashSet<int> _seenThisLoop = new();
+    private readonly HapWatchdog? _watch;         // WINCUE_STRESS_WATCH=1
 
     private int _loops;
     private int _cuesFired;
@@ -46,6 +47,12 @@ public sealed class StressRunner
         _controller = controller;
         _model = model;
         _maxLoops = maxLoops;
+
+        // Watchdog de salud HAP (diagnóstico autónomo del soak): consulta la
+        // duración DECLARADA de cada cue en el show para detectar cuentas
+        // negativas y cues colgados sin tocar el motor.
+        if (Environment.GetEnvironmentVariable("WINCUE_STRESS_WATCH") == "1")
+            _watch = new HapWatchdog(id => model.GetById(id)?.Duration ?? 0.0);
 
         string? env = Environment.GetEnvironmentVariable("WINCUE_STRESS_CSV");
         _csvPath = env is { Length: > 0 }
@@ -76,6 +83,9 @@ public sealed class StressRunner
     /// 3 s sin nada sonando, cierra la vuelta y relanza (o termina).</summary>
     private void DriveTick()
     {
+        // Vigía de salud (mismo tick): revisa la instantánea que ve la vista.
+        _watch?.Tick(_controller.SnapshotActiveCues(out _), _loops);
+
         var running = _controller.RunningCueIds;
         if (running.Count > 0)
         {
@@ -92,9 +102,16 @@ public sealed class StressRunner
 
         _loops++;
         _seenThisLoop.Clear();
+        // Cierre de vuelta: registrar memoria para el análisis de fuga (d).
+        if (_watch is not null)
+        {
+            _proc.Refresh();
+            _watch.OnLoopClosed(_loops, _proc.WorkingSet64 / 1048576.0, _proc.HandleCount);
+        }
         if (_maxLoops > 0 && _loops >= _maxLoops)
         {
             WriteSample();                        // última foto antes de salir
+            _watch?.Summarize();                  // resumen a stdout + log
             _drive.Stop();
             _sample.Stop();
             Application.Current.Shutdown(0);
