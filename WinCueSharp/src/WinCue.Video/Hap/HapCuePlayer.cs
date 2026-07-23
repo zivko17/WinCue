@@ -269,6 +269,14 @@ internal sealed class HapCuePlayer : IDisposable
                 long logical = (long)s.Pass * _segmentFrames + step.FrameIndex;
                 if (!_source.TryGet(logical, out byte[] dxt))
                 {
+                    // COSTURA DE LOOP / RESYNC HACIA DELANTE: si el presentador
+                    // saltó más allá del ring (el reloj envolvió por tiempo y el
+                    // pacer pide WrapMargin·fps > 4 frames dentro de la pasada
+                    // nueva), el decoder secuencial no alcanzaría este lógico sin
+                    // liberar antes los saltados → se adelanta el consumo para
+                    // desatascarlo (antes: decoder y presentador se esperaban y
+                    // el guardián abandonaba el loop tras una sola pasada).
+                    _source.SkipTo(logical);
                     // El decoder va tarde: reintentar sin confirmar el frame.
                     // Si se eterniza (>1 s) es E/S rota: no bloquear el hilo.
                     if (++lateSpins > 1000)

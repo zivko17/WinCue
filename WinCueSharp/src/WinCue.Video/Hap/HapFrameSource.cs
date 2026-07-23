@@ -89,6 +89,31 @@ internal sealed class HapFrameSource : IDisposable
         }
     }
 
+    /// <summary>El presentador SALTÓ hacia delante a un lógico que el
+    /// decodificador secuencial no alcanzaría sin liberar antes los frames que
+    /// se saltó (queda FUERA del ring por delante del último consumido).
+    /// Ocurre en la COSTURA DE LOOP por envolvido por tiempo (vídeo sin audio
+    /// maestro: el reloj cae en local≈WrapMargin → el pacer pide el frame
+    /// WrapMargin·fps, que a 30/60 fps supera el ring de 4) y en un resync del
+    /// reloj hacia delante. Sin esto, decodificador y presentador se esperaban
+    /// mutuamente (el decoder bloqueado esperando que se consuman los frames
+    /// saltados; el presentador esperando el frame de destino) y el guardián de
+    /// >1 s ABANDONABA el loop tras una sola pasada. Adelantar el consumo
+    /// desbloquea al decoder para que produzca hasta el frame pedido.</summary>
+    public void SkipTo(long logicalIndex)
+    {
+        lock (_gate)
+        {
+            // Solo si el destino queda fuera del ring por delante: en catch-up
+            // normal (dentro del ring) el decoder llega solo y no se toca.
+            if (logicalIndex - _consumed > RingSize)
+            {
+                _consumed = logicalIndex - 1;
+                Monitor.PulseAll(_gate);
+            }
+        }
+    }
+
     private void DecodeLoop()
     {
         try

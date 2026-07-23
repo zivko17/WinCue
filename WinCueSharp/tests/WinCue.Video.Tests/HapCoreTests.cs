@@ -157,6 +157,42 @@ public class HapCoreTests : IClassFixture<HapMediaFixture>
     }
 
     [Fact]
+    public void FrameSource_CosturaDeLoopMasAllaDelRing_SkipToDesatasca()
+    {
+        // Regresión del cuelgue de loop del soak HAP (julio 2026): un cue HAP
+        // en LOOP SIN audio maestro envuelve por TIEMPO — el reloj cae en
+        // local≈WrapMargin y el pacer pide el frame WrapMargin·fps de la pasada
+        // nueva (7 a 30 fps, 15 a 60), SALTÁNDOSE los primeros. Como el salto
+        // supera el ring (4), el decodificador secuencial jamás alcanzaba ese
+        // lógico (bloqueado esperando que se consumieran los saltados) y el
+        // presentador lo esperaba: atasco mutuo → el guardián de >1 s ABANDONABA
+        // el loop tras una sola pasada. SkipTo adelanta el consumo y lo desatasca.
+        if (!_media.FFmpegOk) return;
+        var info = MovDemuxer.Open(_media.Hap1);    // 30 frames, 1 s
+        const int seg = 30;
+        using var source = new HapFrameSource(_media.Hap1, info,
+            HapTextureFormat.RgbDxt1, 0, seg, totalLogical: -1);   // loop infinito
+
+        // Pasada 0 completa (lógicos 0..29 consumidos).
+        for (long l = 0; l < seg; l++)
+        {
+            Assert.True(WaitFor(() => source.TryGet(l, out _), 5000),
+                $"el frame lógico {l} no llegó a decodificarse");
+            source.Consume(l);
+        }
+
+        // Costura por tiempo: el pacer pide el frame 7 de la pasada 1 (lógico
+        // 37), saltándose 30..36 (7 > ring 4). El decoder no lo alcanza solo:
+        long seam = seg + 7;
+        Assert.False(source.TryGet(seam, out _));   // fuera del alcance del decoder
+
+        source.SkipTo(seam);                        // lo que hace el presentador
+        Assert.True(WaitFor(() => source.TryGet(seam, out _), 5000),
+            "el frame de la costura no llegó: el decodificador se quedó atascado");
+        Assert.Null(source.Error);
+    }
+
+    [Fact]
     public void FramePacer_AvanceNormalYDrops()
     {
         var pacer = new FramePacer(30.0, 30);

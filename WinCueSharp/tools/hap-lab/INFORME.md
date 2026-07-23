@@ -395,3 +395,63 @@ compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
 - Futuro: precarga en pausa real para HAP (primer frame ya subido), P/Invoke
   para quitar Vortice si se quiere, y quizá mover también los códecs
   «normales» al motor propio (fase «motor de vídeo» completa).
+
+## Endurecimiento (soak del motor HAP, Fase 0)
+
+Métrica de Fase 0: **«un show HAP encadenado corre sin cuenta negativa ni
+cuelgue»**. Se sometió el motor a estrés real hasta soltar los bugs que le
+quedaban, en esta máquina (GPU + ffmpeg en PATH).
+
+**Infraestructura del soak** (repetible con `scripts\soak-hap.ps1`):
+
+- Media de tortura variada (`tests\hap-test\generar-tortura.ps1`, `.mov`
+  gitignoreados): 1080p/4K/720p, 30 y 60 fps, HAP y HAP Q, CON y SIN pista de
+  audio, y una con `pcm_s16le` a 96 kHz (audio grande → arranque tardío del
+  espejo).
+- Show encadenado `tests\stress\estres-hap.json`: cadena AUTO_CONTINUE de cues
+  HAP con solapes (crossfade en misma pista), cues con y sin audio
+  intercalados, cambios de resolución 1080→4K→720→1080, 30/60 fps,
+  `trim_start`/`trim_end`, un LOOP parado por STOP y barrido final.
+- Watchdog de salud (`HapWatchdog`, activable con `WINCUE_STRESS_WATCH=1`;
+  integrado en `StressRunner` sobre `MainController.SnapshotActiveCues` — la
+  MISMA info que ve la vista): registra a gritos en `logs\stress-watch-*.log`
+  (a) remaining negativo, (b) cue colgado, (c) cadena estancada, (d) fuga de
+  working set/handles vuelta a vuelta; cuenta anomalías y resume en stdout al
+  cerrar. Soak autodiagnóstico.
+
+**Bug encontrado y arreglado — cuelgue de LOOP en la costura por tiempo.** El
+soak (30 vueltas) sacó un `hap presentación: decoder >1 s tarde, abandono`
+**una vez por vuelta**, siempre en el cue en LOOP SIN audio maestro y justo tras
+`pasada 0→1`. Causa raíz: al envolver la pasada por TIEMPO (vídeo sin reloj de
+audio, o audio congelado) el `HapMediaClock` cae en `local≈WrapMargin` (0,25 s),
+así que el `FramePacer` pide el frame `WrapMargin·fps` de la pasada nueva (7 a
+30 fps, 15 a 60) **saltándose** los primeros. Como el salto supera el ring de 4
+del `HapFrameSource` (decodificador SECUENCIAL, gateado por consumo), el frame
+de destino quedaba fuera de alcance: el decoder se bloqueaba esperando que se
+consumieran los saltados y el presentador esperaba el frame de destino → atasco
+mutuo → el guardián de >1 s abandonaba el loop **tras una sola pasada** (el loop
+se congelaba). Fix: `HapFrameSource.SkipTo` adelanta el consumo cuando el
+presentador salta fuera del ring (costura de loop o resync hacia delante),
+desatascando al decoder. Regresión:
+`HapCoreTests.FrameSource_CosturaDeLoopMasAllaDelRing_SkipToDesatasca`.
+
+**Falso positivo calibrado — detector de fuga del watchdog.** El working set del
+motor RAMPA de forma monótona durante el arranque (pipelines del pool por spec,
+decode a RAM del audio espejo, JIT) y no llega a régimen hasta ~10 vueltas; con
+un warmup de 2 la ventana de fuga caía dentro de la rampa y gritaba fuga falsa.
+Subido a 12 vueltas de warmup (evidencia: a partir de la vuelta ~10 el working
+set oscila en sierra por el decode 4K, sin tendencia). Regresión:
+`HapWatchdogTests.RampaDeArranque_LuegoRegimen_NoEsFuga`.
+
+**Evidencia del soak final (22 vueltas, ~10 min, `artifacts\soak-hap`):**
+
+- Watchdog **SOAK LIMPIO**: 0 remaining negativos, 0 cues colgados, 0 cadenas
+  estancadas, 0 fugas candidatas.
+- Motor: **44 envolvidos de loop, 0 abandonos** (antes: 1 abandono/vuelta).
+- Memoria estable vuelta a vuelta: working set en sierra acotada (~460–2050 MB,
+  transitorio del decode 4K) sin tendencia; managed 40–200 MB; handles
+  2031→2131; GC gen2 lineal (~1/vuelta). No hay fuga: el audio espejo (decode a
+  RAM) se libera al terminar el cue (`InvalidateCache`/`HapAudioId`), el pool de
+  pipelines HAP es acotado por spec (tamaño de canvas fijo, no por resolución).
+- Los tests de `HapMediaClock` (cuenta negativa por audio espejo atrasado, ya
+  arreglado antes) siguen verdes: no aparecieron primos hermanos por ese lado.
