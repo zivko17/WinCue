@@ -1,0 +1,35 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- =========================================================================
+       HapLab — laboratorio del futuro motor de vídeo propio (PASO 1).
+       Demuxer MOV + parser/descompresor de frames HAP, sin FFmpeg.
+       Proyecto paralelo: NO forma parte de la solución principal WinCueSharp.
+       ========================================================================= -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>hap-lab</AssemblyName>
+    <RootNamespace>HapLab</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- El proyecto de tests vive en subcarpeta: fuera del glob por defecto -->
+    <Compile Remove="HapLab.Tests/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Descompresión Snappy (MIT) -->
+    <PackageReference Include="Snappier" Version="1.3.1" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Los tests ejercitan también helpers internos (ReadSectionHeader) -->
+    <InternalsVisibleTo Include="HapLab.Tests" />
+  </ItemGroup>
+
+</Project>
