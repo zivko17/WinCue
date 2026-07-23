@@ -104,6 +104,10 @@ public partial class App : Application
         // VU de PROGRAMA por loopback WASAPI: mide lo que sale del dispositivo
         // (audio + vídeo + todo). Con ASIO no hay loopback → VU de mixer.
         _audio.StartProgramMeter();
+        // VU de AUDICIÓN por loopback (solo si su dispositivo ≠ principal)
+        _audio.SetAuditionMeterDevice(settings.Get("audition_device_name", ""));
+        _audio.AuditionLevelReport += (l, r) => window.UpdateAuditionVu(l, r);
+        window.SetAuditionVuLoopback(_audio.AuditionMeterActive);
 
         _video = new VideoEngine(() => 0, dispatch);   // el controlador fija el provider
 
@@ -136,6 +140,9 @@ public partial class App : Application
                     .FirstOrDefault(d => d.Name == devName)?.Id;
             _audio.SetDevice(deviceId, driver,
                 asioDriverName: driver == "asio" ? devName : null);
+            // El medidor de audición sigue al dispositivo de audición nuevo
+            _audio.SetAuditionMeterDevice(settings.Get("audition_device_name", ""));
+            window.SetAuditionVuLoopback(_audio.AuditionMeterActive);
             _controller.OnMasterVolume(settings.Get("master_volume", 100));
             _remote.Apply();          // OSC/MIDI IN en caliente
             ApplyCompositorMode();    // modo compositor en caliente

@@ -52,6 +52,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// <summary>RMS estéreo (L, R) de UN cue concreto (inspector/audición).</summary>
     public event Action<int, float, float>? CueLevelReport;
 
+    /// <summary>RMS estéreo del dispositivo de AUDICIÓN por loopback. Solo
+    /// emite con el medidor de audición activo (dispositivo propio).</summary>
+    public event Action<float, float>? AuditionLevelReport;
+
     // ------------------------------------------------------------------
     // Estado interno
     // ------------------------------------------------------------------
@@ -82,7 +86,12 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private LoopbackProgramMeter? _loopback;
     private bool _loopbackWanted;
 
-    private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer);
+    // VU de audición por loopback (solo si su dispositivo ≠ salida principal)
+    private LoopbackProgramMeter? _auditionLoopback;
+    private string _auditionMeterDevice = "";   // FriendlyName; "" = sin medidor
+
+    private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer,
+                                    LimiterSampleProvider Limiter);
     private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput, string Bus);
 
     // ------------------------------------------------------------------
@@ -121,6 +130,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _driver = driver;
         _asioDriverName = asioDriverName;
         RestartProgramMeter();   // el loopback debe seguir al dispositivo nuevo
+        RestartAuditionMeter();  // y re-evaluar si audición == principal
     }
 
     /// <summary>Activa el VU de programa por loopback WASAPI: mide lo que
@@ -132,6 +142,51 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     {
         _loopbackWanted = true;
         RestartProgramMeter();
+    }
+
+    /// <summary>Configura el VU de audición por loopback. deviceName es el
+    /// FriendlyName de settings (audition_device_name). Solo mide si ese
+    /// dispositivo existe Y no es el mismo que la salida principal (en ese
+    /// caso el VU de programa ya lo cubre y la vista usa el VU de stream).</summary>
+    public void SetAuditionMeterDevice(string deviceName)
+    {
+        _auditionMeterDevice = deviceName;
+        RestartAuditionMeter();
+    }
+
+    /// <summary>true si el VU del PVW se alimenta del loopback de audición
+    /// (la vista debe ignorar entonces el VU de stream de la audición).</summary>
+    public bool AuditionMeterActive => _auditionLoopback is not null;
+
+    private void RestartAuditionMeter()
+    {
+        _auditionLoopback?.Dispose();
+        _auditionLoopback = null;
+        if (_auditionMeterDevice.Length == 0)
+            return;
+
+        var devices = ListDevices();
+        string? id = devices.FirstOrDefault(d => d.Name == _auditionMeterDevice)?.Id;
+        if (id is null)
+            return;   // dispositivo no presente ahora mismo → sin medidor
+
+        // Mismo dispositivo que la salida principal → el PGM ya lo mide y el
+        // PVW usa el VU de stream (con ASIO la principal no es WASAPI: no choca)
+        bool asioActive = _driver.Equals("asio", StringComparison.OrdinalIgnoreCase) &&
+                          ListAsioDrivers().Count > 0;
+        if (!asioActive)
+        {
+            string mainId = _deviceId is { Length: > 0 }
+                ? _deviceId
+                : devices.FirstOrDefault(d => d.IsDefault)?.Id ?? "";
+            if (id == mainId)
+                return;
+        }
+
+        var meter = new LoopbackProgramMeter(id, fallbackToDefault: false);
+        meter.LevelReport += (l, r) => Post(() => AuditionLevelReport?.Invoke(l, r));
+        meter.Start();
+        _auditionLoopback = meter;
     }
 
     private void RestartProgramMeter()
@@ -360,6 +415,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public float GetGainReductionDb(int cueId) =>
         _active.TryGetValue(cueId, out var a) ? a.Provider.GetGainReductionDb() : 0f;
 
+    /// <summary>Reducción de ganancia del LIMITADOR del bus principal (dB ≥ 0)
+    /// para el medidor GR del strip master. 0 si la salida aún no se abrió.</summary>
+    public float GetMasterGainReductionDb() =>
+        _outputs.TryGetValue("", out var bus) ? bus.Limiter.GainReductionDb : 0f;
+
     /// <summary>Duración del audio en s (de la sesión activa —con trim— o del buffer).</summary>
     public double GetDuration(int cueId)
     {
@@ -384,6 +444,9 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _loopbackWanted = false;
         _loopback?.Dispose();
         _loopback = null;
+        _auditionMeterDevice = "";
+        _auditionLoopback?.Dispose();
+        _auditionLoopback = null;
     }
 
     public void Dispose()
@@ -531,14 +594,18 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             };
             mixer.MixerInputEnded += OnMixerInputEnded;
 
+            // Limitador brickwall al final del bus: la suma de N cues no
+            // puede saturar el dispositivo (techo −1 dBFS, release 150 ms)
+            var limiter = new LimiterSampleProvider(mixer);
+
             // CA2000: la propiedad pasa a _outputs; el catch libera en toda
             // ruta de error — el analizador no reconoce el patrón.
 #pragma warning disable CA2000
             player = CreateOutput(bus);
 #pragma warning restore CA2000
-            player.Init(mixer);
+            player.Init(limiter);
             player.Play();
-            _outputs[bus] = new OutputBus(player, mixer);
+            _outputs[bus] = new OutputBus(player, mixer, limiter);
             return mixer;
         }
         catch (Exception exc)

@@ -47,6 +47,7 @@ public class SettingsManager
         ["master_volume"]      = 100,        // 0–100
         ["pre_roll_ms"]        = 0,          // (legado Python; sin efecto en C#)
         ["audition_device_name"] = "",       // salida de la audición local ("" = ppal)
+        ["audition_volume"]    = 100,        // trim del fader de audición (0–100)
 
         // ── Vídeo ────────────────────────────────────────────────────
         ["video_output_screen"]     = 0,     // índice de pantalla (0 = principal)

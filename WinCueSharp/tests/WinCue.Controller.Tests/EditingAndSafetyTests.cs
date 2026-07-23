@@ -511,6 +511,27 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void AuditionFader_TrimsCueVolume_AtStartAndLive()
+    {
+        Settings.Set("audition_volume", 50);
+        AddCue(CueType.Audio, "tema", setup: c => c.Volume = 0.8);
+
+        // Arranque: volumen efectivo = cue × trim
+        Controller.AuditionToggle(0);
+        Assert.Equal(0.8 * 0.5, Assert.Single(Audio.Plays).P.Volume, 3);
+
+        // Fader en vivo con persistencia (commit final del panel)
+        Controller.OnAuditionVolume(25);
+        Assert.Equal(0.8 * 0.25, Audio.Volumes[MainController.AuditionCueId], 3);
+        Assert.Equal(25, Settings.Get("audition_volume", 100));
+
+        // Arrastre (persist=false): aplica al motor sin tocar settings
+        Controller.OnAuditionVolume(10, persist: false);
+        Assert.Equal(0.8 * 0.10, Audio.Volumes[MainController.AuditionCueId], 3);
+        Assert.Equal(25, Settings.Get("audition_volume", 100));
+    }
+
+    [Fact]
     public void FadeAll_UsesConfiguredSeconds()
     {
         Settings.Set("fade_all_seconds", 3.0);

@@ -143,6 +143,14 @@ public interface IAudioEngine
     /// <summary>Reducción de ganancia actual del compresor del cue (dB ≥ 0)
     /// para el medidor GR. Por defecto: 0 (motores falsos).</summary>
     float GetGainReductionDb(int cueId) => 0f;
+
+    /// <summary>Reducción de ganancia del LIMITADOR del bus master (dB ≥ 0)
+    /// para el medidor GR del panel Audio. Por defecto: 0 (motores falsos).</summary>
+    float GetMasterGainReductionDb() => 0f;
+
+    /// <summary>RMS estéreo del dispositivo de AUDICIÓN por loopback (VU del
+    /// PVW/panel Audio). Solo emite con medidor de audición activo.</summary>
+    event Action<float, float>? AuditionLevelReport;
 }
 
 /// <summary>Superficie de una pista del COMPOSITOR GPU: recibe la render

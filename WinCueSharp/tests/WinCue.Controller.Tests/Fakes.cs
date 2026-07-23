@@ -71,6 +71,10 @@ public sealed class FakeAudioEngine : IAudioEngine
     public event Action<int, string>? ErrorOccurred;
     public event Action<float, float>? LevelReport;
     public event Action<int, float, float>? CueLevelReport;
+    public event Action<float, float>? AuditionLevelReport;
+
+    /// <summary>Emite niveles de audición como haría el loopback real.</summary>
+    public void EmitAuditionLevel(float l, float r) => AuditionLevelReport?.Invoke(l, r);
 
     public readonly List<(int CueId, string Path, AudioPlayParams P)> Plays = new();
     public readonly List<(int CueId, double Fade)> Stops = new();

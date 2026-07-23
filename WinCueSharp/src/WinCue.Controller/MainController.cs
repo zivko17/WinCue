@@ -290,10 +290,30 @@ public class MainController
         }
         _auditionSourceCueId = cue.Id;
         _audio.Play(AuditionCueId, cue.FilePath, new AudioPlayParams(
-            Volume: cue.Volume, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
+            Volume: cue.Volume * AuditionTrim, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
             OutputDevice: _settings.Get("audition_device_name", ""),
             Eq: EqFor(cue)));
         _view.FlashStatus(Loc.T($"🎧 Audición: {cue.Name}", $"🎧 Audition: {cue.Name}"));
+    }
+
+    /// <summary>Trim del fader de audición (0..1) del panel Audio: se aplica
+    /// SOBRE el volumen del cue auditado (efectivo = cue × trim).</summary>
+    private double AuditionTrim =>
+        Math.Clamp(_settings.Get("audition_volume", 100) / 100.0, 0.0, 1.0);
+
+    /// <summary>Fader de audición del panel Audio (0-100). Se aplica EN VIVO
+    /// si hay una audición sonando; persist=true además guarda en settings
+    /// (el panel lo pide con debounce al final del arrastre).</summary>
+    public void OnAuditionVolume(int value, bool persist = true)
+    {
+        value = Math.Clamp(value, 0, 100);
+        if (persist)
+            _settings.Set("audition_volume", value);
+        if (!_audio.IsPlaying(AuditionCueId))
+            return;
+        int row = _model.IndexOfId(_auditionSourceCueId);
+        double cueVol = _model.GetCue(row)?.Volume ?? 1.0;
+        _audio.SetVolume(AuditionCueId, cueVol * value / 100.0);
     }
 
     /// <summary>Cadena de EQ del cue para el motor (ganancia + filtros).</summary>
@@ -332,6 +352,10 @@ public class MainController
             gr = _audio.GetGainReductionDb(AuditionCueId);
         return gr;
     }
+
+    /// <summary>Reducción de ganancia del limitador del bus master (dB ≥ 0)
+    /// para el medidor GR del panel Audio.</summary>
+    public float GetMasterGainReduction() => _audio.GetMasterGainReductionDb();
 
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
     public void StopCueById(int cueId)
@@ -1659,6 +1683,13 @@ public class MainController
                 _audio.SetEq(cue.Id, EqFor(cue));
             if (cue.Id == _auditionSourceCueId && _audio.IsPlaying(AuditionCueId))
                 _audio.SetEq(AuditionCueId, EqFor(cue));
+        }
+
+        // El volumen también sigue a la AUDICIÓN (no vive en _running)
+        if (fields.ContainsKey("volume") &&
+            cue.Id == _auditionSourceCueId && _audio.IsPlaying(AuditionCueId))
+        {
+            _audio.SetVolume(AuditionCueId, cue.Volume * AuditionTrim);
         }
 
         if (!_running.ContainsKey(cue.Id))

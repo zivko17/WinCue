@@ -93,6 +93,27 @@ public partial class MainWindow : Window, IShowView
         Inspector.SpectrumProvider = cueId => _controller.GetAudioSpectrum(cueId);
         Inspector.GainReductionProvider = cueId => _controller.GetAudioGainReduction(cueId);
 
+        // Panel AUDIO (mesa): faders master/audición/cues + VU + GR limitador
+        Mixer.MasterGainReductionProvider = () => _controller.GetMasterGainReduction();
+        Mixer.MasterVolumeChanged = (v, final) =>
+        {
+            _controller.OnMasterVolume(v);          // en vivo a cada cambio
+            if (final)
+                _settings.Set("master_volume", v);  // persistir con debounce
+        };
+        Mixer.AuditionVolumeChanged = (v, final) =>
+            _controller.OnAuditionVolume(v, persist: final);
+        Mixer.CueVolumeCommitted = (cueId, vol) =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                _controller.OnCueEditCommitted(row,
+                    new Dictionary<string, object?> { ["volume"] = vol });
+        };
+        Mixer.SetMasterFader(_settings.Get("master_volume", 100));
+        Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
+        UpdateMixerDeviceInfo();
+
         // Timeline del show, estilo Watchout (siempre presente, plegable)
         Timeline.SetModel(_model);
         Timeline.CommitField = (cueId, key, value) =>
@@ -473,6 +494,13 @@ public partial class MainWindow : Window, IShowView
 
         // Cursor y progreso del timeline (posición real de los motores)
         Timeline.SetActive(rows);
+
+        // Strips del panel Audio (misma cadencia; reconcilia sin recrear)
+        Mixer.SyncActive(rows, cueId =>
+        {
+            int r = _model.IndexOfId(cueId);
+            return r >= 0 ? _model.GetCue(r) : null;
+        });
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
@@ -503,18 +531,52 @@ public partial class MainWindow : Window, IShowView
     {
         _pgmVuL.SetLevel(left);
         _pgmVuR.SetLevel(right);
+        Mixer.SetMasterLevel(left, right);
     }
 
     public void UpdateCueVuMeter(int cueId, float left, float right)
     {
         if (cueId == MainController.AuditionCueId)
         {
-            // La audición local es el "preview" de audio → VU del PVW
+            // La audición local es el "preview" de audio → VU del PVW.
+            // Con el loopback de audición activo, ese VU lo alimenta el
+            // DISPOSITIVO (UpdateAuditionVu): ignorar el VU de stream.
+            if (_auditionVuFromLoopback)
+                return;
             _pvwVuL.SetLevel(left);
             _pvwVuR.SetLevel(right);
+            Mixer.SetAuditionLevel(left, right);
             return;
         }
         Inspector.UpdateCueLevel(cueId, Math.Max(left, right));
+        Mixer.UpdateCueLevel(cueId, left, right);
+    }
+
+    // ── VU de audición por loopback (dispositivo de audición propio) ───
+
+    private bool _auditionVuFromLoopback;
+
+    /// <summary>true → el VU del PVW/panel lo alimenta el loopback del
+    /// dispositivo de audición (UpdateAuditionVu) y no el stream.</summary>
+    public void SetAuditionVuLoopback(bool active) => _auditionVuFromLoopback = active;
+
+    /// <summary>RMS del dispositivo de AUDICIÓN (loopback). Lo cablea App.</summary>
+    public void UpdateAuditionVu(float left, float right)
+    {
+        _pvwVuL.SetLevel(left);
+        _pvwVuR.SetLevel(right);
+        Mixer.SetAuditionLevel(left, right);
+    }
+
+    /// <summary>Línea de dispositivo/driver del strip MASTER del panel Audio.</summary>
+    private void UpdateMixerDeviceInfo()
+    {
+        string driver = _settings.Get("audio_driver", "wasapi").ToUpperInvariant();
+        string dev = _settings.Get("audio_device_name", "");
+        if (dev.Length == 0)
+            dev = Loc.T("Dispositivo por defecto", "Default device");
+        int sr = _settings.Get("audio_sample_rate", 48000);
+        Mixer.SetDeviceInfo($"{driver} · {dev} · {sr / 1000.0:0.#} kHz");
     }
 
     public nint GetVideoOutputHandle()
@@ -1081,6 +1143,10 @@ public partial class MainWindow : Window, IShowView
             ApplyViewSettings();
             _controller.OnMasterVolume(_settings.Get("master_volume", 100));
             _applyEngineSettings?.Invoke();
+            // Reflejar en el panel Audio lo guardado en settings
+            Mixer.SetMasterFader(_settings.Get("master_volume", 100));
+            Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
+            UpdateMixerDeviceInfo();
             for (int s = 0; s < _videoOutputs.Length; s++)
                 if (_videoOutputs[s] is { IsVisible: true })
                     PlaceVideoOutput(s);   // recolocar en la pantalla elegida

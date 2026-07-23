@@ -32,6 +32,7 @@ public sealed class LoopbackProgramMeter : IDisposable
     public event Action<float, float>? LevelReport;
 
     private readonly string? _deviceId;   // null/vacío = render por defecto
+    private readonly bool _fallbackToDefault;
     private readonly object _gate = new();
 
     private WasapiLoopbackCapture? _capture;
@@ -47,7 +48,16 @@ public sealed class LoopbackProgramMeter : IDisposable
     private double _sumL, _sumR;
     private int _frames;
 
-    public LoopbackProgramMeter(string? deviceId = null) => _deviceId = deviceId;
+    /// <param name="fallbackToDefault">true (medidor de programa): si el id no
+    /// existe se mide el render por defecto — igual que hace la salida del
+    /// engine. false (medidor de audición): sin ese dispositivo NO se mide
+    /// nada (medir otro dispositivo sería mentir); se reintenta hasta que
+    /// aparezca.</param>
+    public LoopbackProgramMeter(string? deviceId = null, bool fallbackToDefault = true)
+    {
+        _deviceId = deviceId;
+        _fallbackToDefault = fallbackToDefault;
+    }
 
     /// <summary>Abre la captura loopback. Si falla (sin dispositivo, formato
     /// raro…) programa reintentos cada 2 s: el medidor se recupera solo al
@@ -109,7 +119,14 @@ public sealed class LoopbackProgramMeter : IDisposable
                 // El MMDevice queda referenciado por el capture: no se libera aquí
                 return new WasapiLoopbackCapture(enumerator.GetDevice(id));
             }
-            catch (Exception) { /* id obsoleto → dispositivo por defecto */ }
+            catch (Exception) when (_fallbackToDefault)
+            {
+                /* id obsoleto → dispositivo por defecto */
+            }
+        }
+        else if (!_fallbackToDefault)
+        {
+            throw new InvalidOperationException("Medidor sin dispositivo asignado.");
         }
         return new WasapiLoopbackCapture();
     }
