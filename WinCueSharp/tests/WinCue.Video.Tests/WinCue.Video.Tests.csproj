@@ -22,6 +22,9 @@
 
   <ItemGroup>
     <ProjectReference Include="..\..\src\WinCue.Video\WinCue.Video.csproj" />
+    <!-- Integración de la conversión a HAP in-app: el runner real vive en el
+         controlador y el resultado se verifica con el MovDemuxer del motor -->
+    <ProjectReference Include="..\..\src\WinCue.Controller\WinCue.Controller.csproj" />
   </ItemGroup>
 
 </Project>

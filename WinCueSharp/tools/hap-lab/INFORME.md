@@ -356,6 +356,12 @@ compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
   real vía FFmpeg (la ruta que usa el espejo).
 - Smoke `--smoke`: exit 0.
 
+- **Conversión a HAP in-app disponible** (paso 3/4): menú contextual de la
+  tabla («Convertir a HAP» por cue y «Convertir todos los vídeos a HAP»), cola
+  secuencial sin bloquear la UI con progreso real (`HapConvertService` +
+  receta única `MediaImporter.HapConversionArgs` con `-chunks 4`); al terminar,
+  el cue pasa a `<nombre>.hap.mov` y el siguiente GO enruta por el motor propio.
+
 ## Límites conocidos / paso 4
 
 - El motor propio NO cubre: modo canvas (multi-salida de un render), rate ≠ 1,
