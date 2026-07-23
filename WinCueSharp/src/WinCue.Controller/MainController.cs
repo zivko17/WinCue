@@ -109,7 +109,8 @@ public class MainController
         IVideoEngine video,
         IScheduler scheduler,
         SettingsManager settings,
-        Random? random = null)
+        Random? random = null,
+        IHapConversionRunner? hapRunner = null)
     {
         _model = model;
         _view = view;
@@ -190,6 +191,13 @@ public class MainController
             triggerAt: idx => Trigger(idx, advanceChain: false),
             stopCue: cueId => EndCue(cueId, markStopped: true),
             isRunning: _running.ContainsKey);
+
+        // Conversión de vídeos a HAP desde la app (alimenta el motor propio):
+        // cola secuencial, sin bloquear la UI, con progreso por FlashStatus.
+        _hapConvert = new HapConvertService(
+            hapRunner ?? new FfmpegHapConversionRunner(), scheduler,
+            onProgress: OnHapConvertProgress,
+            onCompleted: OnHapConvertCompleted);
 
         SetPlayhead(0);
     }
@@ -301,6 +309,134 @@ public class MainController
         && _settings.Get("video_compositor", false)
         && !CanvasMode
         && cue.GeoMode != GeoMode.Custom;
+
+    // ------------------------------------------------------------------
+    // Conversión a HAP desde la app (preparación de show, no de directo)
+    // ------------------------------------------------------------------
+
+    private readonly HapConvertService _hapConvert;
+    private int _lastHapConvertPct = -1;   // anti-spam del FlashStatus de progreso
+
+    /// <summary>true si el archivo del cue es un vídeo convertible a HAP:
+    /// existe, no es imagen y no es ya HAP. Lo usa el menú contextual de la
+    /// tabla para decidir visibilidad (el sondeo de códec va cacheado).</summary>
+    public static bool IsHapConvertible(Cue cue) =>
+        cue.Type == CueType.Video && cue.FilePath.Length > 0
+        && File.Exists(cue.FilePath)
+        && !MediaImporter.ImageFormats.Contains(Path.GetExtension(cue.FilePath))
+        && !MediaImporter.IsUnsupportedVideoCodec(cue.FilePath);
+
+    /// <summary>Encola la conversión a HAP del cue de la fila (menú contextual
+    /// de la tabla). El cue sigue reproducible por su archivo original hasta
+    /// que la conversión termine y se commitee la ruta nueva.</summary>
+    public void ConvertCueToHap(int row)
+    {
+        var cue = _model.GetCue(row);
+        if (cue is null || !IsHapConvertible(cue))
+        {
+            _view.FlashStatus(Loc.T(
+                "Convertir a HAP: selecciona un cue de VÍDEO cuyo archivo no sea ya HAP",
+                "Convert to HAP: select a VIDEO cue whose file is not already HAP"));
+            return;
+        }
+        if (!_hapConvert.Enqueue(cue.Id, cue.FilePath))
+        {
+            _view.FlashStatus(Loc.T(
+                $"«{cue.Name}» ya está en la cola de conversión a HAP",
+                $"«{cue.Name}» is already in the HAP conversion queue"));
+            return;
+        }
+        Log($"Conversión a HAP encolada: {cue.Name} ({cue.FilePath})");
+        _view.FlashStatus(Loc.T(
+            $"🎞 Conversión a HAP encolada: {cue.Name}",
+            $"🎞 HAP conversion queued: {cue.Name}"));
+    }
+
+    /// <summary>Acción de show: encola TODOS los vídeos convertibles (no
+    /// imagen, no ya-HAP). Devuelve cuántos se encolaron.</summary>
+    public int ConvertAllVideosToHap()
+    {
+        int queued = 0;
+        foreach (var cue in _model.Cues)
+            if (IsHapConvertible(cue) && _hapConvert.Enqueue(cue.Id, cue.FilePath))
+                queued++;
+        Log($"Conversión a HAP de todo el show: {queued} vídeo(s) encolados");
+        _view.FlashStatus(queued > 0
+            ? Loc.T($"🎞 Convirtiendo a HAP: {queued} vídeo(s) en cola",
+                    $"🎞 Converting to HAP: {queued} video(s) queued")
+            : Loc.T("No hay vídeos que convertir a HAP (¿ya son HAP?)",
+                    "No videos to convert to HAP (already HAP?)"));
+        return queued;
+    }
+
+    /// <summary>Cancela la cola de conversiones y el ffmpeg en curso.</summary>
+    public void CancelHapConversions() => _hapConvert.CancelAll();
+
+    private void OnHapConvertProgress(HapConvertService.Job job, double pct)
+    {
+        int p = (int)pct;
+        if (p == _lastHapConvertPct)
+            return;   // -progress emite cada ~0,5 s; solo refrescar al cambiar el %
+        _lastHapConvertPct = p;
+        string name = _model.GetById(job.CueId)?.Name ?? Path.GetFileName(job.Source);
+        _view.FlashStatus(Loc.T(
+            $"🎞 Convirtiendo a HAP: {name} — {p}%",
+            $"🎞 Converting to HAP: {name} — {p}%"));
+    }
+
+    private void OnHapConvertCompleted(
+        HapConvertService.Job job, HapConversionResult result, bool reused)
+    {
+        _lastHapConvertPct = -1;
+        var cue = _model.GetById(job.CueId);
+        string name = cue?.Name ?? Path.GetFileName(job.Source);
+
+        if (!result.Ok)
+        {
+            Log($"Conversión a HAP FALLIDA: {name} — {result.Error}" +
+                (result.LogFile.Length > 0 ? $" (stderr en {result.LogFile})" : ""));
+            _view.FlashStatus(Loc.T(
+                $"⚠ Conversión a HAP falló: {name} — {result.Error}",
+                $"⚠ HAP conversion failed: {name} — {result.Error}"));
+            return;
+        }
+        if (cue is null)   // el cue se borró mientras convertía: el .hap.mov queda en disco
+        {
+            Log($"Conversión a HAP terminada pero el cue ya no existe: {job.Dest}");
+            return;
+        }
+
+        // El destino es un archivo NUEVO (o reescrito): tirar su sondeo cacheado
+        // para que el commit lo re-sondee de verdad (AssignToCue calienta la caché
+        // y el siguiente GO enruta por el motor propio sin ffprobe en caliente).
+        MediaImporter.InvalidateCodecProbe(job.Dest);
+
+        int row = _model.IndexOfId(job.CueId);
+        if (row < 0)
+            return;
+        // RUTA DE EDICIÓN OFICIAL (la misma que usa el inspector al cambiar de
+        // archivo): undo, tipo, duración por ffprobe y refresco de fila/timeline
+        // vienen solos.
+        OnCueEditCommitted(row,
+            new Dictionary<string, object?> { ["file_path"] = job.Dest });
+        // Cachés que ese commit no toca: los buffers de audio del cue y de su
+        // espejo HAP podían estar precargados con el archivo antiguo, y el
+        // standby de vídeo apuntaba al original.
+        _audio.InvalidateCache(cue.Id);
+        _audio.InvalidateCache(HapAudioId(cue.Id));
+        _video.DiscardStandby(cue.Id);
+        if (row == _playhead && !_running.ContainsKey(cue.Id) && cue.FilePath.Length > 0)
+            PrepareVideoStandby(cue);
+
+        Log(reused
+            ? $"Conversión a HAP: {name} reutiliza {job.Dest} (ya existía)"
+            : $"Conversión a HAP terminada: {name} → {job.Dest}");
+        _view.FlashStatus(reused
+            ? Loc.T($"🎞 «{name}»: ya estaba convertido — usando {Path.GetFileName(job.Dest)} (motor propio en el siguiente GO)",
+                    $"🎞 «{name}»: already converted — using {Path.GetFileName(job.Dest)} (native engine on next GO)")
+            : Loc.T($"🎞 «{name}» convertido a HAP — motor propio en el siguiente GO",
+                    $"🎞 «{name}» converted to HAP — native engine on next GO"));
+    }
 
     /// <summary>Cue que suena por la audición local (para EQ/RTA en vivo).</summary>
     private int _auditionSourceCueId = -1;
@@ -1881,6 +2017,7 @@ public class MainController
     /// <summary>Detiene todo y libera los motores (llamar al cerrar la app).</summary>
     public void Shutdown()
     {
+        _hapConvert.CancelAll();   // no dejar un ffmpeg huérfano al cerrar
         foreach (var t in _chainTimers)
             t.Dispose();
         _chainTimers.Clear();

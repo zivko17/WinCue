@@ -60,6 +60,12 @@ public static class MediaImporter
     internal static void SeedUnsupportedCodecCache(string filePath, bool unsupported) =>
         _unsupportedVideoCache[Path.GetFullPath(filePath)] = unsupported;
 
+    /// <summary>Invalida el sondeo cacheado de una ruta cuyo ARCHIVO cambió
+    /// después de sondearse (p. ej. el destino de una conversión a HAP que
+    /// existía a medias). El siguiente IsUnsupportedVideoCodec re-sondea.</summary>
+    public static void InvalidateCodecProbe(string filePath) =>
+        _unsupportedVideoCache.TryRemove(Path.GetFullPath(filePath), out _);
+
     /// <summary>Códec del primer stream de vídeo (minúsculas) vía ffprobe;
     /// "" si no hay vídeo o no se puede leer.</summary>
     public static string VideoCodec(string filePath)
@@ -218,6 +224,21 @@ public static class MediaImporter
         }
     }
 
+    /// <summary>Argumentos ffmpeg de la RECETA HAP única (export portable y
+    /// conversión in-app): códec hap con -chunks 4 (frames «Complex» que el
+    /// motor propio descomprime en paralelo — verificado en el lab: parser y
+    /// benchmark de tools/hap-lab), audio a PCM 16-bit, resolución/fps del
+    /// original. Cualquier ajuste de la receta se hace AQUÍ, no en los
+    /// llamantes.</summary>
+    public static IReadOnlyList<string> HapConversionArgs(string src, string dest) => new[]
+    {
+        "-hide_banner", "-nostats", "-y",
+        "-i", src,
+        "-c:v", "hap", "-chunks", "4",
+        "-c:a", "pcm_s16le",
+        dest,
+    };
+
     /// <summary>Transcodifica el vídeo de src a HAP (contenedor .mov, audio a
     /// PCM 16-bit) vía ffmpeg. MUY LENTO con archivos largos — no llamar en el
     /// hilo de UI sin aviso. HAP descomprime baratísimo (intraframe DXT):
@@ -236,13 +257,8 @@ public static class MediaImporter
                 RedirectStandardError = true,
                 CreateNoWindow = true,
             };
-            psi.ArgumentList.Add("-hide_banner");
-            psi.ArgumentList.Add("-nostats");
-            psi.ArgumentList.Add("-y");
-            psi.ArgumentList.Add("-i"); psi.ArgumentList.Add(src);
-            psi.ArgumentList.Add("-c:v"); psi.ArgumentList.Add("hap");
-            psi.ArgumentList.Add("-c:a"); psi.ArgumentList.Add("pcm_s16le");
-            psi.ArgumentList.Add(dest);
+            foreach (string arg in HapConversionArgs(src, dest))
+                psi.ArgumentList.Add(arg);
             using var proc = System.Diagnostics.Process.Start(psi);
             if (proc is null)
                 return false;
