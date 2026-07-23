@@ -95,12 +95,27 @@ public partial class App : Application
         var window = new MainWindow();
         MainWindow = window;
 
-        // 5a: dispositivo por defecto; la selección por nombre llega con el
-        // diálogo de settings (fase 5c)
+        // Resuelve audio_driver/audio_device_name → (driver, deviceId, asio).
+        // Se usa en el arranque Y al guardar settings: sin la resolución en el
+        // arranque, el dispositivo elegido por nombre se perdía en cada inicio
+        // (siempre abría el WASAPI por defecto hasta reabrir Configuración).
+        (string driver, string? deviceId, string? asioName) ResolveAudioDevice()
+        {
+            string driver = settings.Get("audio_driver", "wasapi");
+            string devName = settings.Get("audio_device_name", "");
+            string? deviceId = devName.Length > 0 && driver != "asio"
+                ? AudioEngine.ListDevices().FirstOrDefault(d => d.Name == devName)?.Id
+                : null;
+            return (driver, deviceId, driver == "asio" ? devName : null);
+        }
+
+        var (audioDriver, audioDeviceId, asioName) = ResolveAudioDevice();
         _audio = new AudioEngine(
             dispatch,
-            driver: settings.Get("audio_driver", "wasapi"),
-            sampleRate: settings.Get("audio_sample_rate", 48000));
+            deviceId: audioDeviceId,
+            driver: audioDriver,
+            sampleRate: settings.Get("audio_sample_rate", 48000),
+            asioDriverName: asioName);
         // VU de PROGRAMA por loopback WASAPI: mide lo que sale del dispositivo
         // (audio + vídeo + todo). Con ASIO no hay loopback → VU de mixer.
         _audio.StartProgramMeter();
@@ -132,14 +147,8 @@ public partial class App : Application
         window.Attach(model, _controller, settings, applyEngineSettings: () =>
         {
             // Reconfigurar el dispositivo de audio en caliente tras guardar settings
-            string driver = settings.Get("audio_driver", "wasapi");
-            string devName = settings.Get("audio_device_name", "");
-            string? deviceId = null;
-            if (devName.Length > 0 && driver != "asio")
-                deviceId = AudioEngine.ListDevices()
-                    .FirstOrDefault(d => d.Name == devName)?.Id;
-            _audio.SetDevice(deviceId, driver,
-                asioDriverName: driver == "asio" ? devName : null);
+            var (driver, deviceId, asio) = ResolveAudioDevice();
+            _audio.SetDevice(deviceId, driver, asioDriverName: asio);
             // El medidor de audición sigue al dispositivo de audición nuevo
             _audio.SetAuditionMeterDevice(settings.Get("audition_device_name", ""));
             window.SetAuditionVuLoopback(_audio.AuditionMeterActive);
