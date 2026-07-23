@@ -785,7 +785,9 @@ public sealed class InspectorPanel : ContentControl
             Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)),
         };
         infoCol.Children.Add(label);
-        Note(infoCol, Loc.T("En vivo si el cue suena.\nEl VU es de ESTE cue.", "Live if the cue is playing.\nThe VU is THIS cue's."));
+        slider.ToolTip = Loc.T("Volumen del cue: en vivo si está sonando.",
+                               "Cue volume: live if it is playing.");
+        _levelVu.ToolTip = Loc.T("VU real de ESTE cue.", "THIS cue's real VU.");
 
         slider.ValueChanged += (_, e) =>
         {
@@ -853,17 +855,10 @@ public sealed class InspectorPanel : ContentControl
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         audBtn.Click += (_, _) => AuditionRequested?.Invoke();
+        audBtn.ToolTip = Loc.T(
+            "Por el dispositivo de audición, sin pasar por la sala. Otra pulsación para parar.",
+            "On the audition device, without going to the room. Press again to stop.");
         audioOnly.Children.Add(audBtn);
-        Note(audioOnly, Loc.T("Por el dispositivo de audición, sin pasar por la sala. Otra pulsación para parar.", "On the audition device, without going to the room. Press again to stop."));
-
-        // ── Sección SOLO VÍDEO: qué da (y qué no) la cadena af de mpv ───
-        var videoOnly = new StackPanel();
-        panel.Children.Add(videoOnly);
-        _conditional.Add((videoOnly, c => c.Type == CueType.Video));
-        Header(videoOnly, Loc.T("AUDIO DE ESTE VÍDEO", "THIS VIDEO'S AUDIO"));
-        Note(videoOnly, Loc.T(
-            "La EQ y el compresor se aplican EN VIVO vía mpv.\nRTA, GR y VU por cue no disponibles (mpv no expone las muestras): su nivel se ve en el MASTER del Mixer.",
-            "EQ and compressor apply LIVE via mpv.\nRTA, GR and per-cue VU unavailable (mpv does not expose samples): its level shows on the Mixer's MASTER."));
 
         return scroll;
     }
