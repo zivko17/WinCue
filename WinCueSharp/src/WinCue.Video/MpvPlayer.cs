@@ -54,6 +54,10 @@ public sealed class MpvPlayer : IDisposable
         }
     }
 
+    /// <summary>pause observada (asíncrona): true si mpv está en pausa. La usa
+    /// el PLL híbrido para dejar el tick inerte con el cue pausado.</summary>
+    public bool ObservedPaused => _observedPause != 0;
+
     /// <summary>time-pos observada + extrapolación con reloj de pared desde el
     /// último push (cap 1 s; en pausa no extrapola). Da un reloj CONTINUO
     /// aunque mpv publique a ráfagas — es lo que consume la UI.</summary>

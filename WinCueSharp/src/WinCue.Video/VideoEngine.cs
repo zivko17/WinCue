@@ -136,6 +136,21 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly Dictionary<int, AudioEqParams?> _eqs = new();
     private readonly Dictionary<int, System.Threading.Timer> _fadeTimers = new();
 
+    /// <summary>PLL de la RUTA HÍBRIDA (ExternalAudio): un timer por cue que
+    /// disciplina el time-pos de mpv (mudo, aid=no) al reloj del audio espejo
+    /// (_hapClock). La lógica de decisión vive en MpvSyncPll (pura, testeable);
+    /// aquí solo el tick: leer relojes → aplicar {speed, hard-seek}.</summary>
+    private sealed class PllRunner : IDisposable
+    {
+        public readonly MpvSyncPll Pll = new();
+        public System.Threading.Timer? Timer;
+        public double Speed = 1.0;            // última speed escrita en mpv
+        public double? CachedDuration;        // duración efectiva (con trims)
+        public void Dispose() => Timer?.Dispose();
+    }
+    private readonly Dictionary<int, PllRunner> _syncPlls = new();
+    private const int PllTickMs = 400;
+
     private double _master = 1.0;
     private bool _disposed;
 
@@ -539,6 +554,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     public void Cleanup()
     {
         DiscardStandby();
+        foreach (int cueId in _syncPlls.Keys.ToList())
+            StopSyncPll(cueId);
         foreach (int cueId in _fadeTimers.Keys.ToList())
             CancelFade(cueId);
         foreach (int cueId in _players.Keys.ToList())
@@ -670,6 +687,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 return;
             }
             SetState(cueId, MediaCueState.Playing);
+            if (p.ExternalAudio)
+                StartSyncPll(cueId, sb.Player, p);
             Post(() =>
             {
                 LatencyReport?.Invoke(cueId,
@@ -688,10 +707,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             if (gpu && !canvas && StartHapPlayback(cueId, filePath, p, screen, layer))
                 return;
-            // Fallback de emergencia: mpv clásico MUTEADO — el audio del cue
+            // Fallback de emergencia: mpv clásico MUDO — el audio del cue
             // ya suena por el AudioEngine (espejo del controlador); con
-            // volumen aquí sonaría doble. Sincronía aproximada (reloj libre
-            // de mpv a rate 1), pero el directo no se queda a negro.
+            // audio aquí sonaría doble. ExternalAudio=true: sin pista de
+            // audio (aid=no) y con el PLL híbrido disciplinando el vídeo al
+            // reloj del espejo — mejor sincronía que el reloj libre de antes.
             _playParams[cueId] = p with
             {
                 UseHapEngine = false,
@@ -699,6 +719,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 Volume = 0.0,
                 CanvasOutputs = null,
                 HandoverSeconds = 0.0,
+                ExternalAudio = true,
             };
             StartPlayback(cueId);
             return;
@@ -744,6 +765,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             };
             if (hwnd != 0) options["wid"] = hwnd.ToString();
             if (_nullAudio) options["ao"] = "null";
+            // RUTA HÍBRIDA: mpv nace SIN pista de audio (el espejo del
+            // AudioEngine es quien suena) — fijado ANTES del loadfile
+            if (p.ExternalAudio) options["aid"] = "no";
             // Diagnóstico: WINCUE_MPV_LOG=<dir> vuelca el log verboso de mpv por
             // cue — imprescindible para cazar crashes nativos del render.
             if (Environment.GetEnvironmentVariable("WINCUE_MPV_LOG") is { Length: > 0 } logDir)
@@ -886,6 +910,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         }
 
         SetState(cueId, MediaCueState.Playing);
+        if (p.ExternalAudio)
+            StartSyncPll(cueId, player, p);
     }
 
     /// <summary>Fija en mpv la parte factible de Display &amp; Geometry
@@ -1010,6 +1036,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             ["pause"] = "yes",   // ← cargado y congelado en su primer frame
         };
         if (_nullAudio) options["ao"] = "null";
+        if (p.ExternalAudio) options["aid"] = "no";   // híbrido: mpv sin audio
         if (p.Loop) options["loop-file"] = "inf";
         else if (p.PlayCount > 1) options["loop-file"] = (p.PlayCount - 1).ToString();
         if (p.TrimStart > 0.0) options["start"] = p.TrimStart.ToString("F3", System.Globalization.CultureInfo.InvariantCulture);
@@ -1105,8 +1132,98 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         _handoverTimers[cueId] = timer;
     }
 
+    // ------------------------------------------------------------------
+    // PLL de la RUTA HÍBRIDA (ExternalAudio): vídeo mpv mudo disciplinado
+    // al reloj del audio espejo. Semántica de decisión en MpvSyncPll.
+    // ------------------------------------------------------------------
+
+    /// <summary>RED DE SEGURIDAD: el espejo de audio del cue falló en
+    /// caliente → recuperar el audio POR MPV en el player vivo (aid=auto) y
+    /// apagar el PLL (sin reloj externo ya no hay nada que disciplinar).
+    /// El volumen lo reajusta el controlador después (el fallback HAP corre
+    /// con volume 0).</summary>
+    public void RestoreInternalAudio(int cueId)
+    {
+        StopSyncPll(cueId);
+        if (!_players.TryGetValue(cueId, out var player))
+            return;
+        try
+        {
+            player.SetProperty("speed", 1.0);
+            player.SetProperty("aid", "auto");
+        }
+        catch (Exception) { /* player muriendo: el Stop llegará enseguida */ }
+        Trace($"pll: RestoreInternalAudio cue={cueId} (aid=auto)");
+    }
+
+    private void StartSyncPll(int cueId, MpvPlayer player, VideoPlayParams p)
+    {
+        StopSyncPll(cueId);
+        if (_hapClock is null)
+            return;   // sin reloj inyectado (tests/arranque raro): free-run
+        var runner = new PllRunner();
+        runner.Timer = new System.Threading.Timer(
+            _ => SyncPllTick(cueId, player, runner, p), null, PllTickMs, PllTickMs);
+        _syncPlls[cueId] = runner;
+        Trace($"pll: start cue={cueId} (tick {PllTickMs} ms)");
+    }
+
+    private void StopSyncPll(int cueId)
+    {
+        if (_syncPlls.Remove(cueId, out var runner))
+        {
+            runner.Dispose();
+            Trace($"pll: stop cue={cueId}");
+        }
+    }
+
+    /// <summary>Tick del PLL (hilo del timer). mpv es thread-safe para
+    /// propiedades (mismo patrón que los fades); el player puede estar
+    /// muriendo en paralelo → todo defensivo.</summary>
+    private void SyncPllTick(int cueId, MpvPlayer player, PllRunner runner,
+        VideoPlayParams p)
+    {
+        try
+        {
+            if (player.ObservedPaused)
+                return;   // cue pausado: ambos relojes congelados — tick inerte
+
+            double? video = player.ObservedTimePosSmooth(runner.Speed) is double t
+                ? Math.Max(0.0, t - p.TrimStart)
+                : null;
+            double? audio = _hapClock?.Invoke(cueId);
+
+            // Duración efectiva (con trims) para la guarda de loop; se cachea
+            // al primer read válido (no consultar el core en cada tick)
+            if (runner.CachedDuration is null
+                && player.GetPropertyDouble("duration") is double raw && raw > 0.0)
+            {
+                double end = p.TrimEnd > 0.0 ? Math.Min(p.TrimEnd, raw) : raw;
+                runner.CachedDuration = Math.Max(0.0, end - p.TrimStart);
+            }
+
+            var d = runner.Pll.Tick(video, audio, runner.CachedDuration ?? 0.0);
+            if (d.HardSeekTo is double target)
+            {
+                Trace($"pll: cue={cueId} HARD-SEEK → {target:F3}s " +
+                    $"(video={video:F3} audio={audio:F3})");
+                player.SetProperty("time-pos", target + p.TrimStart);
+            }
+            if (d.WriteSpeed)
+            {
+                runner.Speed = d.Speed;
+                player.SetProperty("speed", d.Speed);
+                Trace($"pll: cue={cueId} speed={d.Speed:F3} " +
+                    $"drift={(video is double vv && audio is double aa ? vv - aa : 0.0):F3}s");
+            }
+        }
+        catch (ObjectDisposedException) { /* player terminado bajo el timer */ }
+        catch (Exception) { /* propiedad no crítica / carrera de cierre */ }
+    }
+
     private void TerminatePlayer(int cueId)
     {
+        StopSyncPll(cueId);
         _playerSlots.Remove(cueId);
         if (_handoverTimers.Remove(cueId, out var handover))
             handover.Dispose();

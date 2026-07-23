@@ -92,7 +92,8 @@ public sealed record VideoPlayParams(
     IReadOnlyList<CanvasView>? CanvasOutputs = null,
     double HandoverSeconds = 0.0,
     bool ForceClassicPath = false,
-    bool UseHapEngine = false);
+    bool UseHapEngine = false,
+    bool ExternalAudio = false);
 // ForceClassicPath = true: el cue NO pasa por el compositor GPU aunque esté
 // activo — va por la ruta clásica (vo=gpu embebido en la ventana de salida).
 // Lo usa el controlador para códecs que el interop del compositor no soporta
@@ -109,6 +110,11 @@ public sealed record VideoPlayParams(
 // solo para HAP en .mov con rate 1.0 y compositor activo; si el motor propio
 // no puede (demux/GPU), el engine cae a mpv clásico MUTEADO (el audio ya
 // suena por el espejo del AudioEngine).
+// ExternalAudio = true (RUTA HÍBRIDA, paso 3b): el AUDIO del cue lo reproduce
+// el AudioEngine (espejo del controlador) — mpv arranca SIN pista de audio
+// (aid=no fijado antes del loadfile) y su vídeo se disciplina al reloj del
+// audio con un PLL suave (MpvSyncPll). Si el espejo falla en caliente, el
+// controlador llama RestoreInternalAudio para recuperar el audio por mpv.
 
 /// <summary>Motor de audio multi-stream (implementado por WinCue.Audio).</summary>
 public interface IAudioEngine
@@ -226,6 +232,12 @@ public interface IVideoEngine
     /// recuerda para players futuros. Default: no-op (motores falsos).</summary>
     void SetEq(int cueId, AudioEqParams? eq) { }
     void SetMasterVolume(double volume);
+
+    /// <summary>RED DE SEGURIDAD de la ruta híbrida: el espejo de audio del
+    /// cue falló en caliente → recuperar el audio POR MPV en el player vivo
+    /// (aid=auto) y apagar el PLL. El cue nunca se queda sin audio.
+    /// Default: no-op (motores falsos / cues sin player mpv).</summary>
+    void RestoreInternalAudio(int cueId) { }
     void PauseAll();
     void ResumeAll();
     /// <summary>Pausa SOLO este cue (congela su reloj).</summary>
