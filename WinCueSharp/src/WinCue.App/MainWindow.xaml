@@ -63,17 +63,11 @@
         <Border x:Name="TopBar" DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
-                    <!-- GO: el botón más importante de la app — más grande que el
-                         resto del transporte y con el atajo a la vista -->
+                    <!-- GO: el botón más importante de la app — más grande que
+                         el resto del transporte -->
                     <Button x:Name="GoButton" Click="OnGoClick" Width="150" Height="48"
-                            Background="#1e7e34" ToolTip="Espacio">
-                        <StackPanel>
-                            <TextBlock Text="GO ▶" FontSize="20" FontWeight="Bold"
-                                       HorizontalAlignment="Center"/>
-                            <TextBlock Text="{local:Loc Es=ESPACIO, En=SPACE}" FontSize="8.5"
-                                       Foreground="#9fd8ae" HorizontalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
+                            Background="#1e7e34" FontSize="20" FontWeight="Bold"
+                            Content="GO ▶" ToolTip="Espacio"/>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
                             Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
                     <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
