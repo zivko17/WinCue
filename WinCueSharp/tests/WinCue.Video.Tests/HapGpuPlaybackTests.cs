@@ -23,17 +23,9 @@ public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
     public void ClipEntero_SeRenderizaYTerminaSolo()
     {
         if (!_media.FFmpegOk) return;
-        HapGpuPipeline pipeline;
-        try
-        {
-            pipeline = new HapGpuPipeline(640, 480);
-        }
-        catch (Exception)
-        {
+        using var pipeline = TryCreatePipeline();
+        if (pipeline is null)
             return;   // sin GPU/driver utilizable: nada que afirmar
-        }
-
-        using var _ = pipeline;
         var info = MovDemuxer.Open(_media.Hap1);   // 1 s @ 30 fps
         int frames = 0;
         pipeline.FrameRendered += () => Interlocked.Increment(ref frames);
@@ -60,5 +52,13 @@ public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
         // La copia de presentación (la que haría el UI dentro del Lock del
         // D3DImage) no debe fallar con el pipeline vivo
         pipeline.CopyPresent();
+    }
+
+    /// <summary>CA2000: la creación va en método aparte — devolver el objeto
+    /// transfiere la propiedad al llamador (que lo mete en un using).</summary>
+    private static HapGpuPipeline? TryCreatePipeline()
+    {
+        try { return new HapGpuPipeline(640, 480); }
+        catch (Exception) { return null; }
     }
 }
