@@ -42,8 +42,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public event Action<int, MediaCueState>? StateChanged;   // (cueId, newState)
     public event Action<int, double>? LatencyReport;          // (cueId, ms)
     public event Action<int, string>? ErrorOccurred;          // (cueId, message)
-    /// <summary>RMS estéreo (L, R) de un stream cualquiera; el VU aplica
-    /// peak-hold, así que con varios streams muestra el más alto.</summary>
+    /// <summary>RMS estéreo (L, R) para el VU de PROGRAMA. Con el medidor
+    /// loopback activo (StartProgramMeter, driver no-ASIO) mide lo que sale
+    /// del dispositivo (audio + vídeo + todo); si no, cae al RMS de los
+    /// streams del mixer interno (el VU aplica peak-hold y muestra el más
+    /// alto).</summary>
     public event Action<float, float>? LevelReport;
 
     /// <summary>RMS estéreo (L, R) de UN cue concreto (inspector/audición).</summary>
@@ -74,6 +77,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
     private float _master = 1.0f;
     private bool _disposed;
+
+    // VU de programa por loopback WASAPI (null = fallback al mixer interno)
+    private LoopbackProgramMeter? _loopback;
+    private bool _loopbackWanted;
 
     private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer);
     private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput, string Bus);
@@ -113,6 +120,35 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _deviceId = deviceId;
         _driver = driver;
         _asioDriverName = asioDriverName;
+        RestartProgramMeter();   // el loopback debe seguir al dispositivo nuevo
+    }
+
+    /// <summary>Activa el VU de programa por loopback WASAPI: mide lo que
+    /// REALMENTE sale del dispositivo (cues de audio, audio de vídeo, todo).
+    /// Con ASIO activo no hay loopback (ASIO puentea el mixer de Windows) y
+    /// LevelReport sigue alimentándose del mixer interno. Lo llama la App;
+    /// los tests que no lo llaman conservan el comportamiento clásico.</summary>
+    public void StartProgramMeter()
+    {
+        _loopbackWanted = true;
+        RestartProgramMeter();
+    }
+
+    private void RestartProgramMeter()
+    {
+        _loopback?.Dispose();
+        _loopback = null;
+        if (!_loopbackWanted)
+            return;
+        // ASIO real (driver asio Y drivers instalados): CreateOutput no pasará
+        // por el mixer de Windows → el loopback no vería nada. Fallback a mixer.
+        if (_driver.Equals("asio", StringComparison.OrdinalIgnoreCase) &&
+            ListAsioDrivers().Count > 0)
+            return;
+        var meter = new LoopbackProgramMeter(_deviceId);
+        meter.LevelReport += (l, r) => Post(() => LevelReport?.Invoke(l, r));
+        meter.Start();
+        _loopback = meter;
     }
 
     /// <summary>Volumen master global (0..1), aplicado a todos los streams en vivo.</summary>
@@ -345,6 +381,9 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         foreach (int cueId in _active.Keys.ToList())
             StopCtx(cueId, emitState: false);
         CloseOutput();
+        _loopbackWanted = false;
+        _loopback?.Dispose();
+        _loopback = null;
     }
 
     public void Dispose()
@@ -417,7 +456,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
         provider.LevelReport += (l, r) => Post(() =>
         {
-            LevelReport?.Invoke(l, r);
+            // Con loopback activo el VU de programa lo alimenta el dispositivo
+            // (evita duplicar reports); los VU por-cue siguen siendo del stream
+            if (_loopback is null)
+                LevelReport?.Invoke(l, r);
             CueLevelReport?.Invoke(cueId, l, r);
         });
 

@@ -101,6 +101,9 @@ public partial class App : Application
             dispatch,
             driver: settings.Get("audio_driver", "wasapi"),
             sampleRate: settings.Get("audio_sample_rate", 48000));
+        // VU de PROGRAMA por loopback WASAPI: mide lo que sale del dispositivo
+        // (audio + vídeo + todo). Con ASIO no hay loopback → VU de mixer.
+        _audio.StartProgramMeter();
 
         _video = new VideoEngine(() => 0, dispatch);   // el controlador fija el provider
 

@@ -189,6 +189,25 @@ public class AudioEngineTests : IDisposable
     }
 
     [Fact]
+    public void ProgramMeter_EmitsDeviceLevels_WhileEnginePlays()
+    {
+        if (!HasAudioDevice) return;
+
+        using var engine = new AudioEngine();
+        engine.StartProgramMeter();
+        int reports = 0;
+        engine.LevelReport += (l, r) => Interlocked.Increment(ref reports);
+
+        engine.Play(1, MakeQuietWav(2.0));
+        Assert.True(WaitFor(() => engine.IsPlaying(1), 5_000));
+        // Con loopback activo los niveles vienen del DISPOSITIVO: basta con que
+        // el flujo esté vivo (la amplitud depende del volumen del sistema)
+        Assert.True(WaitFor(() => Volatile.Read(ref reports) >= 3, 5_000),
+            "el VU de programa no emitió niveles con audio sonando");
+        engine.StopAll();
+    }
+
+    [Fact]
     public void PlayMissingFile_EmitsError()
     {
         using var engine = new AudioEngine();
