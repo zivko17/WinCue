@@ -722,7 +722,7 @@ public sealed class InspectorPanel : ContentControl
             BorderBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
             BorderThickness = new Thickness(0, 0, 1, 0),
             Child = BuildLevels(),
-            MaxWidth = 560,
+            MaxWidth = 320,   // columna compacta: el ancho es para la EQ/comp
         };
         var host = new DockPanel();
         DockPanel.SetDock(levelsHost, Dock.Left);
@@ -772,18 +772,20 @@ public sealed class InspectorPanel : ContentControl
         vuCol.Children.Add(_levelVu);
         mixer.Children.Add(vuCol);
 
-        // Columna de información y ajustes a la derecha del fader
-        var infoCol = new StackPanel { Margin = new Thickness(26, 4, 0, 0) };
+        // Columna de información y ajustes a la derecha del fader — COMPACTA:
+        // esta columna comparte pestaña con el editor de EQ/comp, que es quien
+        // necesita el ancho (curva + RTA)
+        var infoCol = new StackPanel { Margin = new Thickness(12, 4, 0, 0) };
         mixer.Children.Add(infoCol);
 
         var label = new TextBlock
         {
             FontFamily = new FontFamily("Consolas"),
-            FontSize = 20,
+            FontSize = 15,
             Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)),
         };
         infoCol.Children.Add(label);
-        Note(infoCol, Loc.T("Se aplica EN VIVO si el cue está sonando.\nEl VU muestra el nivel real de ESTE cue.", "Applied LIVE if the cue is playing.\nThe VU shows THIS cue's real level."));
+        Note(infoCol, Loc.T("En vivo si el cue suena.\nEl VU es de ESTE cue.", "Live if the cue is playing.\nThe VU is THIS cue's."));
 
         slider.ValueChanged += (_, e) =>
         {
@@ -807,23 +809,19 @@ public sealed class InspectorPanel : ContentControl
         panel.Children.Add(audioOnly);
         _conditional.Add((audioOnly, c => c.Type == CueType.Audio));
 
-        Header(audioOnly, Loc.T("SALIDA DE AUDIO DE ESTE CUE", "AUDIO OUTPUT FOR THIS CUE"));
-        var outRow = new StackPanel
-        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
-        audioOnly.Children.Add(outRow);
-        outRow.Children.Add(new TextBlock
+        Header(audioOnly, Loc.T("SALIDA DE ESTE CUE", "THIS CUE'S OUTPUT"));
+        var outCombo = new ComboBox
         {
-            Text = Loc.T("Dispositivo:", "Device:"), Width = 210,
-            VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
-        });
-        var outCombo = new ComboBox { MinWidth = 260 };
+            MinWidth = 170, MaxWidth = 220,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Margin = new Thickness(0, 2, 0, 2),
+        };
         outCombo.SelectionChanged += (_, _) =>
         {
             if ((outCombo.SelectedItem as ComboBoxItem)?.Tag is string dev)
                 Commit("audio_output", dev);
         };
-        outRow.Children.Add(outCombo);
+        audioOnly.Children.Add(outCombo);
         _loaders["audio_output"] = c =>
         {
             outCombo.Items.Clear();
@@ -856,7 +854,7 @@ public sealed class InspectorPanel : ContentControl
         };
         audBtn.Click += (_, _) => AuditionRequested?.Invoke();
         audioOnly.Children.Add(audBtn);
-        Note(audioOnly, Loc.T("Reproduce este cue por el dispositivo de audición (Settings → Audio) sin pasar por la sala. Pulsa otra vez para parar.", "Plays this cue on the audition device (Settings → Audio) without going to the room. Press again to stop."));
+        Note(audioOnly, Loc.T("Por el dispositivo de audición, sin pasar por la sala. Otra pulsación para parar.", "On the audition device, without going to the room. Press again to stop."));
 
         // ── Sección SOLO VÍDEO: qué da (y qué no) la cadena af de mpv ───
         var videoOnly = new StackPanel();
