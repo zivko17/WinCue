@@ -18,6 +18,16 @@ dotnet publish (Join-Path $root 'src/WinCue.App') `
     -p:IncludeNativeLibrariesForSelfExtract=true `
     -o $out
 
+# El settings.json del dev NO se distribuye (configuración personal; la app
+# regenera los defaults en el primer arranque)
+Remove-Item (Join-Path $out 'settings.json') -ErrorAction SilentlyContinue
+
+# El README de la beta y la EULA de evaluación acompañan al paquete
+$readme = Join-Path $root 'LEEME-BETA.md'
+if (Test-Path $readme) { Copy-Item $readme $out -Force }
+$eula = Join-Path $root 'docs\legal\EULA-EVALUACION.md'
+if (Test-Path $eula) { Copy-Item $eula $out -Force }
+
 # libmpv junto al exe (desde la carpeta del proyecto Python hermano)
 $mpv = Join-Path $root '..\WinCue\libmpv-2.dll'
 if (Test-Path $mpv) {
