@@ -4,6 +4,26 @@
     <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
   </ItemGroup>
 
+  <ItemGroup>
+    <!-- Motor HAP propio (WinCue.Video.Hap):
+         · Snappier (MIT) — descompresión Snappy de los frames HAP (≥1.3.1:
+           versiones anteriores tienen la advisory GHSA-pggp-6c3x-2xmx).
+         · Vortice.* (MIT) — wrappers finos de D3D11/D3D9Ex/D3DCompiler para el
+           pipeline GPU validado en tools/hap-lab. DECISIÓN REVISABLE: la
+           superficie de API usada es pequeña (device, textura BC, RT/SRV, Map,
+           StretchRect) y portable a P/Invoke crudo (estilo D3D9Minimal de
+           GlDxInterop.cs) si se quiere cero dependencias. -->
+    <PackageReference Include="Snappier" Version="1.3.1" />
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
+    <PackageReference Include="Vortice.Direct3D9" Version="3.6.2" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Los tests ejercitan también los tipos internos del motor HAP -->
+    <InternalsVisibleTo Include="WinCue.Video.Tests" />
+  </ItemGroup>
+
   <PropertyGroup>
     <TargetFramework>net8.0</TargetFramework>
     <ImplicitUsings>enable</ImplicitUsings>
