@@ -127,7 +127,7 @@ public class MainController
         // Los ids espejo del motor HAP se REMAPEAN al cue real: el strip del
         // Mixer y el inspector muestran el VU del cue de vídeo, no el interno
         _audio.CueLevelReport += (cueId, l, r) => _view.UpdateCueVuMeter(
-            cueId <= HapAudioBase ? HapAudioBase - cueId : cueId, l, r);
+            cueId <= VideoAudioBase ? VideoAudioBase - cueId : cueId, l, r);
 
         _video.LatencyReport += OnLatencyReport;
         _video.ErrorOccurred += OnVideoError;
@@ -280,23 +280,27 @@ public class MainController
     public const int AuditionCueId = -9999;
 
     // ==================================================================
-    // MOTOR HAP PROPIO (paso 3): el vídeo va por WinCue.Video.Hap y su
-    // pista de AUDIO por el AudioEngine (rack completo: EQ, compresor,
-    // VU por cue, limitador) con un id espejo negativo. El audio actúa de
-    // RELOJ MAESTRO del vídeo (la App inyecta el provider en el engine).
+    // AUDIO ESPEJO de los cues de vídeo (pasos 3 y 3b): la pista de AUDIO
+    // del vídeo suena por el AudioEngine (rack completo: EQ, compresor,
+    // VU por cue, limitador) con un id espejo negativo. Dos rutas la usan:
+    //   · MOTOR HAP PROPIO — el vídeo va por WinCue.Video.Hap y el audio
+    //     espejo actúa de RELOJ MAESTRO del vídeo.
+    //   · HÍBRIDO mpv — vídeo no-HAP por mpv MUDO (aid=no) disciplinado al
+    //     reloj del audio espejo con un PLL suave (MpvSyncPll).
+    // La App inyecta el provider de reloj en el engine para ambas.
     // ==================================================================
 
-    /// <summary>Base de los ids espejo de audio de los cues HAP. Por debajo
-    /// de AuditionCueId: jamás colisiona con cues reales ni con la audición.</summary>
-    public const int HapAudioBase = -20000;
+    /// <summary>Base de los ids espejo de audio de los cues de vídeo. Por
+    /// debajo de AuditionCueId: jamás colisiona con cues ni con la audición.</summary>
+    public const int VideoAudioBase = -20000;
 
-    /// <summary>Id espejo de audio del cue de vídeo HAP (cueId ≥ 0).</summary>
-    public static int HapAudioId(int cueId) => HapAudioBase - cueId;
+    /// <summary>Id espejo de audio del cue de vídeo (cueId ≥ 0).</summary>
+    public static int VideoAudioId(int cueId) => VideoAudioBase - cueId;
 
-    /// <summary>Cues de vídeo actualmente enrutados por el motor HAP propio
-    /// (su audio suena por el id espejo y hay que arrastrarlo en stop/pausa/
-    /// fades/volumen/EQ en vivo).</summary>
-    private readonly HashSet<int> _hapRouted = new();
+    /// <summary>Cues de vídeo con AUDIO ESPEJO activo (motor HAP propio o
+    /// híbrido mpv): su audio suena por el id espejo y hay que arrastrarlo
+    /// en stop/pausa/fades/volumen/EQ en vivo.</summary>
+    private readonly HashSet<int> _mirroredAudio = new();
 
     /// <summary>true si el cue puede ir por el motor HAP propio: HAP en
     /// contenedor .mov, rate 1.0, compositor activo, modo clásico (sin
@@ -423,7 +427,7 @@ public class MainController
         // espejo HAP podían estar precargados con el archivo antiguo, y el
         // standby de vídeo apuntaba al original.
         _audio.InvalidateCache(cue.Id);
-        _audio.InvalidateCache(HapAudioId(cue.Id));
+        _audio.InvalidateCache(VideoAudioId(cue.Id));
         _video.DiscardStandby(cue.Id);
         if (row == _playhead && !_running.ContainsKey(cue.Id) && cue.FilePath.Length > 0)
             PrepareVideoStandby(cue);
@@ -510,8 +514,8 @@ public class MainController
         var s = _audio.GetSpectrum(cueId);
         if (s is null && cueId == _auditionSourceCueId)
             s = _audio.GetSpectrum(AuditionCueId);
-        if (s is null && _hapRouted.Contains(cueId))
-            s = _audio.GetSpectrum(HapAudioId(cueId));   // audio espejo HAP
+        if (s is null && _mirroredAudio.Contains(cueId))
+            s = _audio.GetSpectrum(VideoAudioId(cueId));   // audio espejo HAP
         return s;
     }
 
@@ -522,8 +526,8 @@ public class MainController
         float gr = _audio.GetGainReductionDb(cueId);
         if (gr <= 0f && cueId == _auditionSourceCueId)
             gr = _audio.GetGainReductionDb(AuditionCueId);
-        if (gr <= 0f && _hapRouted.Contains(cueId))
-            gr = _audio.GetGainReductionDb(HapAudioId(cueId));   // espejo HAP
+        if (gr <= 0f && _mirroredAudio.Contains(cueId))
+            gr = _audio.GetGainReductionDb(VideoAudioId(cueId));   // espejo HAP
         return gr;
     }
 
@@ -555,8 +559,8 @@ public class MainController
             run.SelfPaused = true;
             if (cue.Type == CueType.Audio) _audio.PauseCue(cue.Id);
             else _video.PauseCue(cue.Id);
-            if (_hapRouted.Contains(cue.Id))
-                _audio.PauseCue(HapAudioId(cue.Id));   // el audio espejo también
+            if (_mirroredAudio.Contains(cue.Id))
+                _audio.PauseCue(VideoAudioId(cue.Id));   // el audio espejo también
             // Congelar el timer de duración (si lo hay)
             foreach (var t in run.Timers) t.Dispose();
             run.Timers.Clear();
@@ -573,8 +577,8 @@ public class MainController
             }
             else
             {
-                if (_hapRouted.Contains(cue.Id))
-                    _audio.ResumeCue(HapAudioId(cue.Id));   // el reloj vuelve
+                if (_mirroredAudio.Contains(cue.Id))
+                    _audio.ResumeCue(VideoAudioId(cue.Id));   // el reloj vuelve
                 _video.ResumeCue(cue.Id);
                 elapsed = _video.GetElapsed(cue.Id);
             }
@@ -932,8 +936,8 @@ public class MainController
                     // elegibilidad lo garantiza). Si el .mov no tiene pista
                     // de audio, el Play emite error: OnAudioError lo traga
                     // para los ids espejo y el vídeo sigue con su Stopwatch.
-                    _hapRouted.Add(cue.Id);
-                    _audio.Play(HapAudioId(cue.Id), cue.FilePath, new AudioPlayParams(
+                    _mirroredAudio.Add(cue.Id);
+                    _audio.Play(VideoAudioId(cue.Id), cue.FilePath, new AudioPlayParams(
                         Volume: cue.Volume,
                         FadeIn: fadeLeft,
                         FadeOut: cue.FadeOut,
@@ -1296,8 +1300,8 @@ public class MainController
         {
             _video.FadeVolume(target.Id, cue.Volume, cue.Duration, stopAfter);
             // Cue HAP-routed: el volumen real vive en el audio espejo
-            if (_hapRouted.Contains(target.Id))
-                _audio.Fade(HapAudioId(target.Id), cue.Volume, cue.Duration, stopAfter);
+            if (_mirroredAudio.Contains(target.Id))
+                _audio.Fade(VideoAudioId(target.Id), cue.Volume, cue.Duration, stopAfter);
             // La rampa que dibuja el timeline es también VISUAL: la opacidad
             // acompaña al volumen (proporcional a la opacidad base del cue)
             SetCueLayerOpacity(target,
@@ -1387,14 +1391,14 @@ public class MainController
         {
             // Cue HAP-routed: el ciclo de vida del audio espejo SIGUE al del
             // vídeo — mismo fundido, misma parada
-            bool hap = _hapRouted.Remove(cueId);
+            bool hap = _mirroredAudio.Remove(cueId);
             // Llamar Stop aunque el vídeo haya hecho end-file: termina el player
             // y limpia a negro para que su último frame no quede pegado.
             if (fade > 0.0 && _video.IsPlaying(cueId))
             {
                 _video.FadeVolume(cueId, 0.0, fade, stopAfter: true);
                 if (hap)
-                    _audio.Stop(HapAudioId(cueId), fade);
+                    _audio.Stop(VideoAudioId(cueId), fade);
                 // Fundido VISUAL a la par que el de audio (compositor)
                 if (_model.GetById(cueId) is Cue vc)
                     SetCueLayerOpacity(vc, 0.0, fade);
@@ -1403,7 +1407,7 @@ public class MainController
             {
                 _video.Stop(cueId);
                 if (hap)
-                    _audio.Stop(HapAudioId(cueId), 0.0);
+                    _audio.Stop(VideoAudioId(cueId), 0.0);
             }
         }
 
@@ -1484,9 +1488,9 @@ public class MainController
         // Audio espejo de un cue HAP: un .mov sin pista de audio (o un fallo
         // del espejo) NO es un error del cue — el vídeo sigue con su reloj
         // propio (Stopwatch). Silencio deliberado, solo al log del show.
-        if (cueId <= HapAudioBase)
+        if (cueId <= VideoAudioBase)
         {
-            Log($"Audio espejo HAP (cue {HapAudioBase - cueId}): {message}");
+            Log($"Audio espejo HAP (cue {VideoAudioBase - cueId}): {message}");
             return;
         }
         int idx = _model.IndexOfId(cueId);
@@ -1514,8 +1518,8 @@ public class MainController
         }
         _running.Remove(cueId);
         // El audio espejo de un cue HAP no debe quedarse sonando huérfano
-        if (_hapRouted.Remove(cueId))
-            _audio.Stop(HapAudioId(cueId), 0.0);
+        if (_mirroredAudio.Remove(cueId))
+            _audio.Stop(VideoAudioId(cueId), 0.0);
         _view.FlashStatus(Loc.T($"Vídeo: {message}", $"Video: {message}"));
     }
 
@@ -1765,7 +1769,7 @@ public class MainController
         {
             _video.PreloadNext(cue.Id, cue.FilePath);
             if (HapEngineEligible(cue) && !_running.ContainsKey(cue.Id))
-                _audio.Preload(HapAudioId(cue.Id), cue.FilePath);
+                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath);
             return;
         }
         bool visible = CanvasMode
@@ -1941,8 +1945,8 @@ public class MainController
             if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id))
                 _video.SetEq(cue.Id, EqFor(cue));
             // Cue HAP-routed: la EQ real vive en el audio espejo (rack nativo)
-            if (_hapRouted.Contains(cue.Id))
-                _audio.SetEq(HapAudioId(cue.Id), EqFor(cue));
+            if (_mirroredAudio.Contains(cue.Id))
+                _audio.SetEq(VideoAudioId(cue.Id), EqFor(cue));
         }
 
         // El volumen también sigue a la AUDICIÓN (no vive en _running)
@@ -1961,8 +1965,8 @@ public class MainController
             if (_video.IsPlaying(cue.Id))
                 _video.SetVolume(cue.Id, cue.Volume);
             // Cue HAP-routed: el volumen real vive en el audio espejo
-            if (_hapRouted.Contains(cue.Id))
-                _audio.SetVolume(HapAudioId(cue.Id), cue.Volume);
+            if (_mirroredAudio.Contains(cue.Id))
+                _audio.SetVolume(VideoAudioId(cue.Id), cue.Volume);
         }
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
             && fields.Keys.Any(GeoKeys.Contains))

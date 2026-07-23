@@ -117,7 +117,7 @@ public partial class App : Application
         // GetElapsedThreadSafe lee un mapa concurrente + Volatile.Read (no
         // toca el estado del main thread del AudioEngine).
         _video.SetHapClockProvider(cueId =>
-            _audio.GetElapsedThreadSafe(MainController.HapAudioId(cueId)));
+            _audio.GetElapsedThreadSafe(MainController.VideoAudioId(cueId)));
 
         var scheduler = new TimerScheduler(dispatch);
         _controller = new MainController(model, window, _audio, _video, scheduler, settings);

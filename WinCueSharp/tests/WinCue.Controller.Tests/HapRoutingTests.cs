@@ -3,7 +3,7 @@
 // =============================================================================
 // Un cue HAP en .mov con rate 1.0 y compositor activo va por el motor propio:
 // el vídeo con UseHapEngine=true y su AUDIO por el AudioEngine con id espejo
-// negativo (HapAudioId). Todo lo demás (sin compositor, rate≠1, canvas,
+// negativo (VideoAudioId). Todo lo demás (sin compositor, rate≠1, canvas,
 // kill-switch) sigue por la ruta clásica de siempre. La caché del sondeo de
 // códec se SIEMBRA (SeedUnsupportedCodecCache): determinista, sin ffprobe.
 //
@@ -41,7 +41,7 @@ public class HapRoutingTests : ControllerTestBase
         Assert.True(vp.P.UseHapEngine);
         Assert.False(vp.P.ForceClassicPath);
 
-        int hapId = MainController.HapAudioId(cue.Id);
+        int hapId = MainController.VideoAudioId(cue.Id);
         Assert.True(hapId < MainController.AuditionCueId);   // jamás colisiona
         var ap = Assert.Single(Audio.Plays, p => p.CueId == hapId);
         Assert.Equal(cue.FilePath, ap.Path);
@@ -62,7 +62,7 @@ public class HapRoutingTests : ControllerTestBase
         var vp = Assert.Single(Video.Plays);
         Assert.False(vp.P.UseHapEngine);
         Assert.True(vp.P.ForceClassicPath);
-        Assert.DoesNotContain(Audio.Plays, p => p.CueId == MainController.HapAudioId(cue.Id));
+        Assert.DoesNotContain(Audio.Plays, p => p.CueId == MainController.VideoAudioId(cue.Id));
     }
 
     [Fact]
@@ -73,7 +73,7 @@ public class HapRoutingTests : ControllerTestBase
 
         Assert.False(Video.Plays[0].P.UseHapEngine);
         Assert.True(Video.Plays[0].P.ForceClassicPath);
-        Assert.DoesNotContain(Audio.Plays, p => p.CueId == MainController.HapAudioId(cue.Id));
+        Assert.DoesNotContain(Audio.Plays, p => p.CueId == MainController.VideoAudioId(cue.Id));
     }
 
     [Fact]
@@ -104,7 +104,7 @@ public class HapRoutingTests : ControllerTestBase
 
         Assert.False(Video.Plays[0].P.UseHapEngine);
         Assert.Empty(Audio.Plays);
-        Assert.DoesNotContain(Audio.Preloads, id => id <= MainController.HapAudioBase);
+        Assert.DoesNotContain(Audio.Preloads, id => id <= MainController.VideoAudioBase);
         _ = cue;
     }
 
@@ -116,7 +116,7 @@ public class HapRoutingTests : ControllerTestBase
         Controller.StopCueById(cue.Id);
 
         Assert.Contains(cue.Id, Video.Stops);
-        Assert.Contains(Audio.Stops, s => s.CueId == MainController.HapAudioId(cue.Id));
+        Assert.Contains(Audio.Stops, s => s.CueId == MainController.VideoAudioId(cue.Id));
     }
 
     [Fact]
@@ -130,7 +130,7 @@ public class HapRoutingTests : ControllerTestBase
         // MISMO fundido; el barrido StopAll del motor de audio también corre
         Assert.Contains(Video.Fades, f => f.CueId == cue.Id && f.StopAfter);
         Assert.Contains(Audio.Stops, s =>
-            s.CueId == MainController.HapAudioId(cue.Id) && s.Fade > 0.0);
+            s.CueId == MainController.VideoAudioId(cue.Id) && s.Fade > 0.0);
     }
 
     [Fact]
@@ -140,7 +140,7 @@ public class HapRoutingTests : ControllerTestBase
         Controller.OnGoPressed();
         Video.EndNaturally(cue.Id);
 
-        Assert.Contains(Audio.Stops, s => s.CueId == MainController.HapAudioId(cue.Id));
+        Assert.Contains(Audio.Stops, s => s.CueId == MainController.VideoAudioId(cue.Id));
         Assert.Empty(Controller.RunningCueIds);
     }
 
@@ -149,7 +149,7 @@ public class HapRoutingTests : ControllerTestBase
     {
         var cue = AddHapCue("pausa");
         Controller.OnGoPressed();
-        int hapId = MainController.HapAudioId(cue.Id);
+        int hapId = MainController.VideoAudioId(cue.Id);
 
         Controller.OnPauseCueToggle(0);
         Assert.Contains(cue.Id, Video.PausedCues);
@@ -165,7 +165,7 @@ public class HapRoutingTests : ControllerTestBase
     {
         var cue = AddHapCue("vivo");
         Controller.OnGoPressed();
-        int hapId = MainController.HapAudioId(cue.Id);
+        int hapId = MainController.VideoAudioId(cue.Id);
 
         Controller.OnCueEditCommitted(0, new Dictionary<string, object?>
         { ["volume"] = 0.4 });
@@ -182,7 +182,7 @@ public class HapRoutingTests : ControllerTestBase
         var cue = AddHapCue("vu");
         Controller.OnGoPressed();
 
-        Audio.RaiseCueLevel(MainController.HapAudioId(cue.Id), 0.5f, 0.25f);
+        Audio.RaiseCueLevel(MainController.VideoAudioId(cue.Id), 0.5f, 0.25f);
         Assert.True(View.CueVuLevels.TryGetValue(cue.Id, out float v));
         Assert.Equal(0.5f, v);
     }
@@ -194,7 +194,7 @@ public class HapRoutingTests : ControllerTestBase
         Controller.OnGoPressed();
 
         // .mov sin pista de audio: el Play del espejo emite error → tragado
-        Audio.RaiseError(MainController.HapAudioId(cue.Id), "sin pista de audio");
+        Audio.RaiseError(MainController.VideoAudioId(cue.Id), "sin pista de audio");
         Assert.NotEqual(CueState.Error, Model.Cues[0].State);
         Assert.Contains(cue.Id, Controller.RunningCueIds);   // el vídeo sigue
     }
@@ -206,7 +206,7 @@ public class HapRoutingTests : ControllerTestBase
         Controller.OnSetPlayhead(0);
 
         Assert.Contains(cue.Id, Video.Preloaded);            // verificación clásica
-        Assert.Contains(MainController.HapAudioId(cue.Id), Audio.Preloads);
+        Assert.Contains(MainController.VideoAudioId(cue.Id), Audio.Preloads);
         Assert.Empty(Video.Prepared);                        // sin standby GPU con HAP
     }
 
@@ -226,7 +226,7 @@ public class HapRoutingTests : ControllerTestBase
         Controller.OnGoPressed();
 
         Assert.Contains(Audio.Fades, f =>
-            f.CueId == MainController.HapAudioId(cue.Id) && f.Target == 0.0);
+            f.CueId == MainController.VideoAudioId(cue.Id) && f.Target == 0.0);
         _ = fade;
     }
 }

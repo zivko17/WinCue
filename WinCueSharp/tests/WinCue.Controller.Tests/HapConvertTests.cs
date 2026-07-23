@@ -118,7 +118,7 @@ public sealed class HapConvertTests : IDisposable
         Assert.Equal(dest, cue.FilePath);                    // ruta oficial nueva
         Assert.True(_controller.CanUndo);                    // commit con undo
         Assert.Contains(_audio.Invalidated, id => id == cue.Id);
-        Assert.Contains(_audio.Invalidated, id => id == MainController.HapAudioId(cue.Id));
+        Assert.Contains(_audio.Invalidated, id => id == MainController.VideoAudioId(cue.Id));
         Assert.Contains(_video.Discarded, id => id == cue.Id);
         // La caché ffprobe se refrescó: el valor sembrado (true) fue re-sondeado
         Assert.False(MediaImporter.IsUnsupportedVideoCodec(dest));
