@@ -107,6 +107,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
     private readonly Dictionary<int, double> _volumes = new();
+    private readonly Dictionary<int, AudioEqParams?> _eqs = new();
     private readonly Dictionary<int, System.Threading.Timer> _fadeTimers = new();
 
     private double _master = 1.0;
@@ -341,6 +342,22 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             TrySetVolume(player, v);
     }
 
+    /// <summary>EQ/compresor del cue vía la cadena af de mpv (paridad con el
+    /// motor de audio). Se guarda por cue: aplica al player actual EN VIVO y
+    /// a los futuros (arranque normal o standby promovido).</summary>
+    public void SetEq(int cueId, AudioEqParams? eq)
+    {
+        _eqs[cueId] = eq;
+        if (_players.TryGetValue(cueId, out var player))
+            TryApplyEq(player, eq);
+    }
+
+    private static void TryApplyEq(MpvPlayer player, AudioEqParams? eq)
+    {
+        try { player.SetProperty("af", MpvAfChain.Build(eq)); }
+        catch (Exception) { /* sin pista de audio / propiedad no crítica */ }
+    }
+
     private void TrySetVolume(MpvPlayer player, double v)
     {
         try { player.SetProperty("volume", Math.Clamp(v * 100.0, 0.0, 100.0) * _master); }
@@ -562,6 +579,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             _players[cueId] = sb.Player;
             _playerSlots[cueId] = (screen, layer);
             _volumes[cueId] = p.Volume;
+            TryApplyEq(sb.Player, _eqs.GetValueOrDefault(cueId));
             long tGo = System.Diagnostics.Stopwatch.GetTimestamp();
             try { sb.Player.SetProperty("pause", false); }
             catch (Exception exc)
@@ -743,6 +761,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             player.SetProperty("audio-pitch-correction", p.PreservePitch);
         }
         catch (Exception) { /* propiedades no críticas */ }
+        TryApplyEq(player, _eqs.GetValueOrDefault(cueId));
 
         // Escala + geometría en una sola pasada (la escala del cue es el zoom
         // base del modo FULL; en Python la geometría FULL pisaba la escala a 0)

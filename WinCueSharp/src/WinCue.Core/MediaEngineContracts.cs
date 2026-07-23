@@ -212,6 +212,11 @@ public interface IVideoEngine
     void StopAll();
     bool FadeVolume(int cueId, double target, double duration, bool stopAfter = false);
     void SetVolume(int cueId, double volume);
+
+    /// <summary>EQ/compresor del audio del cue de vídeo (cadena af de mpv,
+    /// paridad con el motor de audio). Aplica EN VIVO si el cue suena y se
+    /// recuerda para players futuros. Default: no-op (motores falsos).</summary>
+    void SetEq(int cueId, AudioEqParams? eq) { }
     void SetMasterVolume(double volume);
     void PauseAll();
     void ResumeAll();

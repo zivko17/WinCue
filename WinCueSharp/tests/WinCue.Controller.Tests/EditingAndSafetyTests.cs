@@ -511,6 +511,25 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void VideoCue_EqReachesMpvChain_AtGoAndLive()
+    {
+        var v = AddCue(CueType.Video, "clip", setup: c => c.GainDb = 3.0);
+
+        // Al GO: la af llega ANTES del Play (el player nace con ella)
+        Controller.TriggerCueId(v.Id);
+        var atGo = Assert.Single(Video.Eqs);
+        Assert.Equal(v.Id, atGo.CueId);
+        Assert.Equal(3.0, atGo.Eq!.GainDb);
+
+        // Edición EN VIVO de un campo de EQ con el vídeo sonando
+        Video.Eqs.Clear();
+        Controller.OnCueEditCommitted(0, new Dictionary<string, object?> { ["gain_db"] = -6.0 });
+        var live = Assert.Single(Video.Eqs);
+        Assert.Equal(v.Id, live.CueId);
+        Assert.Equal(-6.0, live.Eq!.GainDb);
+    }
+
+    [Fact]
     public void AuditionFader_TrimsCueVolume_AtStartAndLive()
     {
         Settings.Set("audition_volume", 50);

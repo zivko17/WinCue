@@ -963,7 +963,22 @@ public partial class MainWindow : Window, IShowView
     /// patrones de test y blackout) — control fino sin pasar por Settings.</summary>
     private void OnVideoOutputClick(object sender, RoutedEventArgs e)
     {
+        // UX: el menú SE QUEDA ABIERTO al pulsar (StaysOpenOnClick) para
+        // encadenar acciones — mostrar, identificar, probar patrones — sin
+        // reabrirlo cada vez. Los estados (Mostrar/Ocultar, checks de patrón,
+        // blackout) se refrescan EN VIVO. Se cierra con Esc, clic fuera o con
+        // «Ocultar todas» (acción terminal).
         var menu = new ContextMenu();
+
+        // Checks de patrón de TODAS las salidas (para que «Quitar todos los
+        // patrones» los desmarque en vivo, sin cerrar el menú)
+        var patternItems = new List<(int Screen, TestPattern P, MenuItem Item)>();
+        void RefreshPatternChecks(int screen)
+        {
+            foreach (var (sc, p, item) in patternItems)
+                if (sc == screen)
+                    item.IsChecked = (_videoOutputs[sc]?.Pattern ?? TestPattern.None) == p;
+        }
 
         for (int s = 0; s < _videoOutputs.Length; s++)
         {
@@ -978,12 +993,14 @@ public partial class MainWindow : Window, IShowView
                 Header = Loc.T($"Salida {s + 1}", $"Output {s + 1}"),
                 Foreground = new SolidColorBrush(CanvasEditorControl.OutColors[s]),
                 FontWeight = FontWeights.Bold,
+                StaysOpenOnClick = true,
             };
 
             var show = new MenuItem
             {
                 Header = w is { IsVisible: true } ? Loc.T("Ocultar", "Hide") : Loc.T("Mostrar", "Show"),
                 Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                StaysOpenOnClick = true,
             };
             show.Click += (_, _) =>
             {
@@ -997,6 +1014,8 @@ public partial class MainWindow : Window, IShowView
                     _videoOutputs[idx]!.Show();
                     PlaceVideoOutput(idx);
                 }
+                show.Header = _videoOutputs[idx] is { IsVisible: true }
+                    ? Loc.T("Ocultar", "Hide") : Loc.T("Mostrar", "Show");
             };
             sub.Items.Add(show);
 
@@ -1004,8 +1023,13 @@ public partial class MainWindow : Window, IShowView
             {
                 Header = Loc.T("Identificar", "Identify"),
                 Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                StaysOpenOnClick = true,
             };
-            ident.Click += (_, _) => IdentifyOutput(idx);
+            ident.Click += (_, _) =>
+            {
+                IdentifyOutput(idx);
+                show.Header = Loc.T("Ocultar", "Hide");   // identificar la muestra
+            };
             sub.Items.Add(ident);
 
             sub.Items.Add(new Separator());
@@ -1023,6 +1047,7 @@ public partial class MainWindow : Window, IShowView
                     IsCheckable = true,
                     IsChecked = (w?.Pattern ?? TestPattern.None) == pattern,
                     Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                    StaysOpenOnClick = true,
                 };
                 var p = pattern;
                 item.Click += (_, _) =>
@@ -1030,7 +1055,10 @@ public partial class MainWindow : Window, IShowView
                     EnsureVideoOutputWindow(idx);
                     _videoOutputs[idx]!.SetTestPattern(p);
                     PlaceVideoOutput(idx);
+                    RefreshPatternChecks(idx);            // radio en vivo
+                    show.Header = Loc.T("Ocultar", "Hide");
                 };
+                patternItems.Add((idx, p, item));
                 sub.Items.Add(item);
             }
             menu.Items.Add(sub);
@@ -1038,7 +1066,11 @@ public partial class MainWindow : Window, IShowView
 
         menu.Items.Add(new Separator());
 
-        var identAll = new MenuItem { Header = Loc.T("Identificar salidas visibles", "Identify visible outputs") };
+        var identAll = new MenuItem
+        {
+            Header = Loc.T("Identificar salidas visibles", "Identify visible outputs"),
+            StaysOpenOnClick = true,
+        };
         identAll.Click += (_, _) =>
         {
             for (int s = 0; s < _videoOutputs.Length; s++)
@@ -1047,11 +1079,18 @@ public partial class MainWindow : Window, IShowView
         };
         menu.Items.Add(identAll);
 
-        var clearPatterns = new MenuItem { Header = Loc.T("Quitar todos los patrones", "Clear all patterns") };
+        var clearPatterns = new MenuItem
+        {
+            Header = Loc.T("Quitar todos los patrones", "Clear all patterns"),
+            StaysOpenOnClick = true,
+        };
         clearPatterns.Click += (_, _) =>
         {
-            foreach (var w in _videoOutputs)
-                w?.SetTestPattern(TestPattern.None);
+            for (int s = 0; s < _videoOutputs.Length; s++)
+            {
+                _videoOutputs[s]?.SetTestPattern(TestPattern.None);
+                RefreshPatternChecks(s);
+            }
         };
         menu.Items.Add(clearPatterns);
 
@@ -1060,8 +1099,13 @@ public partial class MainWindow : Window, IShowView
             Header = "Blackout (B)",
             IsCheckable = true,
             IsChecked = _blackout,
+            StaysOpenOnClick = true,
         };
-        blackout.Click += (_, _) => ToggleBlackout();
+        blackout.Click += (_, _) =>
+        {
+            ToggleBlackout();
+            blackout.IsChecked = _blackout;
+        };
         menu.Items.Add(blackout);
 
         menu.Items.Add(new Separator());

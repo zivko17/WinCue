@@ -728,6 +728,8 @@ public class MainController
                         $"«{cue.Name}»: HAP → ruta clásica (sin fundidos de opacidad).",
                         $"«{cue.Name}»: HAP → classic path (no opacity fades)."));
                 }
+                _video.SetEq(cue.Id, EqFor(cue));   // antes del Play: el player
+                                                    // nace con la af aplicada
                 _video.Play(cue.Id, cue.FilePath, vparams);
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
@@ -1683,6 +1685,9 @@ public class MainController
                 _audio.SetEq(cue.Id, EqFor(cue));
             if (cue.Id == _auditionSourceCueId && _audio.IsPlaying(AuditionCueId))
                 _audio.SetEq(AuditionCueId, EqFor(cue));
+            // Paridad vídeo: la misma EQ/comp vía la cadena af de mpv
+            if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id))
+                _video.SetEq(cue.Id, EqFor(cue));
         }
 
         // El volumen también sigue a la AUDICIÓN (no vive en _running)

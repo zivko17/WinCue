@@ -207,6 +207,10 @@ public sealed class FakeVideoEngine : IVideoEngine
     }
 
     public void SetVolume(int cueId, double volume) => Volumes[cueId] = volume;
+
+    public readonly List<(int CueId, AudioEqParams? Eq)> Eqs = new();
+    public void SetEq(int cueId, AudioEqParams? eq) => Eqs.Add((cueId, eq));
+
     public void SetMasterVolume(double volume) => Master = volume;
     public void PauseAll() => PausedAll = true;
     public void ResumeAll() => ResumedAll = true;
