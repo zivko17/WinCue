@@ -1,0 +1,7 @@
+# HapLab.View — ajustes locales sobre el .editorconfig del repo.
+# CA1303 se desactiva SOLO aquí: en HapLab (consola) no salta porque compila
+# con InvariantGlobalization, pero WPF necesita culturas (el font cache lanza
+# con invariant) y sin esa propiedad el analizador pide tablas de recursos
+# para los literales del CLI. El lab no se localiza: mensajes en español.
+[*.cs]
+dotnet_diagnostic.CA1303.severity = none

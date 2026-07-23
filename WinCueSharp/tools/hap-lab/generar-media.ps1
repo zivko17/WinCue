@@ -30,4 +30,10 @@ Gen "bench-2160-chunked.mov" "-f lavfi -i testsrc2=size=3840x2160:rate=30:durati
 # Con pista de audio PCM (el demuxer debe enumerarla e ignorarla)
 Gen "bench-1080-audio.mov" "-f lavfi -i testsrc2=size=1920x1080:rate=30:duration=10 -f lavfi -i sine=frequency=440:duration=10 -c:v hap -format hap -c:a pcm_s16le -shortest"
 
+# 60 fps, 30 s, chunked (4) — media del PASO 2 (presentación GPU: 1080p60 y 4K60)
+Gen "bench-1080-60-hap1.mov" "-f lavfi -i testsrc2=size=1920x1080:rate=60:duration=30 -c:v hap -format hap -chunks 4"
+Gen "bench-1080-60-hapy.mov" "-f lavfi -i testsrc2=size=1920x1080:rate=60:duration=30 -c:v hap -format hap_q -chunks 4"
+Gen "bench-2160-60-hap1.mov" "-f lavfi -i testsrc2=size=3840x2160:rate=60:duration=30 -c:v hap -format hap -chunks 4"
+Gen "bench-2160-60-hapy.mov" "-f lavfi -i testsrc2=size=3840x2160:rate=60:duration=30 -c:v hap -format hap_q -chunks 4"
+
 Write-Host "Media de benchmark generada en $dir"

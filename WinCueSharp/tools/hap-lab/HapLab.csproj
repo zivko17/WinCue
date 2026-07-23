@@ -18,8 +18,9 @@
   </PropertyGroup>
 
   <ItemGroup>
-    <!-- El proyecto de tests vive en subcarpeta: fuera del glob por defecto -->
+    <!-- Los proyectos de tests y de vista viven en subcarpetas: fuera del glob -->
     <Compile Remove="HapLab.Tests/**/*.cs" />
+    <Compile Remove="HapLab.View/**/*.cs" />
   </ItemGroup>
 
   <ItemGroup>

@@ -1,10 +1,12 @@
-# hap-lab — PASO 1 del motor de vídeo propio: demux + decode HAP sin FFmpeg
+# hap-lab — laboratorio del motor de vídeo propio (sin FFmpeg)
 
-Laboratorio headless que demuestra que WinCue puede leer un `.mov` HAP y llegar
-a los datos DXT listos para subir a GPU **sin FFmpeg**: parser propio del
-contenedor QuickTime + parser de frames HAP según la [especificación pública de
-Vidvox](https://github.com/Vidvox/hap) + descompresión Snappy
-([Snappier](https://www.nuget.org/packages/Snappier), MIT).
+- **PASO 1** (`HapLab`, headless): demux `.mov` + decode HAP a DXT en CPU.
+  Parser propio del contenedor QuickTime + parser de frames HAP según la
+  [especificación pública de Vidvox](https://github.com/Vidvox/hap) +
+  descompresión Snappy ([Snappier](https://www.nuget.org/packages/Snappier), MIT).
+- **PASO 2** (`HapLab.View`, WPF): presentación GPU de esos frames con la MISMA
+  técnica de superficies del compositor real de WinCue (D3D11 → shared handle →
+  D3D9Ex → D3DImage). Ver la sección "Paso 2" más abajo.
 
 ## Cómo usarlo
 
@@ -15,8 +17,15 @@ powershell -File generar-media.ps1
 # Info de un fichero
 dotnet run -c Release -- media/bench-1080-hap1.mov
 
-# Benchmark completo (decodifica todos los frames)
+# Benchmark de decode CPU (paso 1)
 dotnet run -c Release -- media/bench-1080-hap1.mov --bench
+
+# Presentación GPU con ventana + overlay de stats (paso 2)
+dotnet run --project HapLab.View -c Release -- media/bench-1080-60-hap1.mov
+#   [--bench-seconds N]          acabar a los N s (default: clip entero)
+#   [--upload dynamic|update]    estrategia de subida de textura (default dynamic)
+#   [--pace thread|compositor]   quién marca la cadencia (default thread)
+#   [--dump-frame out.png [--dump-index N]]  volcado de verificación del RT
 
 # Tests (generan su propia media pequeña 320x240 si falta)
 dotnet test hap-lab.sln
@@ -120,3 +129,147 @@ prefetch), y (2) la subida del DXT a la GPU (siguiente paso del laboratorio:
 - La API de decode escribe sobre un buffer que aporta el llamador
   (`HapFrame.Decode(frame, output, parallel)`): cero allocaciones por frame en
   régimen, pensando ya en el ring de buffers del player real.
+
+---
+
+# Paso 2 — presentación GPU con la técnica de superficies de WinCue
+
+`HapLab.View` (WPF, net8.0-windows) es el **ensayo general de la integración**:
+presenta los frames del paso 1 por GPU exactamente con la coreografía del
+compositor real (`GlDxInterop` + `CompositorLayerControl`) y mide si aguanta
+1080p60 y 4K60 sin drops. **Veredicto: sí, con margen de sobra** — el criterio
+de éxito (1080p60 0 drops, 4K60 ≤ 1 %) se cumple.
+
+## Arquitectura
+
+```
+hilo decode (hap-decode)      hilo presentación (hap-present)        hilo UI WPF
+──────────────────────        ───────────────────────────────        ─────────────────────
+.mov → sample → HapFrame  →   ring 4 frames DXT                      D3DImage.Lock()
+(E/S real + Snappy,           FramePacer (floor(t·fps))                StretchRect
+buffers reutilizados)         Map WRITE_DISCARD → tex BC1/BC3          compartida→present
+                              triángulo fullscreen + pixel shader      AddDirtyRect
+                              → RT B8G8R8A8 COMPARTIDO → Flush       D3DImage.Unlock()
+                              BeginInvoke coalescido ───────────────▶ (patrón InvalidateFrame)
+```
+
+- **D3D11** (Vortice.Windows 3.6.2, MIT): textura BC1 (Hap1) / BC3 (Hap5/HapY)
+  — la GPU descomprime el DXT al muestrear —, quad fullscreen por `SV_VertexID`
+  (sin vertex buffer), pixel shader passthrough o YCoCg→RGB, render target
+  `B8G8R8A8_UNorm` con `ResourceOptionFlags.Shared`.
+- **D3D9Ex** abre ese shared handle con `CreateTexture(..., D3DFMT_A8R8G8B8,
+  Pool.Default, ref handle)` → `GetSurfaceLevel(0)`. WPF **nunca** toca esa
+  superficie: hay una superficie de PRESENTACIÓN separada (no compartida) que
+  es el back buffer del `D3DImage`, y la copia compartida→presentación
+  (`StretchRect`) ocurre SIEMPRE dentro del `Lock` con `AddDirtyRect`
+  (contrato de la auditoría 05). Todas las superficies se crean UNA vez.
+- **Shader HapY**: conversión Scaled YCoCg→RGB del shader de referencia de
+  Vidvox (`ScaledCoCgYToRGBA`): Co=R, Cg=G, escala=B (s = B·255/8 + 1), Y=A,
+  offset de croma −128/255. La misma matemática está en `YCoCgReference` (CPU)
+  y testeada; el pipeline completo se validó contra el decode de ffmpeg del
+  mismo frame (`--dump-frame`): **PSNR 51,6 dB** — solo redondeo del
+  descompresor DXT hardware vs software, imagen indistinguible.
+
+## Resultados (clips enteros de 30 s, testsrc2 chunked ×4, subida Dynamic)
+
+Máquina: Ryzen 9 9900X, **RTX 5070 Ti** (driver 575.x), pantalla 1080p @ 99 Hz,
+Windows 11, .NET 8 Release. `pace thread` (por defecto). Tiempos en ms.
+
+| Clip | Presentados | Drops | Late | Subida p50/p95 | Render p50 | Copia p50 | Decode p50 | CPU (24C) |
+|---|---:|---:|---:|---:|---:|---:|---:|---:|
+| 1080p60 Hap1 | 1800/1800 | **0** | 0 | 0,05 / 0,06 | 0,05 | 0,03 | 0,10 | 0,8 % |
+| 1080p60 HapY | 1800/1800 | **0** | 0 | 0,09 / 0,10 | 0,05 | 0,09 | 0,17 | 0,6 % |
+| 4K60 Hap1 | 1800/1800 | **0** | 0 | 0,20 / 0,22 | 0,06 | 0,12 | 0,37 | 1,3 % |
+| 4K60 HapY | 1799/1800 | **1** (0,06 %) | 0 | 0,32 / 0,37 | 0,07 | 0,06 | 0,77 | 1,5 % |
+| 4K60 HapY (`--upload update`) | 1797/1800 | 3 (0,17 %) | 0 | 0,31 / 0,37 | 0,08 | 0,05 | 0,65 | 0,7 % |
+
+- El presupuesto por frame a 60 fps es 16,7 ms; el camino caliente completo
+  (subida + render + copia) consume **~0,5 ms en 4K** — sobra un orden de
+  magnitud. El único drop del 4K60 HapY fue un pico aislado de 22 ms del
+  `Flush` (¿compilación de shader del driver/GC?), no sistemático.
+- **Subida Dynamic vs Update**: `Map WRITE_DISCARD` sobre textura DYNAMIC
+  **funciona con BC1/BC3 en este driver NVIDIA** (no hizo falta el fallback) y
+  rinde prácticamente igual que `UpdateSubresource` (p50 0,32 vs 0,31 ms en 4K
+  BC3, ~8,3 MB/frame ≈ 26 GB/s efectivos). Nos quedamos con Dynamic (una copia
+  menos conceptual); Update queda como `--upload update` y como fallback
+  codificado por si otro driver rechaza BC dinámico.
+
+## El hallazgo importante: quién marca la cadencia
+
+El plan original ("todo en `CompositionTarget.Rendering` con reloj Stopwatch")
+resultó ser un callejón que merece documentarse — ES el conocimiento del lab:
+
+1. **Stopwatch + tick de WPF = 25 % de drops** en 1080p60 con la GPU aburrida
+   (CPU 0,5 %). El timer de render de WPF dispara a ~65-70 Hz con jitter y
+   cuantización de ~15,6 ms; contra un reloj de pared, `floor(t·fps)` cae en
+   aliasing puro: huecos >33 ms entre ticks aunque la media sobre.
+2. **Reloj del compositor (`RenderingEventArgs.RenderingTime`) = ~10 %**. Mejor
+   (es la línea de tiempo con la que el DWM presentará el pase), pero el timer
+   sigue sin estar enganchado al vsync ni a la cadencia del contenido:
+   1609/1800 presentados en el mismo clip. Queda disponible como
+   `--pace compositor` para reproducir la medida.
+3. **Hilo de presentación propio (`--pace thread`, default) = 0 drops.** La
+   arquitectura REAL de WinCue: el motor escribe en la superficie compartida a
+   la cadencia del clip (Sleep(1) con `timeBeginPeriod(1)` + spin fino, como
+   mpv) y el hilo de UI solo hace la copia dentro del Lock, coalescida
+   (patrón `InvalidateFrame` de `CompositorLayerControl`). El UI coalesció
+   1 frame de 1800 por corrida (el DWM compone a su ritmo; eso no es un drop
+   del motor, es el mismo comportamiento que tiene hoy mpv+WinCue).
+
+Conclusión para la integración: el player propio debe conservar el hilo de
+render con reloj propio (como `MpvGpuRenderer` hoy) y NO atar la cadencia del
+vídeo al tick de WPF.
+
+## Fontanería del interop (lo que costaba encontrar)
+
+- **D3D11 → D3D9Ex funcionó a la primera** en esta máquina: RT
+  `B8G8R8A8_UNorm` + `ResourceOptionFlags.Shared`, handle por
+  `IDXGIResource.SharedHandle`, y en D3D9Ex `CreateTexture` con
+  `D3DFMT_A8R8G8B8` + `Usage.RenderTarget` + `Pool.Default` pasando el handle
+  existente en el parámetro `pSharedHandle`. No hizo falta la ruta inversa
+  (D3D9 crea y D3D11 abre, la que usa el WPFDXInterop de Microsoft) ni formatos
+  alternativos.
+- **iGPU + dGPU**: la máquina tiene una Radeon integrada y la RTX. El device
+  D3D11 se crea sobre el adaptador `HighPerformance`
+  (`IDXGIFactory6.EnumAdapterByGpuPreference`) y el device D3D9Ex se crea en el
+  MISMO adaptador **emparejando por LUID** (`IDirect3D9Ex.GetAdapterLuid`); el
+  ordinal 0 de D3D9 no es fiable con dos GPUs. Sin esto el shared handle no
+  abre (o abre con copia cruzada entre GPUs).
+- **Sincronización**: `Flush` del contexto D3D11 tras el draw, antes del
+  `StretchRect` D3D9 (sin keyed mutex; suficiente para superficie compartida
+  same-adapter, igual que hace hoy el interop GL↔D3D9 de WinCue con `glFlush`).
+- `InvariantGlobalization=true` **rompe WPF** (el font cache lanza
+  `CultureNotFoundException`): quitado del proyecto de vista. Efecto colateral:
+  CA1303 se reactiva (estaba suprimido por invariant) → desactivado por
+  `.editorconfig` local del proyecto con justificación.
+- `Thread.Sleep(1)` real requiere `timeBeginPeriod(1)` (winmm): sin él la
+  granularidad es ~15,6 ms e imposible clavar 16,7 ms de período.
+
+## Decisiones del paso 2
+
+- **Vortice.Windows 3.6.2** (Vortice.Direct3D11/Direct3D9/D3DCompiler, MIT):
+  decisión de LAB para iterar rápido. La integración final decidirá Vortice vs
+  P/Invoke crudo (el estilo `D3D9Minimal` de `GlDxInterop.cs`); la superficie
+  de API usada es pequeña (device, textura, RT/SRV, Map, StretchRect) y
+  portable a mano si se quiere cero dependencias.
+- **Shaders compilados en runtime** (D3DCompiler): sin paso de build; la
+  integración puede precompilarlos si molesta el coste de arranque (~ms).
+- **Selector de frames puro** (`FramePacer`, Peek/Commit): sin dependencias de
+  WPF/D3D, testeado en headless (avance normal, drops, clamp al final,
+  monotonía, reintento cuando el decoder va tarde). Commit solo si el frame se
+  presentó de verdad.
+- **Alfa forzado a 1** en el pixel shader: el lab presenta opaco; la mezcla por
+  capas es del compositor real.
+- Los tests del paso 1 siguen intactos; la suite queda en **42 tests** (22 del
+  paso 1 + 20 nuevos de pacing y YCoCg), cero warnings en toda la solución.
+
+## Qué queda para el paso 3 (integración)
+
+- Contenido real de VJ (bitrates 10-30× los de testsrc2) y E/S de disco
+  sostenida; el ring de 4 frames absorbió picos de decode de 50 ms, pero con
+  bitrates reales el prefetch de disco será el protagonista.
+- Varias capas simultáneas (2-3 players sobre el mismo device/ventana) y
+  crossfades — el pool de superficies persistentes de la auditoría 05.
+- Audio y sincronía A/V (el paso 2 ignora la pista de audio).
+- Decidir Vortice vs P/Invoke y dónde vive el hilo de presentación en
+  `WinCue.Video` (reutilizar el contrato `IVideoLayerSurface` existente).

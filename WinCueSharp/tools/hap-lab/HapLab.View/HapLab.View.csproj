@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- =========================================================================
+       HapLab.View — laboratorio del motor de vídeo propio (PASO 2).
+       Presentación GPU de frames HAP con la MISMA técnica de superficies que
+       el compositor real de WinCue: render D3D11 (textura BC1/BC3 → quad con
+       pixel shader → render target compartido) → superficie D3D9Ex →
+       D3DImage de WPF (escritura SIEMPRE dentro del Lock + AddDirtyRect).
+       Proyecto paralelo: NO forma parte de la solución principal WinCueSharp.
+       ========================================================================= -->
+
+  <PropertyGroup>
+    <!-- Exe (no WinExe): el bench imprime el resumen por stdout -->
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <UseWPF>true</UseWPF>
+    <AssemblyName>hap-lab-view</AssemblyName>
+    <RootNamespace>HapLab.View</RootNamespace>
+    <!-- OJO: sin InvariantGlobalization — el font cache de WPF necesita culturas -->
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- Copia de filas del DXT al puntero mapeado de D3D11 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Vortice (MIT): wrappers finos de D3D11/D3D9/D3DCompiler. Decisión de
+         LAB para iterar rápido; la integración final decidirá Vortice vs
+         P/Invoke crudo (ver INFORME.md). -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
+    <PackageReference Include="Vortice.Direct3D9" Version="3.6.2" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\HapLab.csproj" />
+  </ItemGroup>
+
+</Project>
