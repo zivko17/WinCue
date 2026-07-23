@@ -83,6 +83,12 @@ public class SettingsManager
         ["go_min_interval_ms"] = 200, // anti doble-tap del GO (0 = desactivado)
         ["fade_all_seconds"] = 5.0,   // duración del FADE ALL manual
 
+        // ── PANIC (emergencia) ───────────────────────────────────────
+        ["panic_fade"]        = 1.5,      // s de fundido del PANIC
+        ["panic_action"]      = "black",  // "black" | "image" (imagen de respaldo)
+        ["panic_image_path"]  = "",       // cartela mostrada en las salidas si "image"
+        ["panic_double_hard"] = true,     // 2ª pulsación en <2 s = corte duro
+
         // ── Interfaz ─────────────────────────────────────────────────
         // Latencia OFF por defecto (útil para depurar, ruido para operar)
         ["show_latency_column"] = false,

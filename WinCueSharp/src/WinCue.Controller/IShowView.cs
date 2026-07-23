@@ -44,6 +44,12 @@ public interface IShowView
     void UpdateTransport(bool paused);
     void UpdateCountdown(double? secondsRemaining);
     void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows);
+
+    /// <summary>Imagen de respaldo del PANIC: mostrarla en las salidas visibles
+    /// (fundido de entrada de fadeSeconds) y quitarla. Default no-op (fakes y
+    /// vistas sin salidas de vídeo).</summary>
+    void ShowBackupSlate(double fadeSeconds) { }
+    void HideBackupSlate() { }
     /// <summary>RMS estéreo del programa (VU junto al monitor PGM).</summary>
     void UpdateVuMeter(float left, float right);
 

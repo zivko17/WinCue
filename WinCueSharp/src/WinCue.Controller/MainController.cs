@@ -220,12 +220,39 @@ public class MainController
         _view.FlashStatus(Loc.T("■ STOP ALL — todos los cues detenidos", "■ STOP ALL — all cues stopped"));
     }
 
-    /// <summary>Panic: fundido de salida global y parada de todo.</summary>
+    private long _lastPanicTicks;
+
+    /// <summary>Panic: fundido de salida global (panic_fade, 1,5 s por defecto)
+    /// y parada de todo. Con panic_action = "image", muestra la imagen de
+    /// respaldo en las salidas visibles (se quita sola al siguiente GO de
+    /// vídeo). Segunda pulsación en &lt;2 s = CORTE DURO (panic_double_hard).</summary>
     public void OnPanic()
     {
+        double fade = Math.Clamp(_settings.Get("panic_fade", PanicFade), 0.0, 10.0);
+        bool showImage = _settings.Get("panic_action", "black") == "image";
+
+        bool doublePress = _settings.Get("panic_double_hard", true) &&
+            _lastPanicTicks != 0 &&
+            Stopwatch.GetElapsedTime(_lastPanicTicks).TotalSeconds < 2.0;
+        _lastPanicTicks = Stopwatch.GetTimestamp();
+
+        if (doublePress)
+        {
+            Log("PANIC (doble — corte duro)");
+            StopEverything(fade: 0.0);
+            if (showImage)
+                _view.ShowBackupSlate(0.15);
+            _view.FlashStatus(Loc.T("⚠⚠ PANIC ×2 — CORTE DURO", "⚠⚠ PANIC ×2 — HARD CUT"));
+            return;
+        }
+
         Log("PANIC");
-        StopEverything(fade: PanicFade);
-        _view.FlashStatus(Loc.T($"⚠ PANIC — fundido de {PanicFade:F0}s y parada", $"⚠ PANIC — {PanicFade:F0}s fade and stop"));
+        StopEverything(fade: fade);
+        if (showImage)
+            _view.ShowBackupSlate(fade);
+        _view.FlashStatus(showImage
+            ? Loc.T($"⚠ PANIC — fundido de {fade:0.#}s a imagen de respaldo", $"⚠ PANIC — {fade:0.#}s fade to backup image")
+            : Loc.T($"⚠ PANIC — fundido de {fade:0.#}s y parada", $"⚠ PANIC — {fade:0.#}s fade and stop"));
     }
 
     /// <summary>FADE ALL: fundido elegante de todo (distinto del PANIC de
@@ -653,6 +680,8 @@ public class MainController
 
             case CueType.Video:
                 ModelState(idx, CueState.Playing);
+                // La imagen de respaldo del PANIC se retira al volver el vídeo
+                _view.HideBackupSlate();
                 // Fade de entrada pendiente (con offset, lo que quede): además
                 // de la opacidad, es la señal de CROSSFADE en la misma pista
                 // (el motor mantiene vivo al saliente durante el fundido)

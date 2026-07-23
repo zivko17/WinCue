@@ -69,6 +69,14 @@ public partial class VideoOutputWindow : Window
     private bool _blackout;
     private bool _hwndMode;   // último modo pedido por el motor
 
+    // Imagen de respaldo del PANIC (cartela de cortesía): overlay WPF con
+    // fundido de entrada. En modo clásico el host WinForms taparía el overlay
+    // (airspace) → mientras la cartela está activa se oculta ese host, igual
+    // que hacen los patrones de test.
+    private readonly Grid _slateHost;
+    private readonly Image _slateImage;
+    private bool _slate;
+
     public VideoOutputWindow()
     {
         InitializeComponent();
@@ -130,14 +138,73 @@ public partial class VideoOutputWindow : Window
             Visibility = Visibility.Collapsed,
         };
 
+        _slateImage = new Image
+        {
+            Stretch = Stretch.Uniform,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        _slateHost = new Grid
+        {
+            Background = Brushes.Black,
+            Visibility = Visibility.Collapsed,
+            IsHitTestVisible = false,
+        };
+        _slateHost.Children.Add(_slateImage);
+
         var root = new Grid { Background = System.Windows.Media.Brushes.Black };
         root.Children.Add(_hwndHost);
         root.Children.Add(_gpuHost);
+        root.Children.Add(_slateHost);
         root.Children.Add(_patternHost);
         root.Children.Add(_identifyOverlay);
         root.Children.Add(_blackoutVeil);
         _gpuHost.Visibility = Visibility.Collapsed;
         Content = root;
+    }
+
+    // ==================================================================
+    // Imagen de respaldo del PANIC
+    // ==================================================================
+
+    /// <summary>Muestra la cartela de respaldo con fundido de entrada. En modo
+    /// compositor es un crossfade real sobre el vídeo que se apaga; en clásico
+    /// el host nativo se oculta (airspace) y la cartela entra sobre negro.</summary>
+    public void ShowBackupSlate(string imagePath, double fadeSeconds)
+    {
+        try
+        {
+            var bmp = new System.Windows.Media.Imaging.BitmapImage();
+            bmp.BeginInit();
+            bmp.UriSource = new Uri(imagePath, UriKind.Absolute);
+            bmp.CacheOption = System.Windows.Media.Imaging.BitmapCacheOption.OnLoad;
+            bmp.EndInit();
+            bmp.Freeze();
+            _slateImage.Source = bmp;
+        }
+        catch (Exception)
+        {
+            return;   // imagen ilegible: mejor negro que romper el PANIC
+        }
+        _slate = true;
+        _slateHost.Opacity = 0.0;
+        _slateHost.Visibility = Visibility.Visible;
+        _slateHost.BeginAnimation(OpacityProperty,
+            new System.Windows.Media.Animation.DoubleAnimation(0.0, 1.0,
+                TimeSpan.FromSeconds(Math.Max(0.05, fadeSeconds))));
+        ApplyHostVisibility();
+    }
+
+    /// <summary>Quita la cartela (al siguiente GO de vídeo o a mano).</summary>
+    public void HideBackupSlate()
+    {
+        if (!_slate)
+            return;
+        _slate = false;
+        _slateHost.BeginAnimation(OpacityProperty, null);
+        _slateHost.Visibility = Visibility.Collapsed;
+        _slateImage.Source = null;
+        ApplyHostVisibility();
     }
 
     /// <summary>La ventana se adapta al modo que USA el motor: pedir un HWND
@@ -153,7 +220,9 @@ public partial class VideoOutputWindow : Window
     private void ApplyHostVisibility()
     {
         bool videoVisible = _pattern == TestPattern.None && !_blackout;
-        _hwndHost.Visibility = _hwndMode && videoVisible
+        // La cartela de respaldo tapa el host CLÁSICO (airspace WinForms);
+        // sobre el compositor (WPF) convive y el fundido es un crossfade real.
+        _hwndHost.Visibility = _hwndMode && videoVisible && !_slate
             ? Visibility.Visible : Visibility.Collapsed;
         _gpuHost.Visibility = !_hwndMode && (_pattern == TestPattern.None)
             ? Visibility.Visible : Visibility.Collapsed;

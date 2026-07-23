@@ -356,6 +356,25 @@ public class EditingAndSafetyTests : ControllerTestBase
     }
 
     [Fact]
+    public void Panic_DoublePress_IsHardCut_AndSinglePressIsNot()
+    {
+        Controller.OnPanic();
+        Assert.DoesNotContain(View.Statuses, s => s.Contains("CORTE DURO"));
+
+        Controller.OnPanic();   // segunda pulsación inmediata (<2 s)
+        Assert.Contains(View.Statuses, s => s.Contains("CORTE DURO"));
+    }
+
+    [Fact]
+    public void Panic_DoubleHardDisabled_NeverHardCuts()
+    {
+        Settings.Set("panic_double_hard", false);
+        Controller.OnPanic();
+        Controller.OnPanic();
+        Assert.DoesNotContain(View.Statuses, s => s.Contains("CORTE DURO"));
+    }
+
+    [Fact]
     public void ExportPortable_CopiesMediaRelative_WithoutMutatingWorkingShow()
     {
         // Media en una carpeta APARTE (no junto al show de trabajo)

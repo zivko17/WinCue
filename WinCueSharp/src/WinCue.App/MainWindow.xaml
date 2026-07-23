@@ -66,14 +66,20 @@
                     <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
                             Background="#1e7e34" FontSize="20" FontWeight="Bold"
                             Content="GO ▶" ToolTip="Espacio"/>
+                    <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
+                            Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
                     <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
                             Content="■ STOP ALL" ToolTip="Escape"/>
                     <Button x:Name="FadeAllButton" Click="OnFadeAllClick" Height="44"
-                            Content="◢ FADE ALL" ToolTip="Fundido elegante de todo (Settings → duración)"/>
+                            MouseRightButtonUp="OnFadeAllRightClick"
+                            Content="◢ FADE ALL"
+                            ToolTip="{local:Loc Es=Fundido elegante de todo · clic derecho: duración,
+                                                En=Elegant fade of everything · right-click: duration}"/>
                     <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
-                            Background="#7e1e1e" Content="⚠ PANIC"/>
-                    <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
-                            Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
+                            MouseRightButtonUp="OnPanicRightClick"
+                            Background="#7e1e1e" Content="⚠ PANIC"
+                            ToolTip="{local:Loc Es=Fundido rápido y parada · doble pulsación: corte duro · clic derecho: opciones,
+                                                En=Quick fade and stop · double press: hard cut · right-click: options}"/>
                     <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
                         <TextBlock Text="{local:Loc Es=SIGUIENTE, En=NEXT}" FontSize="9"
                                    Foreground="{StaticResource FgDim}"/>

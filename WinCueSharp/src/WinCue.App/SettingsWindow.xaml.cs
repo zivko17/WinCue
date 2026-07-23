@@ -227,6 +227,16 @@ public partial class SettingsWindow : Window
         Spin("go_min_interval_ms", go, Loc.T("Anti doble-GO (ms; 0 = desactivado):", "Anti double-GO (ms; 0 = off):"), 0, 2000);
         Spin("fade_all_seconds", go, Loc.T("Duración del FADE ALL (s):", "FADE ALL duration (s):"), 1, 60);
 
+        var panic = Group(root, Loc.T("EMERGENCIA (PANIC)", "EMERGENCY (PANIC)"));
+        Spin("panic_fade", panic, Loc.T("Fundido del PANIC (s):", "PANIC fade (s):"), 0, 10);
+        Combo("panic_action", panic, Loc.T("Tras el fundido:", "After the fade:"),
+            ("black", Loc.T("Negro (parada normal)", "Black (normal stop)")),
+            ("image", Loc.T("Imagen de respaldo en las salidas", "Backup image on outputs")));
+        PathField("panic_image_path", panic, Loc.T("Imagen de respaldo:", "Backup image:"), folder: false);
+        Check("panic_double_hard", panic, Loc.T("Doble pulsación (<2 s) = corte duro inmediato", "Double press (<2 s) = immediate hard cut"));
+        Note(panic, Loc.T("La imagen se quita sola al siguiente GO de vídeo. Atajos: clic derecho sobre el botón PANIC.",
+                    "The image clears itself on the next video GO. Shortcuts: right-click the PANIC button."));
+
         var ui = Group(root, Loc.T("VISTA", "VIEW"));
         Check("show_latency_column", ui, Loc.T("Mostrar columna de latencia", "Show latency column"));
         Check("show_next_cue_label", ui, Loc.T("Mostrar etiqueta del siguiente cue", "Show next-cue label"));

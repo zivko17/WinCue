@@ -663,6 +663,105 @@ public partial class MainWindow : Window, IShowView
     private void OnPanicClick(object sender, RoutedEventArgs e) => _controller.OnPanic();
     private void OnPauseClick(object sender, RoutedEventArgs e) => _controller.OnPauseToggle();
 
+    // ── Imagen de respaldo del PANIC (IShowView) ───────────────────────
+
+    /// <summary>Muestra la cartela de respaldo en las salidas VISIBLES (la
+    /// llama el controlador en el PANIC con panic_action = "image").</summary>
+    public void ShowBackupSlate(double fadeSeconds)
+    {
+        string path = _settings.Get("panic_image_path", "");
+        if (path.Length == 0 || !System.IO.File.Exists(path))
+        {
+            FlashStatus(Loc.T(
+                "PANIC: no hay imagen de respaldo válida (clic derecho en PANIC → Elegir imagen).",
+                "PANIC: no valid backup image (right-click PANIC → Choose image)."));
+            return;
+        }
+        foreach (var w in _videoOutputs)
+            if (w is { IsVisible: true })
+                w.ShowBackupSlate(path, fadeSeconds);
+    }
+
+    /// <summary>Quita la cartela de todas las salidas.</summary>
+    public void HideBackupSlate()
+    {
+        foreach (var w in _videoOutputs)
+            w?.HideBackupSlate();
+    }
+
+    /// <summary>Clic derecho en PANIC: opciones de la imagen de respaldo (la
+    /// configuración completa vive en Settings → GO).</summary>
+    private void OnPanicRightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        bool imageOn = _settings.Get("panic_action", "black") == "image";
+        var menu = new ContextMenu();
+        var toggle = new MenuItem
+        {
+            Header = Loc.T("Imagen de respaldo al hacer PANIC", "Backup image on PANIC"),
+            IsCheckable = true,
+            IsChecked = imageOn,
+        };
+        toggle.Click += (_, _) =>
+        {
+            _settings.Set("panic_action", imageOn ? "black" : "image");
+            FlashStatus(imageOn
+                ? Loc.T("PANIC → negro.", "PANIC → black.")
+                : Loc.T("PANIC → imagen de respaldo.", "PANIC → backup image."));
+        };
+        menu.Items.Add(toggle);
+        menu.Items.Add(Mi(Loc.T("Elegir imagen…", "Choose image…"), "", () =>
+        {
+            var dlg = new OpenFileDialog
+            {
+                Filter = "Imagen|*.jpg;*.jpeg;*.png;*.bmp;*.webp|Todos|*.*",
+            };
+            if (dlg.ShowDialog(this) == true)
+            {
+                _settings.SetMany(new Dictionary<string, object?>
+                {
+                    ["panic_image_path"] = dlg.FileName,
+                    ["panic_action"] = "image",
+                });
+                FlashStatus(Loc.T(
+                    $"Imagen de respaldo: {System.IO.Path.GetFileName(dlg.FileName)} (activada).",
+                    $"Backup image: {System.IO.Path.GetFileName(dlg.FileName)} (enabled)."));
+            }
+        }));
+        menu.Items.Add(Mi(Loc.T("Quitar imagen de las salidas", "Remove image from outputs"), "",
+            HideBackupSlate));
+        menu.PlacementTarget = (UIElement)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
+    /// <summary>Clic derecho en FADE ALL: presets de duración del fundido.</summary>
+    private void OnFadeAllRightClick(object sender, System.Windows.Input.MouseButtonEventArgs e)
+    {
+        e.Handled = true;
+        double current = _settings.Get("fade_all_seconds", 5.0);
+        var menu = new ContextMenu();
+        foreach (double s in new[] { 3.0, 5.0, 10.0, 20.0 })
+        {
+            var item = new MenuItem
+            {
+                Header = Loc.T($"Fundido de {s:0.#} s", $"{s:0.#} s fade"),
+                IsCheckable = true,
+                IsChecked = Math.Abs(current - s) < 0.01,
+            };
+            double v = s;
+            item.Click += (_, _) =>
+            {
+                _settings.Set("fade_all_seconds", v);
+                FlashStatus(Loc.T($"FADE ALL: {v:0.#} s.", $"FADE ALL: {v:0.#} s."));
+            };
+            menu.Items.Add(item);
+        }
+        menu.PlacementTarget = (UIElement)sender;
+        menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
+        menu.IsOpen = true;
+    }
+
     // ── Reloj del show (restante ↔ transcurrido, clic para alternar) ────
     private bool _clockCountdown = true;
     private long? _showStartTicks;
