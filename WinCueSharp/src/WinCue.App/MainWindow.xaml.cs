@@ -1525,6 +1525,11 @@ public partial class MainWindow : Window, IShowView
                 menu.Items.Add(Mi("𝄞 Normalizar sonoridad (−16 LUFS)", "",
                     () => NormalizeLoudness(selRows), edit));
             }
+            // Solo vídeos aún no-HAP; en modo SHOW queda deshabilitado (la
+            // conversión es tarea de preparación, no de directo)
+            if (MainController.IsHapConvertible(cue))
+                menu.Items.Add(Mi(Loc.T("🎞 Convertir a HAP (motor propio)", "🎞 Convert to HAP (native engine)"), "",
+                    () => _controller.ConvertCueToHap(row), edit));
             menu.Items.Add(Mi("⏸ Pausar / reanudar", "Ctrl+P",
                 () => _controller.OnPauseCueToggle(row), running && cue.IsMedia()));
             menu.Items.Add(Mi("■ Detener", "S",
@@ -1578,6 +1583,10 @@ public partial class MainWindow : Window, IShowView
         menu.Items.Add(InsertSubmenu(row, edit));
         menu.Items.Add(Mi("＋ Importar archivos…", "",
             () => OnImportFiles(this, new RoutedEventArgs()), edit));
+        // Acción de show: preparar TODOS los vídeos para el motor propio
+        if (_model.Cues.Any(MainController.IsHapConvertible))
+            menu.Items.Add(Mi(Loc.T("🎞 Convertir todos los vídeos a HAP", "🎞 Convert all videos to HAP"), "",
+                () => _controller.ConvertAllVideosToHap(), edit));
         return menu;
     }
 
