@@ -86,6 +86,18 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private readonly System.Collections.Concurrent.ConcurrentDictionary<int, CueSampleProvider>
         _clockProviders = new();
 
+    // STREAMING (paso 4): fuentes ffmpeg pre-lanzadas por Preload (standby),
+    // listas para consumir en el GO; y tokens de los spawns en vuelo para que
+    // un Stop/replay descarte el arranque obsoleto (y mate su proceso).
+    private sealed record ParkedStream(
+        ICueAudioSource Source, string Path, double TrimStart, double TrimEnd);
+    private readonly Dictionary<int, ParkedStream> _parkedStreams = new();
+    private readonly List<int> _parkedOrder = new();       // poda FIFO (máx 2)
+    private readonly Dictionary<int, long> _pendingStreamPlay = new();
+    private readonly Dictionary<int, long> _pendingPark = new();
+    private long _streamSeq;
+    private readonly Func<string, AudioPlayParams, ICueAudioSource>? _streamingFactory;
+
     private float _master = 1.0f;
     private bool _disposed;
 
@@ -107,13 +119,16 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
     /// <param name="dispatch">Remite un callback al main thread (en WPF:
     /// a => dispatcher.BeginInvoke(a)). null → invocar inline.</param>
+    /// <param name="streamingFactory">Fábrica de fuentes de STREAMING
+    /// inyectable (tests). null → StreamingAudioSource real (ffmpeg).</param>
     public AudioEngine(
         Action<Action>? dispatch = null,
         string? deviceId = null,
         string driver = "wasapi",
         int sampleRate = 48000,
         int latencyMs = 60,
-        string? asioDriverName = null)
+        string? asioDriverName = null,
+        Func<string, AudioPlayParams, ICueAudioSource>? streamingFactory = null)
     {
         _dispatch = dispatch;
         _deviceId = deviceId;
@@ -121,6 +136,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _mixSampleRate = sampleRate;
         _latencyMs = Math.Clamp(latencyMs, 20, 500);
         _asioDriverName = asioDriverName;
+        _streamingFactory = streamingFactory;
     }
 
     // ------------------------------------------------------------------
@@ -277,14 +293,33 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         LaunchLoader(cueId, filePath);
     }
 
-    /// <summary>Pre-carga un cue en RAM sin reproducir (latencia cero en el GO).</summary>
-    public void Preload(int cueId, string filePath) => Load(cueId, filePath);
+    /// <summary>Pre-carga un cue sin reproducir (latencia cero en el GO).
+    /// Ruta RAM: decode a buffer. Con p.Streaming (audio espejo, paso 4):
+    /// pre-spawn del ffmpeg con el ring llenándose, APARCADO sin consumir —
+    /// el Play con los mismos trims lo toma tal cual (GO instantáneo).</summary>
+    public void Preload(int cueId, string filePath, AudioPlayParams? p = null)
+    {
+        if (p is not null && UseStreaming(p))
+        {
+            PreloadStreaming(cueId, filePath, p);
+            return;
+        }
+        Load(cueId, filePath);
+    }
 
-    /// <summary>Descarta el buffer en RAM de un cue (su archivo cambió).</summary>
+    /// <summary>Descarta el buffer en RAM de un cue (su archivo cambió) y, si
+    /// tenía una fuente de streaming aparcada, la mata (cero zombis).</summary>
     public void InvalidateCache(int cueId)
     {
         _buffers.Remove(cueId);
         _states.Remove(cueId);
+        _pendingStreamPlay.Remove(cueId);
+        _pendingPark.Remove(cueId);
+        if (_parkedStreams.Remove(cueId, out var parked))
+        {
+            _parkedOrder.Remove(cueId);
+            parked.Source.Dispose();
+        }
     }
 
     // ------------------------------------------------------------------
@@ -317,13 +352,28 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         if (_active.ContainsKey(cueId))
             StopCtx(cueId, emitState: false);
 
+        // STREAMING (paso 4, audio espejo): ffmpeg → ring acotado. Si el
+        // spawn falla, StartStreamingPlayback cae SOLO a la ruta RAM clásica.
+        if (UseStreaming(clamped))
+        {
+            StartStreamingPlayback(cueId, filePath, clamped);
+            return;
+        }
+
+        PlayClassic(cueId, filePath, clamped);
+    }
+
+    /// <summary>Ruta RAM clásica: buffer pre-decodificado (cargando primero
+    /// si hace falta). También es el FALLBACK del streaming.</summary>
+    private void PlayClassic(int cueId, string filePath, AudioPlayParams p)
+    {
         if (_buffers.ContainsKey(cueId))
         {
-            StartPlayback(cueId, clamped);
+            StartPlayback(cueId, p);
         }
         else
         {
-            _pendingPlay[cueId] = clamped;
+            _pendingPlay[cueId] = p;
             if (!_loading.Contains(cueId))
             {
                 SetState(cueId, MediaCueState.Loading);
@@ -335,6 +385,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// <summary>Detiene un cue. fade &gt; 0 → fundido de salida antes de parar.</summary>
     public void Stop(int cueId, double fade = 0.0)
     {
+        _pendingStreamPlay.Remove(cueId);   // descarta un spawn en vuelo
         if (!_active.TryGetValue(cueId, out var a))
             return;
         if (fade > 0.0)
@@ -453,6 +504,13 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     {
         foreach (int cueId in _active.Keys.ToList())
             StopCtx(cueId, emitState: false);
+        // Streaming: descartar spawns en vuelo y matar los pre-spawns aparcados
+        _pendingStreamPlay.Clear();
+        _pendingPark.Clear();
+        foreach (var parked in _parkedStreams.Values)
+            parked.Source.Dispose();
+        _parkedStreams.Clear();
+        _parkedOrder.Clear();
         CloseOutput();
         _loopbackWanted = false;
         _loopback?.Dispose();
@@ -517,17 +575,30 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             EmitError(cueId, "Buffer en RAM no disponible para reproducción.");
             return;
         }
+        StartPlaybackWithSource(cueId,
+            new RamAudioSource(buffer, p.TrimStart, p.TrimEnd), p);
+    }
 
+    /// <summary>Arranca la reproducción sobre una fuente ya construida (RAM o
+    /// streaming): provider + registro + mixer. Común a ambas rutas.</summary>
+    private void StartPlaybackWithSource(int cueId, ICueAudioSource source, AudioPlayParams p)
+    {
         string bus = p.OutputDevice ?? "";
         var mixer = EnsureOutput(cueId, bus);
         if (mixer is null)
-            return;   // EmitError ya emitido
+        {
+            source.Dispose();   // EmitError ya emitido; sin ffmpeg huérfano
+            return;
+        }
 
+        // CA2000: la propiedad del provider pasa a _active (y se libera en
+        // StopCtx/OnMixerInputEnded); el analizador no reconoce el patrón.
+#pragma warning disable CA2000
         var provider = new CueSampleProvider(
-            cueId, buffer,
+            cueId, source,
             volume: p.Volume, fadeIn: p.FadeIn, fadeOut: p.FadeOut,
-            loop: p.Loop, trimStart: p.TrimStart, trimEnd: p.TrimEnd,
-            playCount: p.PlayCount, eq: p.Eq);
+            loop: p.Loop, playCount: p.PlayCount, eq: p.Eq);
+#pragma warning restore CA2000
         provider.SetMaster(_master);
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
         provider.LevelReport += (l, r) => Post(() =>
@@ -539,11 +610,166 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             CueLevelReport?.Invoke(cueId, l, r);
         });
 
+        // El ffmpeg del streaming murió MAL en caliente → cortar el espejo y
+        // subir el error (el controlador recupera el audio por mpv). Cortarlo
+        // evita el solape: el ring aún tendría ~3 s decodificados por delante.
+        if (source is StreamingAudioSource streaming)
+            streaming.FatalError += msg => Post(() => OnStreamFatal(cueId, provider, msg));
+
         var input = AdaptToMixerFormat(provider, p.Rate);
         _active[cueId] = new ActiveCue(provider, input, bus);
         _clockProviders[cueId] = provider;
         mixer.AddMixerInput(input);
         SetState(cueId, MediaCueState.Playing);
+    }
+
+    // ------------------------------------------------------------------
+    // STREAMING (paso 4) — audio espejo por ffmpeg subproceso + ring
+    // ------------------------------------------------------------------
+
+    /// <summary>true si estos parámetros van por STREAMING: lo pide el
+    /// controlador (p.Streaming, espejos de vídeo), el kill-switch de directo
+    /// WINCUE_MIRROR_STREAMING=0 no lo veta, y hay ffmpeg (o factory de tests).</summary>
+    private bool UseStreaming(AudioPlayParams p) =>
+        p.Streaming
+        && Environment.GetEnvironmentVariable("WINCUE_MIRROR_STREAMING") != "0"
+        && (_streamingFactory is not null || AudioDecoder.IsFFmpegAvailable);
+
+    // CA2000: la propiedad de la fuente pasa al llamador (provider activo o
+    // aparcamiento del preload); ambos la liberan — patrón no reconocido.
+#pragma warning disable CA2000
+    private ICueAudioSource CreateStreamingSource(string filePath, AudioPlayParams p) =>
+        _streamingFactory is not null
+            ? _streamingFactory(filePath, p)
+            : new StreamingAudioSource(filePath, _mixSampleRate, p.TrimStart, p.TrimEnd);
+#pragma warning restore CA2000
+
+    /// <summary>true para los tests: hay una fuente de streaming aparcada.</summary>
+    public bool HasParkedStream(int cueId) => _parkedStreams.ContainsKey(cueId);
+
+    /// <summary>Pre-spawn del standby: construye la fuente en segundo plano y
+    /// la aparca llena, sin consumir. Idempotente si ya hay una compatible.</summary>
+    private void PreloadStreaming(int cueId, string filePath, AudioPlayParams p)
+    {
+        if (_parkedStreams.TryGetValue(cueId, out var parked))
+        {
+            if (parked.Path == filePath
+                && parked.TrimStart == p.TrimStart && parked.TrimEnd == p.TrimEnd)
+                return;   // ya hay un pre-spawn compatible aparcado
+            _parkedStreams.Remove(cueId);
+            _parkedOrder.Remove(cueId);
+            parked.Source.Dispose();
+        }
+
+        long token = ++_streamSeq;
+        _pendingPark[cueId] = token;
+        Task.Run(() =>
+        {
+            ICueAudioSource src;
+            try
+            {
+                src = CreateStreamingSource(filePath, p);
+            }
+            catch (Exception)
+            {
+                return;   // el GO caerá al spawn en vivo (y de ahí a RAM)
+            }
+            Post(() =>
+            {
+                // Solo aparca si nadie lo relevó mientras se construía
+                if (_disposed || !_pendingPark.TryGetValue(cueId, out long t) || t != token
+                    || _parkedStreams.ContainsKey(cueId))
+                {
+                    src.Dispose();
+                    return;
+                }
+                _pendingPark.Remove(cueId);
+                _parkedStreams[cueId] = new ParkedStream(src, filePath, p.TrimStart, p.TrimEnd);
+                _parkedOrder.Add(cueId);
+                // Poda FIFO: el standby real es 1; dejar margen de 2 evita
+                // matar el bueno en un cambio rápido de playhead
+                while (_parkedOrder.Count > 2)
+                {
+                    int victim = _parkedOrder[0];
+                    _parkedOrder.RemoveAt(0);
+                    if (_parkedStreams.Remove(victim, out var old))
+                        old.Source.Dispose();
+                }
+            });
+        });
+    }
+
+    /// <summary>Toma (y desaparca) la fuente pre-lanzada si es compatible con
+    /// los parámetros del Play; una incompatible se mata y se devuelve null.</summary>
+    private ICueAudioSource? TakeParkedStream(int cueId, string filePath, AudioPlayParams p)
+    {
+        if (!_parkedStreams.Remove(cueId, out var parked))
+            return null;
+        _parkedOrder.Remove(cueId);
+        if (parked.Path == filePath
+            && parked.TrimStart == p.TrimStart && parked.TrimEnd == p.TrimEnd)
+            return parked.Source;
+        parked.Source.Dispose();
+        return null;
+    }
+
+    /// <summary>Play por streaming: consume el pre-spawn del standby (GO
+    /// instantáneo) o lanza ffmpeg en segundo plano. FALLBACK EN CASCADA: si
+    /// el spawn falla → ruta RAM clásica; si esa también falla, su propio
+    /// EmitError dispara la red de seguridad del controlador.</summary>
+    private void StartStreamingPlayback(int cueId, string filePath, AudioPlayParams p)
+    {
+        _pendingPark.Remove(cueId);   // un pre-spawn en vuelo ya no se aparca
+        if (TakeParkedStream(cueId, filePath, p) is { } ready)
+        {
+            StartPlaybackWithSource(cueId, ready, p);
+            return;
+        }
+
+        SetState(cueId, MediaCueState.Loading);
+        long token = ++_streamSeq;
+        _pendingStreamPlay[cueId] = token;
+        Task.Run(() =>
+        {
+            try
+            {
+                var src = CreateStreamingSource(filePath, p);
+                Post(() =>
+                {
+                    if (_disposed || !_pendingStreamPlay.TryGetValue(cueId, out long t) || t != token)
+                    {
+                        src.Dispose();   // un Stop/replay nos relevó: sin zombis
+                        return;
+                    }
+                    _pendingStreamPlay.Remove(cueId);
+                    StartPlaybackWithSource(cueId, src, p);
+                });
+            }
+            catch (Exception exc)
+            {
+                Post(() =>
+                {
+                    if (_disposed || !_pendingStreamPlay.TryGetValue(cueId, out long t) || t != token)
+                        return;
+                    _pendingStreamPlay.Remove(cueId);
+                    // Spawn fallido → reintento por la ruta RAM de siempre
+                    _ = exc;
+                    PlayClassic(cueId, filePath, p);
+                });
+            }
+        });
+    }
+
+    /// <summary>El ffmpeg de un cue en streaming murió mal en caliente:
+    /// retirar el espejo (sin estado STOPPED: lo que sigue es un ERROR) y
+    /// subirlo — el controlador restaura el audio por mpv.</summary>
+    private void OnStreamFatal(int cueId, CueSampleProvider provider, string message)
+    {
+        // Solo si ESTE provider sigue siendo el activo (no un replay posterior)
+        if (!_active.TryGetValue(cueId, out var a) || !ReferenceEquals(a.Provider, provider))
+            return;
+        StopCtx(cueId, emitState: false);
+        EmitError(cueId, $"Streaming de audio caído: {message}");
     }
 
     /// <summary>Adapta canales y samplerate del cue al formato del mixer
@@ -697,6 +923,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
                 {
                     _active.Remove(cueId);
                     _clockProviders.TryRemove(cueId, out _);
+                    a.Provider.Dispose();   // streaming: mata el ffmpeg
                     SetState(cueId, MediaCueState.Stopped);
                     break;
                 }
@@ -713,6 +940,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         a.Provider.RequestStop();               // por si el mixer lee antes del Remove
         if (_outputs.TryGetValue(a.Bus, out var bus))
             bus.Mixer.RemoveMixerInput(a.MixerInput);
+        a.Provider.Dispose();                   // streaming: mata el ffmpeg
         if (emitState)
             SetState(cueId, MediaCueState.Stopped);
     }

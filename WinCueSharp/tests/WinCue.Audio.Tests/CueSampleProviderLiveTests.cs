@@ -43,7 +43,7 @@ public class CueSampleProviderLiveTests
     [Fact]
     public void SetPaused_SilencioConPosicionCongelada_YReanudaDondeEstaba()
     {
-        var p = new CueSampleProvider(1, Ramp(100));
+        using var p = new CueSampleProvider(1, Ramp(100));
 
         var antes = Read(p, 50);
         Assert.Equal(49f, antes[^1]);            // reproduce 0..49
@@ -71,7 +71,7 @@ public class CueSampleProviderLiveTests
     {
         var s = new float[2000];
         Array.Fill(s, 1.0f);
-        var p = new CueSampleProvider(1,
+        using var p = new CueSampleProvider(1,
             new AudioBuffer { Samples = s, SampleRate = 1000, Channels = 1 });
 
         var antes = Read(p, 100);
@@ -92,7 +92,7 @@ public class CueSampleProviderLiveTests
     {
         // 440 Hz a SR 8000: la banda log b = 20·log10(440/20) ≈ 26 debe ser
         // el pico del espectro tras llenar el bloque FFT de 2048 muestras.
-        var p = new CueSampleProvider(1, Sine(440.0, 8000, 4096, amp: 0.5f));
+        using var p = new CueSampleProvider(1, Sine(440.0, 8000, 4096, amp: 0.5f));
 
         Assert.Null(p.GetSpectrum());            // 1ª llamada: arma el análisis
 
@@ -126,7 +126,7 @@ public class CueSampleProviderLiveTests
         // Mismo escenario que el GR de EqChainTests, pero por la API del
         // provider (la que usa el controlador): 0 dBFS, umbral −20, ratio 4:1
         // → ~15 dB de reducción.
-        var p = new CueSampleProvider(1, Sine(1000.0, 48000, 9600));
+        using var p = new CueSampleProvider(1, Sine(1000.0, 48000, 9600));
         p.SetEq(new AudioEqParams(Comp: new AudioCompParams(
             Enabled: true, ThresholdDb: -20.0, Ratio: 4.0,
             AttackMs: 0.1, ReleaseMs: 500.0, MakeupDb: 0.0)));
@@ -140,7 +140,7 @@ public class CueSampleProviderLiveTests
     [Fact]
     public void GetGainReductionDb_SinCompresor_EsCero()
     {
-        var p = new CueSampleProvider(1, Sine(1000.0, 48000, 4800));
+        using var p = new CueSampleProvider(1, Sine(1000.0, 48000, 4800));
         var block = new float[4800];
         p.Read(block, 0, block.Length);
 

@@ -50,7 +50,7 @@ public class CueSampleProviderTests
     [Fact]
     public void PlainPlayback_OutputsSourceVerbatim_ThenEnds()
     {
-        var p = new CueSampleProvider(1, RampBuffer(500));
+        using var p = new CueSampleProvider(1, RampBuffer(500));
         var output = ReadAll(p);
         Assert.Equal(500, output.Count);
         for (int i = 0; i < 500; i++)
@@ -62,7 +62,7 @@ public class CueSampleProviderTests
     [Fact]
     public void Volume_ScalesAllSamples()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(100), volume: 0.5);
+        using var p = new CueSampleProvider(1, OnesBuffer(100), volume: 0.5);
         var output = ReadAll(p);
         Assert.All(output, v => Assert.Equal(0.5f, v, precision: 5));
     }
@@ -70,7 +70,7 @@ public class CueSampleProviderTests
     [Fact]
     public void Master_MultipliesOnTopOfVolume()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(100), volume: 0.5);
+        using var p = new CueSampleProvider(1, OnesBuffer(100), volume: 0.5);
         p.SetMaster(0.5f);
         var output = ReadAll(p);
         Assert.All(output, v => Assert.Equal(0.25f, v, precision: 5));
@@ -84,7 +84,7 @@ public class CueSampleProviderTests
     public void FadeIn_RampsFromZeroToVolume()
     {
         // 1000 frames, fade-in de 0.5 s = 500 frames
-        var p = new CueSampleProvider(1, OnesBuffer(1000), volume: 1.0, fadeIn: 0.5);
+        using var p = new CueSampleProvider(1, OnesBuffer(1000), volume: 1.0, fadeIn: 0.5);
         var output = ReadAll(p);
         Assert.Equal(1000, output.Count);
 
@@ -101,7 +101,7 @@ public class CueSampleProviderTests
     public void AutoFadeOut_RampsToZeroAtEnd()
     {
         // 1000 frames, fade-out de 0.2 s = últimos 200 frames
-        var p = new CueSampleProvider(1, OnesBuffer(1000), fadeOut: 0.2);
+        using var p = new CueSampleProvider(1, OnesBuffer(1000), fadeOut: 0.2);
         var output = ReadAll(p);
         Assert.Equal(1000, output.Count);
 
@@ -115,7 +115,7 @@ public class CueSampleProviderTests
     [Fact]
     public void ManualFade_ToTarget_ChangesSteadyVolume()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(2000));
+        using var p = new CueSampleProvider(1, OnesBuffer(2000));
         // Consumir 100 frames a volumen 1
         var pre = new float[100];
         p.Read(pre, 0, 100);
@@ -132,7 +132,7 @@ public class CueSampleProviderTests
     [Fact]
     public void FadeToZero_WithStopAfter_EndsPlayback()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(100_000));
+        using var p = new CueSampleProvider(1, OnesBuffer(100_000));
         p.BeginFade(0.0, 0.1, stopAfter: true);   // 100 frames de fade
         var output = ReadAll(p);
 
@@ -145,7 +145,7 @@ public class CueSampleProviderTests
     [Fact]
     public void InstantFade_DurationZero_AppliesImmediately()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(1000));
+        using var p = new CueSampleProvider(1, OnesBuffer(1000));
         p.BeginFade(0.3, 0.0, stopAfter: false);
         var block = new float[10];
         p.Read(block, 0, 10);
@@ -155,7 +155,7 @@ public class CueSampleProviderTests
     [Fact]
     public void SetVolume_Instant_WhenNoFadeActive()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(1000));
+        using var p = new CueSampleProvider(1, OnesBuffer(1000));
         p.SetVolume(0.7);
         var block = new float[10];
         p.Read(block, 0, 10);
@@ -169,7 +169,7 @@ public class CueSampleProviderTests
     [Fact]
     public void PlayCount_RepeatsExactlyNTimes_SampleAccurate()
     {
-        var p = new CueSampleProvider(1, RampBuffer(300), playCount: 3);
+        using var p = new CueSampleProvider(1, RampBuffer(300), playCount: 3);
         var output = ReadAll(p);
         Assert.Equal(900, output.Count);
         // Sin huecos en el wrap: el frame 300 es de nuevo el 0 de la fuente
@@ -182,7 +182,7 @@ public class CueSampleProviderTests
     [Fact]
     public void InfiniteLoop_ContinuesUntilRequestStop()
     {
-        var p = new CueSampleProvider(1, RampBuffer(100), loop: true);
+        using var p = new CueSampleProvider(1, RampBuffer(100), loop: true);
         var block = new float[64];
         int total = 0;
         // Leer 10 bloques: mucho más que la longitud del buffer
@@ -201,7 +201,7 @@ public class CueSampleProviderTests
     {
         // Bug de la versión Python (no replicado): con play_count>1 el fade-out
         // se armaba en la primera pasada y las siguientes sonaban a ganancia 0.
-        var p = new CueSampleProvider(1, OnesBuffer(200), fadeOut: 0.1, playCount: 2);
+        using var p = new CueSampleProvider(1, OnesBuffer(200), fadeOut: 0.1, playCount: 2);
         var output = ReadAll(p);
         Assert.Equal(400, output.Count);
 
@@ -220,7 +220,7 @@ public class CueSampleProviderTests
     public void Trim_PlaysOnlyTheRegion()
     {
         // Fuente 0..999; trim in=0.1s (frame 100), out=0.5s (frame 500)
-        var p = new CueSampleProvider(1, RampBuffer(1000), trimStart: 0.1, trimEnd: 0.5);
+        using var p = new CueSampleProvider(1, RampBuffer(1000), trimStart: 0.1, trimEnd: 0.5);
         Assert.Equal(400, p.TotalFrames);
         Assert.Equal(0.4, p.DurationSeconds, 6);
 
@@ -234,14 +234,14 @@ public class CueSampleProviderTests
     public void InvalidTrim_FallsBackToFullFile()
     {
         // in > out → región vacía → archivo completo (defensivo)
-        var p = new CueSampleProvider(1, RampBuffer(100), trimStart: 0.9, trimEnd: 0.1);
+        using var p = new CueSampleProvider(1, RampBuffer(100), trimStart: 0.9, trimEnd: 0.1);
         Assert.Equal(100, p.TotalFrames);
     }
 
     [Fact]
     public void Trim_WithLoop_WrapsInsideRegion()
     {
-        var p = new CueSampleProvider(1, RampBuffer(1000), trimStart: 0.1, trimEnd: 0.2, playCount: 2);
+        using var p = new CueSampleProvider(1, RampBuffer(1000), trimStart: 0.1, trimEnd: 0.2, playCount: 2);
         var output = ReadAll(p);
         Assert.Equal(200, output.Count);
         Assert.Equal(100f, output[0]);
@@ -261,7 +261,7 @@ public class CueSampleProviderTests
         for (int f = 0; f < 100; f++) { s[f * 2] = 1.0f; s[f * 2 + 1] = 0.5f; }
         var buf = new AudioBuffer { Samples = s, SampleRate = SR, Channels = 2 };
 
-        var p = new CueSampleProvider(1, buf, volume: 0.5);
+        using var p = new CueSampleProvider(1, buf, volume: 0.5);
         var output = ReadAll(p);
         Assert.Equal(200, output.Count);
         for (int f = 0; f < 100; f++)
@@ -278,7 +278,7 @@ public class CueSampleProviderTests
     [Fact]
     public void LatencyMeasured_FiresExactlyOnce()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(1000));
+        using var p = new CueSampleProvider(1, OnesBuffer(1000));
         int count = 0;
         double reported = -1;
         p.LatencyMeasured += ms => { count++; reported = ms; };
@@ -293,7 +293,7 @@ public class CueSampleProviderTests
     [Fact]
     public void LevelReport_FiresThrottled_Stereo()
     {
-        var p = new CueSampleProvider(1, OnesBuffer(10_000));
+        using var p = new CueSampleProvider(1, OnesBuffer(10_000));
         var levels = new List<(float L, float R)>();
         p.LevelReport += (l, r) => levels.Add((l, r));
 
@@ -314,7 +314,7 @@ public class CueSampleProviderTests
         var s = new float[2000];
         for (int f = 0; f < 1000; f++) { s[f * 2] = 1.0f; s[f * 2 + 1] = 0.5f; }
         var buf = new AudioBuffer { Samples = s, SampleRate = SR, Channels = 2 };
-        var p = new CueSampleProvider(1, buf);
+        using var p = new CueSampleProvider(1, buf);
         (float L, float R)? report = null;
         p.LevelReport += (l, r) => report = (l, r);
 

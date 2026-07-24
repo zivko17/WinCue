@@ -16,28 +16,35 @@
 //     silencio (Python zero-padeaba el resto del bloque al hacer wrap).
 //   · Fade-out automático solo se arma en la ÚLTIMA pasada de play_count
 //     (en Python se armaba en la primera y dejaba mudas las siguientes).
+//
+// PASO 4 (streaming): los samples ya no salen de un AudioBuffer directo sino
+// de una ICueAudioSource (RAM o streaming ffmpeg). La matemática RT (fades,
+// loop, EQ, VU, elapsed) es LA MISMA para ambas; la diferencia nueva es el
+// UNDERRUN del streaming (ring vacío con proceso vivo): silencio SIN avanzar
+// la posición — el reloj del vídeo se congela y se recupera al volver el dato.
 // =============================================================================
 
 using NAudio.Wave;
 
 namespace WinCue.Audio;
 
-public sealed class CueSampleProvider : ISampleProvider
+public sealed class CueSampleProvider : ISampleProvider, IDisposable
 {
-    private readonly AudioBuffer _buf;
-    private readonly int _startFrame;   // trim in (frames absolutos en el buffer)
-    private readonly int _endFrame;     // trim out (exclusivo)
+    private readonly ICueAudioSource _source;
+    private readonly int _sampleRate;
+    private readonly int _channels;
     private readonly int _playCount;    // nº total de reproducciones (1 = una vez)
     private readonly bool _loop;
     private readonly int _fadeOutFrames;
     private readonly long _tStartTicks;
 
-    private int _positionFrames;        // posición relativa a _startFrame
+    private int _positionFrames;        // posición dentro de la pasada actual
     private int _passes;                // repeticiones ya completadas
     private bool _firstReadDone;
     private int _levelCounter;
     private bool _fadeOutArmed;
     private bool _completed;
+    private int _underruns;             // bloques con silencio por ring vacío
 
     // ── Envolvente de ganancia (escrita por main thread, leída por RT) ──
     private double _volume;             // ganancia objetivo en régimen permanente
@@ -76,6 +83,8 @@ public sealed class CueSampleProvider : ISampleProvider
 
     public int CueId { get; }
 
+    /// <summary>Constructor clásico sobre el buffer entero en RAM (cues de
+    /// AUDIO): el trim se resuelve dentro de la RamAudioSource.</summary>
     public CueSampleProvider(
         int cueId,
         AudioBuffer buffer,
@@ -87,30 +96,38 @@ public sealed class CueSampleProvider : ISampleProvider
         double trimEnd = 0.0,
         int playCount = 1,
         WinCue.Core.AudioEqParams? eq = null)
+        : this(cueId, new RamAudioSource(buffer, trimStart, trimEnd),
+               volume, fadeIn, fadeOut, loop, playCount, eq)
+    {
+    }
+
+    /// <summary>Constructor sobre una fuente arbitraria (RAM o streaming);
+    /// la fuente YA lleva el trim aplicado (solo expone la región).</summary>
+    public CueSampleProvider(
+        int cueId,
+        ICueAudioSource source,
+        double volume = 1.0,
+        double fadeIn = 0.0,
+        double fadeOut = 0.0,
+        bool loop = false,
+        int playCount = 1,
+        WinCue.Core.AudioEqParams? eq = null)
     {
         CueId = cueId;
-        _buf = buffer;
-        _eq = new EqChain(buffer.SampleRate, buffer.Channels);
+        _source = source;
+        _sampleRate = source.SampleRate;
+        _channels = source.Channels;
+        _eq = new EqChain(_sampleRate, _channels);
         _eq.Configure(eq);
         _loop = loop;
         _playCount = Math.Max(1, playCount);
         _tStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
 
-        WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(buffer.SampleRate, buffer.Channels);
-
-        // Recorte (in/out) dentro del archivo, estilo QLab
-        int n = buffer.FrameCount;
-        int s = trimStart > 0.0 ? (int)(trimStart * buffer.SampleRate) : 0;
-        int e = trimEnd > 0.0 ? (int)(trimEnd * buffer.SampleRate) : n;
-        s = Math.Clamp(s, 0, n);
-        e = Math.Clamp(e, s, n);
-        if (e <= s) { s = 0; e = n; }   // trim inválido → archivo completo
-        _startFrame = s;
-        _endFrame = e;
+        WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, _channels);
 
         _volume = Math.Clamp(volume, 0.0, 1.0);
         double fadeOutSec = Math.Max(0.0, fadeOut);
-        _fadeOutFrames = fadeOutSec > 0.0 ? (int)(fadeOutSec * buffer.SampleRate) : 0;
+        _fadeOutFrames = fadeOutSec > 0.0 ? (int)(fadeOutSec * _sampleRate) : 0;
 
         // Fade-in automático: de 0 al volumen objetivo
         double fadeInSec = Math.Max(0.0, fadeIn);
@@ -119,7 +136,7 @@ public sealed class CueSampleProvider : ISampleProvider
             _gain = 0.0;
             _fadeFrom = 0.0;
             _fadeTo = _volume;
-            _fadeTotal = Math.Max(1, (int)(fadeInSec * buffer.SampleRate));
+            _fadeTotal = Math.Max(1, (int)(fadeInSec * _sampleRate));
             _fadePos = 0;
             _stopAfterFade = false;
             _fadeActive = true;
@@ -134,16 +151,21 @@ public sealed class CueSampleProvider : ISampleProvider
     // Propiedades de consulta (main thread)
     // ------------------------------------------------------------------
 
-    /// <summary>Frames totales de la región reproducible (con trim aplicado).</summary>
-    public int TotalFrames => _endFrame - _startFrame;
+    /// <summary>Frames totales de la región reproducible (con trim aplicado).
+    /// Streaming: estimación por ffprobe; 0 = desconocido.</summary>
+    public int TotalFrames => (int)Math.Clamp(_source.TotalFrames, 0L, int.MaxValue);
 
-    /// <summary>Duración de la región reproducible en segundos.</summary>
-    public double DurationSeconds => (double)TotalFrames / _buf.SampleRate;
+    /// <summary>Duración de la región reproducible en segundos (0 = desconocida).</summary>
+    public double DurationSeconds => (double)TotalFrames / _sampleRate;
 
     /// <summary>Segundos reproducidos de la pasada actual.</summary>
-    public double ElapsedSeconds => (double)Volatile.Read(ref _positionFrames) / _buf.SampleRate;
+    public double ElapsedSeconds => (double)Volatile.Read(ref _positionFrames) / _sampleRate;
 
     public bool IsCompleted => _completed;
+
+    /// <summary>Bloques que salieron con silencio por UNDERRUN del streaming
+    /// (ring vacío con el subproceso vivo). Con RAM siempre 0. Diagnóstico.</summary>
+    public int UnderrunCount => Volatile.Read(ref _underruns);
 
     // ------------------------------------------------------------------
     // Mutación externa (main thread) — mismo contrato que en Python
@@ -165,7 +187,7 @@ public sealed class CueSampleProvider : ISampleProvider
         }
         _fadeFrom = _gain;
         _fadeTo = target;
-        _fadeTotal = Math.Max(1, (int)(duration * _buf.SampleRate));
+        _fadeTotal = Math.Max(1, (int)(duration * _sampleRate));
         _fadePos = 0;
         _stopAfterFade = stopAfter;
         if (!stopAfter)
@@ -238,22 +260,34 @@ public sealed class CueSampleProvider : ISampleProvider
             return count;
         }
 
-        int channels = _buf.Channels;
+        int channels = _channels;
         int framesRequested = count / channels;
         int framesWritten = 0;
-        int totalFrames = TotalFrames;
-        float[] src = _buf.Samples;
+        long totalFrames = _source.TotalFrames;   // streaming: estimado; <0 = n/d
 
         while (framesWritten < framesRequested)
         {
             if (_requestStop)
                 break;
 
-            int remaining = totalFrames - _positionFrames;
-            if (remaining <= 0)
+            // ── Fin real de la pasada (lo dicta la FUENTE, no la estimación) ─
+            if (_source.PassEnded)
             {
                 if (!Wrap()) break;
-                remaining = totalFrames;
+                continue;
+            }
+
+            long remaining = totalFrames >= 0
+                ? Math.Max(0, totalFrames - _positionFrames)
+                : long.MaxValue;
+
+            // ── Precalentar la SIGUIENTE pasada (streaming: pre-spawn del
+            //    subproceso con el ring llenándose ANTES de agotar la actual;
+            //    RAM: no-op). 4 s de antelación > ring de 3 s. ─────────────
+            if ((_loop || _passes < _playCount - 1)
+                && remaining <= 4L * _sampleRate)
+            {
+                _source.PrepareNextPass();
             }
 
             // ── Fade-out automático al final (solo en la ÚLTIMA pasada) ─
@@ -264,17 +298,33 @@ public sealed class CueSampleProvider : ISampleProvider
                 _fadeOutArmed = true;
                 _fadeFrom = _gain;
                 _fadeTo = 0.0;
-                _fadeTotal = Math.Max(1, remaining);
+                _fadeTotal = Math.Max(1, (int)Math.Min(remaining, int.MaxValue));
                 _fadePos = 0;
-                _stopAfterFade = false;   // el fin natural del buffer para solo
+                _stopAfterFade = false;   // el fin natural de la fuente para solo
                 _fadeActive = true;
             }
 
-            int chunk = Math.Min(framesRequested - framesWritten, remaining);
-            int srcIndex = (_startFrame + _positionFrames) * channels;
+            int chunk = framesRequested - framesWritten;
             int dstIndex = offset + framesWritten * channels;
+            int got = _source.ReadFrames(buffer, dstIndex, chunk);
 
-            // ── Copiar bloque aplicando envolvente de ganancia ──────────
+            if (got == 0)
+            {
+                if (_source.PassEnded)
+                {
+                    if (!Wrap()) break;
+                    continue;
+                }
+                // ── UNDERRUN (streaming): silencio el resto del bloque SIN
+                //    avanzar la posición — el reloj se congela y el audio
+                //    retoma donde iba cuando el ring vuelva a tener datos. ──
+                _underruns++;
+                Array.Clear(buffer, dstIndex, chunk * channels);
+                framesWritten = framesRequested;
+                break;
+            }
+
+            // ── Aplicar la envolvente de ganancia IN-PLACE sobre lo leído ──
             float master = _master;
             if (_fadeActive)
             {
@@ -282,16 +332,15 @@ public sealed class CueSampleProvider : ISampleProvider
                 double from = _fadeFrom;
                 double delta = _fadeTo - _fadeFrom;
                 int p0 = _fadePos;
-                for (int f = 0; f < chunk; f++)
+                for (int f = 0; f < got; f++)
                 {
                     double t = Math.Min((p0 + f + 1) / total, 1.0);
                     float g = (float)(from + delta * t) * master;
-                    int si = srcIndex + f * channels;
                     int di = dstIndex + f * channels;
                     for (int c = 0; c < channels; c++)
-                        buffer[di + c] = src[si + c] * g;
+                        buffer[di + c] *= g;
                 }
-                _fadePos += chunk;
+                _fadePos += got;
                 if (_fadePos >= _fadeTotal)
                 {
                     _gain = _fadeTo;
@@ -303,22 +352,18 @@ public sealed class CueSampleProvider : ISampleProvider
             else
             {
                 float g = (float)_gain * master;
-                if (g == 1.0f)
+                if (g != 1.0f)
                 {
-                    Array.Copy(src, srcIndex, buffer, dstIndex, chunk * channels);
-                }
-                else
-                {
-                    int samples = chunk * channels;
+                    int samples = got * channels;
                     for (int i = 0; i < samples; i++)
-                        buffer[dstIndex + i] = src[srcIndex + i] * g;
+                        buffer[dstIndex + i] *= g;
                 }
             }
 
-            _positionFrames += chunk;
-            framesWritten += chunk;
+            _positionFrames += got;
+            framesWritten += got;
 
-            if (_positionFrames >= totalFrames && !_requestStop)
+            if (_source.PassEnded && !_requestStop)
             {
                 if (!Wrap()) break;
             }
@@ -397,7 +442,7 @@ public sealed class CueSampleProvider : ISampleProvider
             NAudio.Dsp.FastFourierTransform.FFT(true, 11, work);   // 2^11 = 2048
 
             // Bandas log 20 Hz → 20 kHz (3 décadas) en dBFS
-            int fs = _buf.SampleRate;
+            int fs = _sampleRate;
             lock (_specLock)
             {
                 for (int b = 0; b < SpectrumBands; b++)
@@ -423,22 +468,32 @@ public sealed class CueSampleProvider : ISampleProvider
         }
     }
 
-    /// <summary>¿Repetir desde el principio? (loop infinito o play_count).</summary>
+    /// <summary>¿Repetir desde el principio? (loop infinito o play_count).
+    /// La fuente conmuta de pasada (streaming: al subproceso pre-lanzado);
+    /// si no puede (fallo fatal del spawn), el cue termina limpio.</summary>
     private bool Wrap()
     {
         if (_requestStop)
             return false;
         if (_loop)
         {
+            if (!_source.BeginNextPass())
+                return false;
             _positionFrames = 0;
             return true;
         }
         if (_passes < _playCount - 1)
         {
+            if (!_source.BeginNextPass())
+                return false;
             _passes++;
             _positionFrames = 0;
             return true;
         }
         return false;
     }
+
+    /// <summary>Libera la fuente (streaming: mata el subproceso ffmpeg y sus
+    /// pre-spawns). El engine lo llama al retirar el cue del mixer; RAM: no-op.</summary>
+    public void Dispose() => _source.Dispose();
 }

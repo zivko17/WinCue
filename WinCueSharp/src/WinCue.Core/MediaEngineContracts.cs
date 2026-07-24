@@ -37,7 +37,14 @@ public sealed record AudioEqParams(
     AudioCompParams? Comp = null);
 
 /// <summary>Parámetros de reproducción de un cue de audio.
-/// OutputDevice: nombre del dispositivo de salida ("" = el principal).</summary>
+/// OutputDevice: nombre del dispositivo de salida ("" = el principal).
+/// Streaming (paso 4): true → la fuente es un ffmpeg subproceso a un ring
+/// acotado en vez del pre-decode entero a RAM. Lo fija el CONTROLADOR para
+/// los AUDIOS ESPEJO de los cues de vídeo (motor HAP e híbrido mpv+PLL):
+/// arranque en ~centenas de ms y RAM constante, independiente de la duración.
+/// Los cues de AUDIO normales siguen por RAM (garantía de directo: un fallo
+/// de disco durante PLAYING no interrumpe). Kill-switch de directo:
+/// WINCUE_MIRROR_STREAMING=0 fuerza la ruta RAM también para los espejos.</summary>
 public sealed record AudioPlayParams(
     double Volume = 1.0,
     double FadeIn = 0.0,
@@ -48,7 +55,8 @@ public sealed record AudioPlayParams(
     int PlayCount = 1,
     string OutputDevice = "",
     AudioEqParams? Eq = null,
-    double Rate = 1.0);
+    double Rate = 1.0,
+    bool Streaming = false);
 
 /// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
 public sealed record VideoGeometry(
@@ -128,7 +136,10 @@ public interface IAudioEngine
     event Action<int, float, float>? CueLevelReport;
 
     void Play(int cueId, string filePath, AudioPlayParams? p = null);
-    void Preload(int cueId, string filePath);
+    /// <summary>Precarga sin reproducir. p (opcional) permite precalentar la
+    /// ruta de STREAMING del audio espejo con sus trims reales (el pre-spawn
+    /// solo sirve si coincide con los parámetros del Play del GO).</summary>
+    void Preload(int cueId, string filePath, AudioPlayParams? p = null);
     void Stop(int cueId, double fade = 0.0);
     void StopAll(double fade = 0.0);
     bool Fade(int cueId, double targetVolume, double duration, bool stopAfter = false);

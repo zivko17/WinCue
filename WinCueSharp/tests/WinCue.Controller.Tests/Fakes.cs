@@ -96,7 +96,13 @@ public sealed class FakeAudioEngine : IAudioEngine
         Playing.Add(cueId);
     }
 
-    public void Preload(int cueId, string filePath) => Preloads.Add(cueId);
+    public readonly List<(int CueId, AudioPlayParams? P)> PreloadParams = new();
+
+    public void Preload(int cueId, string filePath, AudioPlayParams? p = null)
+    {
+        Preloads.Add(cueId);
+        PreloadParams.Add((cueId, p));
+    }
 
     public void Stop(int cueId, double fade = 0.0)
     {
