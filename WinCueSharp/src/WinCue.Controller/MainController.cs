@@ -783,8 +783,15 @@ public class MainController
             return;
         }
 
-        SetPlayhead(idx + 1);
+        // DISPARAR ANTES DE AVANZAR: mover el playhead prepara el standby del
+        // SIGUIENTE cue, y eso DESCARTA el del cue que estamos disparando —
+        // el GO instantáneo no se promovía jamás y el entrante llegaba al
+        // cruce con la superficie aún sin pintar (un fotograma de negro puro
+        // medido en los cortes secos). Con el orden correcto el cue sale al
+        // aire con su primer fotograma ya puesto, y el playhead avanza
+        // después, a tiempo de precargar el siguiente.
         Trigger(idx, advanceChain: true);
+        SetPlayhead(idx + 1);
     }
 
     private void GoGroup(int idx, Cue cue)

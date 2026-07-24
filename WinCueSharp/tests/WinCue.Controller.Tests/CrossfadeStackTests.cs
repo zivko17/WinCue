@@ -72,4 +72,24 @@ public class CrossfadeStackTests : ControllerTestBase
 
         Assert.Contains(entrante.Id, View.RaisedCues);
     }
+
+    [Fact]
+    public void GoDisparaAntesDeAvanzar_NoTiraElStandbyDelCueQueSale()
+    {
+        // El playhead se movía ANTES de disparar, y preparar el standby del
+        // SIGUIENTE descarta el del cue que se está disparando: el GO
+        // instantáneo no se promovía nunca y el entrante llegaba al cruce con
+        // la superficie sin pintar.
+        var primero = AddCue(CueType.Video, "primero", duration: 10.0);
+        var segundo = AddCue(CueType.Video, "segundo", duration: 10.0);
+        View.VisibleOutputs.Add(0);
+
+        Controller.OnGoPressed();
+
+        // El Play del cue disparado NO viene precedido de un descarte suyo
+        Assert.Equal(primero.Id, Assert.Single(Video.Plays).CueId);
+        Assert.DoesNotContain(primero.Id, Video.Discarded);
+        // Y el standby que queda preparado es el del SIGUIENTE
+        Assert.Equal(segundo.Id, Assert.Single(Video.Prepared).CueId);
+    }
 }
