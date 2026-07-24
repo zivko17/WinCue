@@ -385,9 +385,10 @@ compositor GPU activo** se reproducen por un player PROPIO (sin mpv):
 - El motor propio NO cubre: modo canvas (multi-salida de un render), rate ≠ 1,
   geometría CUSTOM (translate/rotate), HAP en avi/mkv — todos caen a la ruta
   clásica actual. HapM/Hap7/HapH tampoco (el parser los rechaza → fallback).
-- El AudioEngine decodifica el buffer ENTERO a RAM (float32): vídeos muy
-  largos (>1 h) pagan cientos de MB — límite heredado de la arquitectura de
-  audio, aceptable para clips de directo; revisar si aparece el caso.
+- ~~El AudioEngine decodifica el buffer ENTERO a RAM (float32): vídeos muy
+  largos (>1 h) pagan cientos de MB.~~ **RESUELTO en el paso 4** (§ «Paso 4 —
+  streaming»): el espejo va por ffmpeg → ring acotado (RAM constante); los
+  cues de AUDIO normales conservan su pre-decode a RAM (garantía de directo).
 - Validación en vivo pendiente con contenido real (bitrates 10-30× testsrc2)
   y varias capas HAP simultáneas + crossfades largos; la telemetría está
   (drops/resyncs en engine-trace.log con WINCUE_MPV_LOG).
@@ -557,11 +558,128 @@ Corrido con `scripts/soak-hibrido.ps1` (compositor ON, watchdog
 
 ## Límites conocidos (además de los del paso 3)
 
-- El espejo decodifica a RAM → `video_audio_max_minutes` (default 20). El
-  provider de audio en streaming es la pieza del paso 4 que lo elimina.
+- ~~El espejo decodifica a RAM → `video_audio_max_minutes` (default 20). El
+  provider de audio en streaming es la pieza del paso 4 que lo elimina.~~
+  **RESUELTO en el paso 4** (§ «Paso 4 — streaming», al final): el espejo va
+  por streaming (ffmpeg → ring) y el default pasa a 0 = sin límite.
 - Varispeed (`rate ≠ 1`) sigue por mpv con su audio: replicar el retimado
   (resample + pitch) en el espejo no está hecho.
 - El PLL corrige el reloj, no el género: con `aid=no` mpv pierde su A/V sync
   interno y pasa a reloj de sistema disciplinado — en esta máquina el drift
   real nunca pasó de 66 ms entre ticks; máquinas muy cargadas podrían ver el
   hard-seek (está trazado en `engine-trace.log` si ocurre).
+
+# Paso 4 — streaming del audio espejo (ffmpeg → ring acotado)
+
+El AUDIO ESPEJO de los cues de vídeo (motor HAP propio y ruta híbrida
+mpv+PLL) deja de decodificar el archivo ENTERO a RAM antes de sonar y pasa a
+STREAMING: un subproceso ffmpeg decodifica a `f32le` por pipe y un hilo
+lector llena un RING ACOTADO de ~3 s. Esto ataca la RAÍZ de la familia de
+bugs de campo del «arranque tardío del espejo» (existía porque el pre-decode
+tardaba): el audio ahora llega en ~centenas de ms y las mitigaciones (reloj
+HAP que ignora audio atrasado, frenada del PLL) pasan a ser redes de
+seguridad que casi nunca actúan. Y elimina el límite de duración del
+híbrido: un largometraje ya puede llevar el rack de audio nativo.
+
+## Diseño elegido: fuente abstracta, UN solo provider
+
+Se extrajo de `CueSampleProvider` una interfaz mínima de fuente
+(`ICueAudioSource`: SampleRate/Channels/TotalFrames, `ReadFrames` secuencial
+no bloqueante, `PassEnded`, `PrepareNextPass`/`BeginNextPass`) con dos
+implementaciones:
+
+- **`RamAudioSource`** — el AudioBuffer entero con el trim resuelto a
+  índices. Los cues de AUDIO normales siguen EXACTAMENTE igual (verificado
+  muestra a muestra por los 33 tests previos del provider, intactos): misma
+  garantía de directo (cero I/O en PLAYING).
+- **`StreamingAudioSource`** — `ffmpeg -ss/-t -i src -vn -f f32le -ac 2 -ar
+  {mixRate} pipe:1` a un ring SPSC (índices Volatile, sin locks en el hilo
+  RT) con backpressure natural (ring lleno → el lector espera → ffmpeg se
+  frena por el pipe). La salida ya está en el formato del mixer (los espejos
+  van SIEMPRE a rate 1.0): sin resampleo en proceso.
+
+Se DESCARTÓ el `StreamingCueSampleProvider` paralelo: habría duplicado la
+envolvente de fades, el loop, el VU y el elapsed (la EQ ya vivía aparte en
+`EqChain`, pero el resto no). El diff real del provider es el bucle Read
+consumiendo la fuente en vez de indexar el array — la matemática de ganancia
+es la misma línea a línea (se aplica in-place tras leer).
+
+## Semántica del ring / underrun / fin
+
+- `ReadFrames` (hilo RT) JAMÁS bloquea. Ring vacío con proceso vivo =
+  **UNDERRUN** → el provider emite silencio SIN avanzar la posición: el
+  reloj del vídeo (ElapsedSeconds) se CONGELA y el contenido retoma donde
+  iba — el PLL ve «audio atrasado» y frena suave (la red de seguridad ya
+  existente). Contador `UnderrunCount` para diagnóstico.
+- Fin real: ffmpeg sale (exit 0) + ring drenado → `PassEnded` → el mixer
+  retira el input → STOPPED (la misma semántica de siempre).
+- Muerte MALA del proceso (exit ≠ 0 sin Dispose, p. ej. kill externo):
+  evento `FatalError` con el stderr → el engine CORTA el espejo al instante
+  (el ring aún tendría ~3 s decodificados: cortarlo evita el solape) y emite
+  ErrorOccurred → la red de seguridad del controlador restaura el audio por
+  mpv (`RestoreInternalAudio`). Un cue HAP nativo sigue con su Stopwatch.
+- Dispose SIEMPRE mata los subprocesos (kill del árbol) — cero zombis,
+  verificado por PID en los tests (incluida la carrera spawn-async/Dispose).
+
+## Loop / play_count: RELANZAR el subproceso (no -stream_loop)
+
+Cada pasada es UN subproceso idéntico (mismo comando determinista → los
+MISMOS samples, verificado numéricamente). El provider pre-spawnea la pasada
+siguiente 4 s antes del final (`PrepareNextPass`, ring de 3 s llenándose en
+paralelo) y conmuta en el wrap (`BeginNextPass`): el empalme lee del ring ya
+lleno — hueco CERO salvo pasadas más cortas que el pre-spawn (~100 ms de
+spawn cubiertos por el silencio de underrun, que congela el reloj: el vídeo
+en loop espera al audio, no al revés). Se descartó `-stream_loop` porque el
+elapsed POR PASADA (el reloj del vídeo depende de ese reset) habría exigido
+contar frames módulo una longitud estimada — con el relanzo el reset es
+natural al conmutar. El fin real de cada pasada lo dicta la FUENTE
+(PassEnded), no la estimación de ffprobe: sin drift acumulado.
+
+## Enrutado / fallbacks / kill-switch
+
+- `AudioPlayParams.Streaming` (nuevo, default false): lo fija el CONTROLADOR
+  para los espejos (ambas rutas, HAP e híbrida). Los cues de AUDIO normales
+  no cambian.
+- Cascada: spawn de streaming FALLA (sin ffmpeg, sin pista de audio…) →
+  reintento por la ruta RAM clásica → si también falla, el fallback
+  existente (error → RestoreInternalAudio / Stopwatch).
+- `GetElapsedThreadSafe` funciona igual: es el MISMO CueSampleProvider
+  registrado en `_clockProviders`.
+- Preload/standby: `Preload(id, path, params)` pre-spawnea y APARCA la
+  fuente con el ring lleno SIN consumir; el GO con los mismos trims la toma
+  tal cual (arranque instantáneo). Aparcado incompatible → se mata y se
+  relanza. `InvalidateCache`/`Cleanup`/`Stop` matan aparcados y spawns en
+  vuelo (tokens de relevo). Poda FIFO a 2 aparcados.
+- Kill-switch de directo: `WINCUE_MIRROR_STREAMING=0` fuerza la ruta RAM
+  también para los espejos (y restaura el techo clásico de 20 min).
+
+## Elegibilidad: adiós al límite de duración
+
+`video_audio_max_minutes` pasa a **0 = SIN LÍMITE (nuevo default, en
+SettingsManager)** y solo actúa como OPT-OUT explícito (> 0 → techo en
+minutos). Con el kill-switch (ruta RAM, ~23 MB/min) vuelve el techo prudente
+de 20 min salvo ajuste del usuario. Ajustes → Vídeo actualizado (el spin
+admite 0 y la nota documenta la semántica). OJO: settings guardados por
+versiones anteriores pueden tener 20 persistido — actúa como opt-out.
+
+## Tests (421 en verde, 0 warnings latest-all)
+
+- `StreamingAudioSourceTests` (ffmpeg real, se saltan sin él): paridad
+  numérica con la ruta RAM sobre wav float conocido (muestra a muestra),
+  trims honrados (-ss/-t == índices RAM), empalme de pasadas (pasada 2 ==
+  pasada 1 exacta), elapsed que resetea por pasada vía provider, kill del
+  ffmpeg a medias (silencio + fin limpio + FatalError + sin zombi por PID),
+  underrun con fuente lenta simulada (Read no bloquea, silencio sin avanzar,
+  el contenido retoma sin perder frames).
+- `AudioEngineStreamingTests` (fábrica inyectable, sin ffmpeg): el Play con
+  Streaming usa la fábrica y libera la fuente al terminar, spawn fallido →
+  fallback RAM sonando, preload aparca y el GO lo consume (sin re-spawn),
+  aparcado incompatible se mata, InvalidateCache mata el pre-spawn, Stop
+  durante el spawn descarta y libera, kill-switch fuerza RAM (0 spawns).
+- `HybridAudioRoutingTests`: espejo con Streaming=true, cue de 2 h elegible
+  (sin límite), opt-out explícito, kill-switch con techo restaurado, standby
+  que precalienta con los trims reales.
+
+## Soak con cue LARGO (la evidencia del paso 4)
+
+(pendiente: se rellena con los números del soak)
