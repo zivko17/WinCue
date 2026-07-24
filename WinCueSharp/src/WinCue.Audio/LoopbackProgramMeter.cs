@@ -17,8 +17,10 @@
 //   · Start/Dispose: main thread (o timer de reintento). Estado bajo _gate.
 //   · DataAvailable: hilo de captura de NAudio. Solo acumula y emite
 //     LevelReport (el AudioEngine lo remite al dispatcher).
-//   · Un capture muerto NUNCA se libera en su propio hilo (WasapiCapture.
-//     Dispose hace Join del hilo de captura) → se libera en el ThreadPool.
+//   · NINGÚN capture se libera en el hilo llamante: WasapiCapture.Dispose hace
+//     Join del hilo de captura y bloquearía a quien llame (el hilo de UI al
+//     guardar Ajustes → tirones de la barra de progreso y los relojes). TODA
+//     liberación —incluida la de Dispose()— va al ThreadPool.
 // =============================================================================
 
 using NAudio.CoreAudioApi;
@@ -35,9 +37,14 @@ public sealed class LoopbackProgramMeter : IDisposable
     private readonly bool _fallbackToDefault;
     private readonly object _gate = new();
 
+    // CA2213: SÍ se libera, pero SIEMPRE en el ThreadPool (ReleaseOffThread) —
+    // su Dispose hace Join del hilo de captura y no puede correr aquí.
+#pragma warning disable CA2213
     private WasapiLoopbackCapture? _capture;
+#pragma warning restore CA2213
     private System.Threading.Timer? _retry;
     private bool _disposed;
+    private volatile bool _capturing;
 
     // Formato del capture activo (fijado en Start, leído en el hilo de captura)
     private int _channels;
@@ -57,6 +64,27 @@ public sealed class LoopbackProgramMeter : IDisposable
     {
         _deviceId = deviceId;
         _fallbackToDefault = fallbackToDefault;
+    }
+
+    /// <summary>true SOLO mientras hay una captura viva de verdad. Es el
+    /// interruptor del VU de programa: si esto es false el AudioEngine mide
+    /// por la mezcla interna, porque «existe el objeto medidor» NO significa
+    /// «el medidor está midiendo» (reintentos, dispositivo caído, ASIO…).
+    /// Legible desde cualquier hilo.</summary>
+    public bool IsCapturing => _capturing;
+
+    /// <summary>Libera un capture SIEMPRE fuera del hilo llamante: su Dispose
+    /// hace Join del hilo de captura (colgaría al propio hilo de captura y
+    /// bloquearía al de UI).</summary>
+    private static void ReleaseOffThread(WasapiLoopbackCapture? cap)
+    {
+        if (cap is null)
+            return;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            try { cap.StopRecording(); } catch (Exception) { }
+            try { cap.Dispose(); } catch (Exception) { }
+        });
     }
 
     /// <summary>Abre la captura loopback. Si falla (sin dispositivo, formato
@@ -88,15 +116,13 @@ public sealed class LoopbackProgramMeter : IDisposable
                     cap.RecordingStopped += OnStopped;
                     cap.StartRecording();
                     _capture = cap;
+                    _capturing = true;
                 }
                 catch
                 {
                     // Nunca Dispose bajo _gate: hace Join del hilo de captura
                     // y este puede estar esperando el lock en OnStopped
-                    ThreadPool.QueueUserWorkItem(_ =>
-                    {
-                        try { cap.Dispose(); } catch (Exception) { }
-                    });
+                    ReleaseOffThread(cap);
                     throw;
                 }
                 _retry?.Dispose();
@@ -104,6 +130,7 @@ public sealed class LoopbackProgramMeter : IDisposable
             }
             catch (Exception)
             {
+                _capturing = false;
                 ScheduleRetryLocked();
             }
         }
@@ -178,6 +205,7 @@ public sealed class LoopbackProgramMeter : IDisposable
         WasapiLoopbackCapture? dead;
         lock (_gate)
         {
+            _capturing = false;
             if (_disposed)
                 return;
             dead = _capture;
@@ -186,16 +214,18 @@ public sealed class LoopbackProgramMeter : IDisposable
         }
         // Puede llegar en el propio hilo de captura → liberar fuera de él
         // (Dispose hace Join del hilo y se colgaría a sí mismo)
-        if (dead is not null)
-            ThreadPool.QueueUserWorkItem(_ =>
-            {
-                try { dead.Dispose(); } catch (Exception) { }
-            });
+        ReleaseOffThread(dead);
     }
 
     private void ScheduleRetryLocked() =>
         _retry ??= new System.Threading.Timer(_ => Start(), null, 2_000, 2_000);
 
+    /// <summary>Cierra el medidor SIN bloquear al que llama: el StopRecording +
+    /// Dispose del capture (que hace Join del hilo de captura, ~10 ms medidos)
+    /// se hace en el ThreadPool. Antes esto corría en el hilo de UI cada vez
+    /// que se guardaban Ajustes y era parte del tirón del cambio en caliente.
+    /// Tras volver, IsCapturing ya es false: el VU cae a la mezcla interna en
+    /// el acto, sin ventana ciega.</summary>
     public void Dispose()
     {
         WasapiLoopbackCapture? cap;
@@ -204,15 +234,12 @@ public sealed class LoopbackProgramMeter : IDisposable
             if (_disposed)
                 return;
             _disposed = true;
+            _capturing = false;
             _retry?.Dispose();
             _retry = null;
             cap = _capture;
             _capture = null;
         }
-        if (cap is not null)
-        {
-            try { cap.StopRecording(); } catch (Exception) { }
-            try { cap.Dispose(); } catch (Exception) { }
-        }
+        ReleaseOffThread(cap);
     }
 }

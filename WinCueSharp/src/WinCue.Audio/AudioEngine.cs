@@ -33,6 +33,20 @@ namespace WinCue.Audio;
 /// <summary>Dispositivo de salida disponible.</summary>
 public sealed record AudioDeviceInfo(int Index, string Id, string Name, bool IsDefault);
 
+/// <summary>De dónde sale el VU de PROGRAMA en cada momento. El operador tiene
+/// derecho a saber qué está mirando: no es lo mismo medir el dispositivo
+/// entero que medir solo lo que pasa por nuestro mixer.</summary>
+public enum ProgramMeterSource
+{
+    /// <summary>Captura loopback del dispositivo: TODO lo que suena en él
+    /// (cues, audio de los vídeos, audiciones, sonidos del sistema).</summary>
+    DeviceLoopback,
+    /// <summary>Mezcla interna del motor: solo los cues de audio del mixer.
+    /// Es la vía con ASIO (puentea el mixer de Windows) y el respaldo cuando
+    /// el loopback no puede abrirse.</summary>
+    InternalMix,
+}
+
 public sealed class AudioEngine : IAudioEngine, IDisposable
 {
     // ------------------------------------------------------------------
@@ -42,12 +56,26 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     public event Action<int, MediaCueState>? StateChanged;   // (cueId, newState)
     public event Action<int, double>? LatencyReport;          // (cueId, ms)
     public event Action<int, string>? ErrorOccurred;          // (cueId, message)
-    /// <summary>RMS estéreo (L, R) para el VU de PROGRAMA. Con el medidor
-    /// loopback activo (StartProgramMeter, driver no-ASIO) mide lo que sale
-    /// del dispositivo (audio + vídeo + todo); si no, cae al RMS de los
-    /// streams del mixer interno (el VU aplica peak-hold y muestra el más
-    /// alto).</summary>
+    /// <summary>RMS estéreo (L, R) para el VU de PROGRAMA. SIEMPRE hay una vía
+    /// viva: con la captura loopback funcionando mide lo que sale del
+    /// dispositivo (audio + vídeo + todo) y, si esa captura no existe o no
+    /// está capturando (ASIO, dispositivo caído, reintento en curso), cae al
+    /// RMS de la mezcla interna del mixer. ProgramMeterSource dice cuál de las
+    /// dos está alimentando el VU en este momento.</summary>
     public event Action<float, float>? LevelReport;
+
+    /// <summary>Cambió la vía que alimenta el VU de PROGRAMA (para que la UI
+    /// lo escriba en el strip MASTER).</summary>
+    public event Action<ProgramMeterSource>? ProgramMeterSourceChanged;
+
+    /// <summary>Cambió si el VU del PVW lo alimenta el loopback de audición.
+    /// Existe porque los medidores se abren FUERA del hilo de UI: el estado no
+    /// puede consultarse justo después de SetAuditionMeterDevice.</summary>
+    public event Action<bool>? AuditionMeterActiveChanged;
+
+    /// <summary>Cambió la salida realmente abierta (p. ej. ASIO cayó a WASAPI).
+    /// La salida no se abre hasta el primer Play: por eso es un evento.</summary>
+    public event Action<string>? OutputDescriptionChanged;
 
     /// <summary>RMS estéreo (L, R) de UN cue concreto (inspector/audición).</summary>
     public event Action<int, float, float>? CueLevelReport;
@@ -101,13 +129,32 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private float _master = 1.0f;
     private bool _disposed;
 
-    // VU de programa por loopback WASAPI (null = fallback al mixer interno)
+    // VU de programa por loopback WASAPI (null o sin capturar = mezcla interna)
     private LoopbackProgramMeter? _loopback;
     private bool _loopbackWanted;
+    private ProgramMeterSource _meterSource = ProgramMeterSource.InternalMix;
 
     // VU de audición por loopback (solo si su dispositivo ≠ salida principal)
     private LoopbackProgramMeter? _auditionLoopback;
     private string _auditionMeterDevice = "";   // FriendlyName; "" = sin medidor
+
+    // Épocas de los medidores: los abre el ThreadPool (nunca el hilo de UI) y
+    // un cambio de driver posterior debe descartar el que venía en camino.
+    private int _programMeterEpoch;
+    private int _auditionMeterEpoch;
+
+    // Descripción de la salida REALMENTE abierta (p. ej. "ASIO · ASIO4ALL v2"
+    // o "WASAPI · ASIO no disponible"): lo que el operador ve en el mixer.
+    private string _outputDescription = "";
+    // El driver es ASIO pero no se pudo abrir y sonamos por WASAPI → SÍ hay
+    // loopback posible (el VU vuelve a medir el dispositivo entero).
+    private bool _asioFellBackToWasapi;
+
+    // Vigilancia de salida MUDA: un driver puede abrirse y no pedir nunca
+    // audio (típico de ASIO4ALL sin dispositivo WDM habilitado). El cue se ve
+    // «Playing», no suena nada y el VU está a cero sin explicación.
+    private readonly Dictionary<int, long> _playStartedTicks = new();
+    private bool _outputStallReported;
 
     private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer,
                                     LimiterSampleProvider Limiter);
@@ -152,6 +199,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _deviceId = deviceId;
         _driver = driver;
         _asioDriverName = asioDriverName;
+        SetOutputDescription("");   // se conocerá al abrir la salida nueva
         RestartProgramMeter();   // el loopback debe seguir al dispositivo nuevo
         RestartAuditionMeter();  // y re-evaluar si audición == principal
     }
@@ -167,6 +215,13 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         RestartProgramMeter();
     }
 
+    /// <summary>Vía que alimenta AHORA MISMO el VU de PROGRAMA.</summary>
+    public ProgramMeterSource ProgramMeterSource => _meterSource;
+
+    /// <summary>Salida realmente abierta ("" si aún no se abrió ninguna).
+    /// Con ASIO dice QUÉ driver se abrió — o que se cayó a WASAPI.</summary>
+    public string OutputDescription => _outputDescription;
+
     /// <summary>Configura el VU de audición por loopback. deviceName es el
     /// FriendlyName de settings (audition_device_name). Solo mide si ese
     /// dispositivo existe Y no es el mismo que la salida principal (en ese
@@ -181,52 +236,170 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// (la vista debe ignorar entonces el VU de stream de la audición).</summary>
     public bool AuditionMeterActive => _auditionLoopback is not null;
 
+    /// <summary>Reabre el medidor de AUDICIÓN. Todo el trabajo caro (enumerar
+    /// dispositivos por COM y abrir la captura) va al ThreadPool: llamarlo
+    /// desde el hilo de UI —que es lo que hace «guardar Ajustes»— no debe
+    /// bloquearlo. El resultado se instala de vuelta por el dispatcher.</summary>
     private void RestartAuditionMeter()
     {
-        _auditionLoopback?.Dispose();
+        int epoch = ++_auditionMeterEpoch;
+        _auditionLoopback?.Dispose();     // ya no bloquea: libera en ThreadPool
         _auditionLoopback = null;
-        if (_auditionMeterDevice.Length == 0)
+        AuditionMeterActiveChanged?.Invoke(false);
+        if (_auditionMeterDevice.Length == 0 || _disposed)
             return;
 
+        string wantedName = _auditionMeterDevice;
+        string? mainDeviceId = _deviceId;
+        string driver = _driver;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            var meter = BuildAuditionMeter(wantedName, mainDeviceId, driver);
+            if (meter is null)
+                return;
+            Post(() =>
+            {
+                if (_disposed || epoch != _auditionMeterEpoch)
+                {
+                    meter.Dispose();   // nos relevaron mientras se abría
+                    return;
+                }
+                _auditionLoopback = meter;
+                AuditionMeterActiveChanged?.Invoke(true);
+            });
+        });
+    }
+
+    /// <summary>THREADPOOL: decide si procede un medidor de audición y lo abre.
+    /// null = no hay que medir (sin dispositivo, o es la misma salida principal
+    /// y el VU de programa ya lo cubre).</summary>
+    private LoopbackProgramMeter? BuildAuditionMeter(
+        string wantedName, string? mainDeviceId, string driver)
+    {
         var devices = ListDevices();
-        string? id = devices.FirstOrDefault(d => d.Name == _auditionMeterDevice)?.Id;
+        string? id = devices.FirstOrDefault(d => d.Name == wantedName)?.Id;
         if (id is null)
-            return;   // dispositivo no presente ahora mismo → sin medidor
+            return null;   // dispositivo no presente ahora mismo → sin medidor
 
         // Mismo dispositivo que la salida principal → el PGM ya lo mide y el
         // PVW usa el VU de stream (con ASIO la principal no es WASAPI: no choca)
-        bool asioActive = _driver.Equals("asio", StringComparison.OrdinalIgnoreCase) &&
-                          ListAsioDrivers().Count > 0;
-        if (!asioActive)
+        if (!IsAsioActive(driver))
         {
-            string mainId = _deviceId is { Length: > 0 }
-                ? _deviceId
+            string mainId = mainDeviceId is { Length: > 0 }
+                ? mainDeviceId
                 : devices.FirstOrDefault(d => d.IsDefault)?.Id ?? "";
             if (id == mainId)
-                return;
+                return null;
         }
 
         var meter = new LoopbackProgramMeter(id, fallbackToDefault: false);
         meter.LevelReport += (l, r) => Post(() => AuditionLevelReport?.Invoke(l, r));
         meter.Start();
-        _auditionLoopback = meter;
+        return meter;
     }
 
+    /// <summary>Reabre el medidor de PROGRAMA. Igual que el de audición: el
+    /// hilo de UI solo suelta el anterior (liberación diferida) y encarga el
+    /// nuevo. Mientras no haya captura viva el VU se alimenta de la mezcla
+    /// interna, así que NO hay ningún instante sin VU.</summary>
     private void RestartProgramMeter()
     {
+        int epoch = ++_programMeterEpoch;
         _loopback?.Dispose();
         _loopback = null;
-        if (!_loopbackWanted)
+        UpdateProgramMeterSource();
+        if (!_loopbackWanted || _disposed)
             return;
-        // ASIO real (driver asio Y drivers instalados): CreateOutput no pasará
-        // por el mixer de Windows → el loopback no vería nada. Fallback a mixer.
-        if (_driver.Equals("asio", StringComparison.OrdinalIgnoreCase) &&
-            ListAsioDrivers().Count > 0)
+        // ASIO real (driver asio Y drivers instalados) Y abierto de verdad:
+        // CreateOutput no pasa por el mixer de Windows → el loopback no vería
+        // nada, se mide por la mezcla interna. Si ASIO no pudo abrirse y
+        // sonamos por WASAPI, el loopback SÍ vale y se recupera.
+        if (IsAsioActive(_driver) && !_asioFellBackToWasapi)
             return;
-        var meter = new LoopbackProgramMeter(_deviceId);
-        meter.LevelReport += (l, r) => Post(() => LevelReport?.Invoke(l, r));
-        meter.Start();
-        _loopback = meter;
+
+        string? deviceId = _deviceId;
+        ThreadPool.QueueUserWorkItem(_ =>
+        {
+            var meter = new LoopbackProgramMeter(deviceId);
+            meter.LevelReport += (l, r) => Post(() => LevelReport?.Invoke(l, r));
+            meter.Start();
+            Post(() =>
+            {
+                if (_disposed || epoch != _programMeterEpoch)
+                {
+                    meter.Dispose();   // nos relevaron mientras se abría
+                    return;
+                }
+                _loopback = meter;
+                UpdateProgramMeterSource();
+            });
+        });
+        // La captura tarda ~10 ms en abrir: hasta que IsCapturing sea true el
+        // VU sigue saliendo del mixer. Un tick tardío de refresco lo cuadra.
+        Post(UpdateProgramMeterSource);
+    }
+
+    /// <summary>true si el driver ASIO está realmente en juego (elegido Y con
+    /// drivers instalados). La lista se cachea: leerla es COM/registro.</summary>
+    private static bool IsAsioActive(string driver) =>
+        driver.Equals("asio", StringComparison.OrdinalIgnoreCase) &&
+        ListAsioDrivers().Count > 0;
+
+    /// <summary>La verdad sobre el VU: el loopback manda SOLO si está
+    /// capturando de verdad; en cualquier otro caso, mezcla interna.</summary>
+    private void UpdateProgramMeterSource()
+    {
+        var now = _loopback is { IsCapturing: true }
+            ? ProgramMeterSource.DeviceLoopback
+            : ProgramMeterSource.InternalMix;
+        if (now == _meterSource)
+            return;
+        _meterSource = now;
+        ProgramMeterSourceChanged?.Invoke(now);
+    }
+
+    /// <summary>Reevalúa la vía del VU (la captura puede caerse o recuperarse
+    /// sola por el reintento) y vigila que la salida consuma audio. La UI lo
+    /// llama en su tick lento; es leer un par de campos.</summary>
+    public void RefreshProgramMeterSource()
+    {
+        UpdateProgramMeterSource();
+        CheckOutputAlive();
+    }
+
+    /// <summary>Salida MUDA: el dispositivo se abrió sin error pero no pide
+    /// audio (caso real: ASIO4ALL abierto sin dispositivo WDM habilitado —
+    /// AsioOut queda en Playing y jamás llama al callback). Sin esto el cue se
+    /// ve «Playing», no suena nada y el VU está a cero SIN EXPLICACIÓN, que es
+    /// justo lo que el operador reporta como «el VU no funciona». Se avisa una
+    /// sola vez por salida abierta.</summary>
+    private void CheckOutputAlive()
+    {
+        if (_outputStallReported || _paused || _active.Count == 0)
+            return;
+        long now = Environment.TickCount64;
+        foreach (var (cueId, a) in _active)
+        {
+            if (a.Provider.IsPaused
+                || !_playStartedTicks.TryGetValue(cueId, out long started)
+                || now - started < 2_000)
+                continue;
+            if (a.Provider.ElapsedSeconds > 0.0)
+                continue;   // el dispositivo sí está tirando de audio
+            _outputStallReported = true;
+            ErrorOccurred?.Invoke(cueId,
+                $"La salida de audio no está consumiendo audio ({(_outputDescription.Length > 0 ? _outputDescription : _driver)}). " +
+                "Revisa el panel de control del driver (con ASIO, que tenga un dispositivo habilitado) o vuelve a WASAPI.");
+            return;
+        }
+    }
+
+    private void SetOutputDescription(string text)
+    {
+        if (_outputDescription == text)
+            return;
+        _outputDescription = text;
+        OutputDescriptionChanged?.Invoke(text);
     }
 
     /// <summary>Volumen master global (0..1), aplicado a todos los streams en vivo.</summary>
@@ -263,11 +436,31 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         return result;
     }
 
-    /// <summary>Nombres de drivers ASIO instalados (vacío si no hay).</summary>
+    // La lista de drivers ASIO se lee por COM/registro (hasta 2 ms medidos) y
+    // la consultan SetDevice y los medidores. Se cachea: instalar un driver
+    // ASIO requiere instalador (y normalmente reinicio), no pasa en mitad de
+    // un show. El botón «Refrescar dispositivos» de Ajustes la invalida.
+    private static List<string>? _asioDriversCache;
+    private static readonly object _asioCacheGate = new();
+
+    /// <summary>Nombres de drivers ASIO instalados (vacío si no hay). Cacheado.</summary>
     public static List<string> ListAsioDrivers()
     {
-        try { return AsioOut.GetDriverNames().ToList(); }
-        catch (Exception) { return new List<string>(); }
+        lock (_asioCacheGate)
+        {
+            if (_asioDriversCache is null)
+            {
+                try { _asioDriversCache = AsioOut.GetDriverNames().ToList(); }
+                catch (Exception) { _asioDriversCache = new List<string>(); }
+            }
+            return new List<string>(_asioDriversCache);
+        }
+    }
+
+    /// <summary>Olvida la caché de drivers ASIO (Ajustes → Refrescar).</summary>
+    public static void RefreshAsioDrivers()
+    {
+        lock (_asioCacheGate) { _asioDriversCache = null; }
     }
 
     // ------------------------------------------------------------------
@@ -512,12 +705,17 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _parkedStreams.Clear();
         _parkedOrder.Clear();
         CloseOutput();
+        // Épocas al día: un medidor que se estuviera abriendo en el ThreadPool
+        // se descarta al aterrizar (y se libera) en vez de quedarse vivo.
+        _programMeterEpoch++;
+        _auditionMeterEpoch++;
         _loopbackWanted = false;
         _loopback?.Dispose();
         _loopback = null;
         _auditionMeterDevice = "";
         _auditionLoopback?.Dispose();
         _auditionLoopback = null;
+        UpdateProgramMeterSource();
     }
 
     public void Dispose()
@@ -603,9 +801,12 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));
         provider.LevelReport += (l, r) => Post(() =>
         {
-            // Con loopback activo el VU de programa lo alimenta el dispositivo
-            // (evita duplicar reports); los VU por-cue siguen siendo del stream
-            if (_loopback is null)
+            // El VU de PROGRAMA lo alimenta el dispositivo SOLO si su captura
+            // loopback está viva de verdad (IsCapturing, no «existe el objeto»):
+            // con ASIO, con el loopback caído o mientras reintenta, la mezcla
+            // interna toma el relevo — el VU nunca se queda a cero por diseño.
+            // Los VU por-cue siguen siendo siempre del stream.
+            if (_loopback is not { IsCapturing: true })
                 LevelReport?.Invoke(l, r);
             CueLevelReport?.Invoke(cueId, l, r);
         });
@@ -619,6 +820,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         var input = AdaptToMixerFormat(provider, p.Rate);
         _active[cueId] = new ActiveCue(provider, input, bus);
         _clockProviders[cueId] = provider;
+        _playStartedTicks[cueId] = Environment.TickCount64;
         mixer.AddMixerInput(input);
         SetState(cueId, MediaCueState.Playing);
     }
@@ -825,6 +1027,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         if (_outputs.TryGetValue(bus, out var existing))
             return existing.Mixer;
         IWavePlayer? player = null;
+        bool asioFallbackBefore = _asioFellBackToWasapi;
         try
         {
             var mixer = new MixingSampleProvider(
@@ -846,6 +1049,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             player.Init(limiter);
             player.Play();
             _outputs[bus] = new OutputBus(player, mixer, limiter);
+            // El driver ASIO no pudo abrirse y sonamos por WASAPI: entonces SÍ
+            // hay loopback y el VU vuelve a medir el dispositivo entero.
+            if (bus.Length == 0 && _asioFellBackToWasapi && !asioFallbackBefore)
+                RestartProgramMeter();
             return mixer;
         }
         catch (Exception exc)
@@ -885,16 +1092,28 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         // Bus principal: configuración de settings (driver + device)
         if (_driver.Equals("asio", StringComparison.OrdinalIgnoreCase))
         {
-            var names = ListAsioDrivers();
-            if (names.Count > 0)
-            {
-                string name = _asioDriverName is { Length: > 0 } wanted && names.Contains(wanted)
-                    ? wanted : names[0];
-                return new AsioOut(name);
-            }
-            // Sin drivers ASIO instalados → caer a WASAPI
+            // CA2000: la propiedad pasa al llamador (EnsureOutput la guarda en
+            // _outputs o la libera en su catch) — patrón no reconocido.
+#pragma warning disable CA2000
+            var asio = OpenAsio();
+#pragma warning restore CA2000
+            if (asio is not null)
+                return asio;
+            // Sin ASIO utilizable → WASAPI. En directo es preferible sonar por
+            // el dispositivo del sistema (con VU) a quedarse mudo; el mixer
+            // avisa de la caída con OutputDescription.
+            _asioFellBackToWasapi = true;
+            SetOutputDescription(ListAsioDrivers().Count == 0
+                ? "WASAPI · sin drivers ASIO instalados"
+                : "WASAPI · ningún driver ASIO pudo abrirse");
+        }
+        else
+        {
+            SetOutputDescription("");
         }
 
+        // El MMDevice pasa a ser propiedad del WasapiOut (lo libera él); si no
+        // llegamos a construirlo hay que soltarlo o se filtra un handle COM.
         MMDevice? device = null;
         if (_deviceId is { Length: > 0 })
         {
@@ -906,9 +1125,51 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             catch (Exception) { device = null; }   // id obsoleto → por defecto
         }
 
-        return device is not null
-            ? new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, _latencyMs)
-            : new WasapiOut(AudioClientShareMode.Shared, _latencyMs);
+        try
+        {
+            return device is not null
+                ? new WasapiOut(device, AudioClientShareMode.Shared, useEventSync: true, _latencyMs)
+                : new WasapiOut(AudioClientShareMode.Shared, _latencyMs);
+        }
+        catch (Exception)
+        {
+            device?.Dispose();
+            throw;
+        }
+    }
+
+    /// <summary>Abre la salida ASIO. El driver CONFIGURADO manda; si no hay
+    /// ninguno configurado se prueban los instalados en orden hasta que uno
+    /// abra — antes se cogía names[0] a ciegas y bastaba con tener instalado
+    /// un driver de un cacharro desconectado (típico: una interfaz USB) para
+    /// que ASIO fallara SIEMPRE: sin salida, sin sonido y sin VU.
+    /// null = ningún ASIO utilizable.</summary>
+    private AsioOut? OpenAsio()
+    {
+        var names = ListAsioDrivers();
+        if (names.Count == 0)
+            return null;
+
+        var order = new List<string>();
+        if (_asioDriverName is { Length: > 0 } wanted && names.Contains(wanted))
+            order.Add(wanted);   // el elegido por el operador: solo ese
+        else
+            order.AddRange(names);
+
+        foreach (string name in order)
+        {
+            try
+            {
+                var outp = new AsioOut(name);
+                SetOutputDescription($"ASIO · {name}");
+                return outp;
+            }
+            catch (Exception)
+            {
+                // Cacharro desconectado / driver ocupado → probar el siguiente
+            }
+        }
+        return null;
     }
 
     /// <summary>El mixer retiró un input porque su Read devolvió 0 (fin natural
@@ -922,6 +1183,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
                 if (ReferenceEquals(a.MixerInput, e.SampleProvider))
                 {
                     _active.Remove(cueId);
+                    _playStartedTicks.Remove(cueId);
                     _clockProviders.TryRemove(cueId, out _);
                     a.Provider.Dispose();   // streaming: mata el ffmpeg
                     SetState(cueId, MediaCueState.Stopped);
@@ -935,6 +1197,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     private void StopCtx(int cueId, bool emitState)
     {
         _clockProviders.TryRemove(cueId, out _);
+        _playStartedTicks.Remove(cueId);
         if (!_active.Remove(cueId, out var a))
             return;
         a.Provider.RequestStop();               // por si el mixer lee antes del Remove
@@ -953,7 +1216,10 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             try { bus.Player.Dispose(); } catch (Exception) { }
         }
         _outputs.Clear();
+        _playStartedTicks.Clear();
         _paused = false;
+        _asioFellBackToWasapi = false;
+        _outputStallReported = false;
     }
 
     // ------------------------------------------------------------------
