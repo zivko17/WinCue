@@ -8,6 +8,14 @@
 // manejadores en la línea de 0 dB (solo frecuencia). Los commits van por el
 // flujo normal (undo con coalescencia) y el controlador los aplica EN VIVO
 // al cue sonando y a la audición → se ecualiza escuchando.
+//
+// VÍDEO TAMBIÉN: el rack (ganancia + EQ + compresor) vale para cues de VÍDEO
+//   · con AUDIO ESPEJO (motor HAP propio o ruta híbrida) la cadena es la
+//     NATIVA, igual que un cue de audio → hay RTA y GR reales;
+//   · sin espejo el audio lo saca mpv y la EQ se traduce a su cadena af: los
+//     controles funcionan, pero NO hay analizador → se muestra la curva (que
+//     es matemática de los parámetros) y una nota honesta en vez de un RTA
+//     muerto que parezca roto.
 // =============================================================================
 
 using System.Globalization;
@@ -34,6 +42,9 @@ public sealed class EqEditorControl : ContentControl
 
     private Cue? _cue;
     private bool _loading;
+    /// <summary>El audio de este cue pasa por el rack nativo → hay RTA y GR
+    /// reales. false = vídeo cuyo audio sale por mpv: curva sí, medidores no.</summary>
+    private bool _analysis = true;
 
     private readonly EqCurveCanvas _canvas = new();
     private readonly CompCurveCanvas _compCanvas = new();
@@ -49,6 +60,7 @@ public sealed class EqEditorControl : ContentControl
     private readonly TextBox[] _bQ = new TextBox[4];
     private readonly TextBlock _readout;
     private readonly TextBlock _noAudio;
+    private readonly TextBlock _noAnalyzer;
     private readonly Grid _root;
     private readonly DispatcherTimer _rta;
 
@@ -228,6 +240,7 @@ public sealed class EqEditorControl : ContentControl
         };
         eqPars.Children.Add(_readout);
 
+
         var eqParsScroll = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -240,6 +253,28 @@ public sealed class EqEditorControl : ContentControl
         Grid.SetColumn(_canvas, 2);
         _root.Children.Add(_canvas);
         _canvas.ReadoutChanged += text => _readout!.Text = text;
+
+        // Nota honesta EN EL SITIO DEL RTA (vídeo sin espejo de audio): la EQ
+        // se aplica por la cadena af de mpv, pero no hay nada que medir —
+        // mejor decirlo donde el operador espera ver el analizador que dejar
+        // un fondo vacío que parece roto.
+        _noAnalyzer = new TextBlock
+        {
+            Text = Loc.T(
+                "Sin analizador (RTA/GR): el audio de este vídeo lo saca mpv. La ganancia, la EQ y el compresor SÍ actúan —y la curva es real—, pero solo hay medidores cuando el audio va por el rack (AUDIO ESPEJO).",
+                "No analyzer (RTA/GR): this video's audio is played by mpv. Gain, EQ and compressor DO work —and the curve is real— but there are meters only when audio goes through the rack (MIRRORED AUDIO)."),
+            Foreground = new SolidColorBrush(Color.FromRgb(0xc9, 0xa8, 0x4a)),
+            Background = new SolidColorBrush(Color.FromArgb(0xcc, 0x14, 0x14, 0x16)),
+            FontSize = 10,
+            Padding = new Thickness(6, 4, 6, 4),
+            Margin = new Thickness(8, 6, 8, 0),
+            TextWrapping = TextWrapping.Wrap,
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+            VerticalAlignment = VerticalAlignment.Top,
+            Visibility = Visibility.Collapsed,
+        };
+        Grid.SetColumn(_noAnalyzer, 2);
+        _root.Children.Add(_noAnalyzer);
 
         // ── HERRAMIENTA 2: COMPRESOR — parámetros en columna + gráfica ──
         var compPars = new StackPanel { Margin = new Thickness(14, 0, 8, 0) };
@@ -279,7 +314,8 @@ public sealed class EqEditorControl : ContentControl
 
         _noAudio = new TextBlock
         {
-            Text = Loc.T("La EQ paramétrica es para cues de AUDIO.", "The parametric EQ is for AUDIO cues."),
+            Text = Loc.T("Este tipo de cue no tiene audio: la ganancia, la EQ y el compresor son para cues de AUDIO y de VÍDEO.",
+                         "This cue type has no audio: gain, EQ and compressor are for AUDIO and VIDEO cues."),
             Foreground = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
@@ -291,7 +327,9 @@ public sealed class EqEditorControl : ContentControl
         _rta = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(80) };
         _rta.Tick += (_, _) =>
         {
-            if (IsVisible && _cue is { Type: CueType.Audio })
+            // Sin analizador (vídeo por mpv) no se pide nada: la curva de la
+            // EQ sigue viva porque es matemática de los parámetros
+            if (IsVisible && _analysis && _cue is { Type: CueType.Audio or CueType.Video })
             {
                 _canvas.SetSpectrum(SpectrumProvider?.Invoke());
                 _compCanvas.SetGainReduction(GainReductionProvider?.Invoke() ?? 0f);
@@ -401,17 +439,22 @@ public sealed class EqEditorControl : ContentControl
         Margin = new Thickness(2, 0, 10, 0),
     };
 
-    /// <summary>Repuebla el editor con el cue dado (solo al cambiar selección).</summary>
-    public void SetCue(Cue? cue)
+    /// <summary>Repuebla el editor con el cue dado (solo al cambiar selección).
+    /// hasAnalysis = su audio pasa por el rack nativo (RTA y GR reales).</summary>
+    public void SetCue(Cue? cue, bool hasAnalysis = true)
     {
         _cue = cue;
+        _analysis = hasAnalysis;
         _canvas.SetCue(cue);
         _compCanvas.SetCue(cue);
-        if (cue is not { Type: CueType.Audio })
+        // El rack vale para AUDIO y para VÍDEO (espejo nativo o cadena af de
+        // mpv); el resto de tipos no tienen audio que tratar
+        if (cue is not { Type: CueType.Audio or CueType.Video })
         {
             Content = _noAudio;
             return;
         }
+        _noAnalyzer.Visibility = hasAnalysis ? Visibility.Collapsed : Visibility.Visible;
         Content = _root;
         RefreshParams();
     }
@@ -420,7 +463,7 @@ public sealed class EqEditorControl : ContentControl
     /// seleccionar y tras cada arrastre en las gráficas, que mutan el cue).</summary>
     private void RefreshParams()
     {
-        if (_cue is not { Type: CueType.Audio } cue)
+        if (_cue is not { Type: CueType.Audio or CueType.Video } cue)
             return;
         _loading = true;
         try

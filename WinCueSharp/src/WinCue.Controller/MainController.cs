@@ -590,6 +590,39 @@ public class MainController
     /// para el medidor GR del panel Audio.</summary>
     public float GetMasterGainReduction() => _audio.GetMasterGainReductionDb();
 
+    /// <summary>true si el audio de este cue pasa (o pasará) por el RACK
+    /// NATIVO y por tanto se puede MEDIR: VU por cue, RTA del analizador y
+    /// medidor GR del compresor.
+    ///   · AUDIO — siempre (es el rack de siempre).
+    ///   · VÍDEO — solo si su audio va por el ESPEJO (motor HAP propio o ruta
+    ///     híbrida). Si lo saca mpv (varispeed, kill-switch, imagen, sin
+    ///     compositor…) la EQ/compresor SÍ se aplican —cadena af de mpv— pero
+    ///     no hay nada que medir: el inspector debe decirlo en vez de enseñar
+    ///     un analizador muerto.
+    ///   · El resto de tipos (MEMO/WAIT/FADE…) no tienen audio.</summary>
+    public bool CueHasAudioAnalysis(int cueId)
+    {
+        if (_mirroredAudio.Contains(cueId))
+            return true;                       // espejo sonando ahora mismo
+        if (_model.GetById(cueId) is not Cue cue)
+            return false;
+        if (cue.Type == CueType.Audio)
+            return true;
+        if (cue.Type != CueType.Video || cue.FilePath.Length == 0)
+            return false;
+        if (_running.ContainsKey(cueId))
+            return false;                      // ya suena y NO está espejado → mpv
+        return WillMirrorAudio(cue);
+    }
+
+    /// <summary>Decisión de enrutado del audio de un cue de vídeo ANTES del GO
+    /// — la MISMA que aplica Trigger: HAP → motor propio si es elegible;
+    /// no-HAP → ruta híbrida si es elegible.</summary>
+    private bool WillMirrorAudio(Cue cue) =>
+        MediaImporter.IsUnsupportedVideoCodec(cue.FilePath)
+            ? HapEngineEligible(cue)
+            : HybridAudioEligible(cue);
+
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
     public void StopCueById(int cueId)
     {

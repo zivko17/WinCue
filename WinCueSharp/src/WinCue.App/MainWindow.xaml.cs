@@ -92,6 +92,7 @@ public partial class MainWindow : Window, IShowView
             _controller.AuditionToggle(CueGrid.SelectedIndex);
         Inspector.SpectrumProvider = cueId => _controller.GetAudioSpectrum(cueId);
         Inspector.GainReductionProvider = cueId => _controller.GetAudioGainReduction(cueId);
+        Inspector.AudioAnalysisProvider = cueId => _controller.CueHasAudioAnalysis(cueId);
 
         // Panel AUDIO (mesa): faders master/audición/cues + VU + GR limitador
         Mixer.MasterGainReductionProvider = () => _controller.GetMasterGainReduction();
@@ -175,8 +176,8 @@ public partial class MainWindow : Window, IShowView
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
         MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR,
-            Loc.T("Nivel L/R del PROGRAMA (cues de AUDIO del mixer; el sonido de los vídeos sale por mpv y no es medible aquí)",
-                  "L/R level of PROGRAM (AUDIO cues from the mixer; video sound goes through mpv and isn't measurable here)")));
+            Loc.T("Nivel L/R del PROGRAMA (loopback del dispositivo: incluye los vídeos con AUDIO ESPEJO por el rack; el audio que saca mpv no pasa por el mixer)",
+                  "L/R level of PROGRAM (device loopback: includes videos whose MIRRORED AUDIO goes through the rack; audio played by mpv doesn't go through the mixer)")));
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
             Loc.T("Nivel L/R de la AUDICIÓN local (🎧)", "L/R level of the local AUDITION (🎧)")));
         _pvw.Clear("—");

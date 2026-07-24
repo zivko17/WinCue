@@ -31,6 +31,11 @@ public sealed class InspectorPanel : ContentControl
     /// <summary>Medidor GR del compresor: reducción de ganancia (dB ≥ 0).</summary>
     public Func<int, float>? GainReductionProvider;
 
+    /// <summary>true si el audio del cue pasa por el RACK NATIVO y por tanto
+    /// se puede medir (VU por cue, RTA, GR). En cues de vídeo depende del
+    /// enrutado: con AUDIO ESPEJO sí; con el audio por mpv, no.</summary>
+    public Func<int, bool>? AudioAnalysisProvider;
+
     private readonly EqEditorControl _eqEditor = new();
 
     private readonly TabControl _tabs = new()
@@ -145,13 +150,19 @@ public sealed class InspectorPanel : ContentControl
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
             UpdateWave(cue);
             UpdateEditPreview(cue);
-            _eqEditor.SetCue(cue);
+            _eqEditor.SetCue(cue, HasAudioAnalysis(cue));
         }
         finally
         {
             _loading = false;
         }
     }
+
+    /// <summary>true si el cue tiene analizador REAL (su audio va por el rack
+    /// nativo). Sin provider cableado (tests/diseño) se asume el
+    /// comportamiento clásico: solo los cues de AUDIO.</summary>
+    private bool HasAudioAnalysis(Cue cue) =>
+        AudioAnalysisProvider?.Invoke(cue.Id) ?? cue.Type == CueType.Audio;
 
     /// <summary>Visor de edición: solo para cues de VÍDEO con archivo.</summary>
     private void UpdateEditPreview(Cue cue)
@@ -787,7 +798,9 @@ public sealed class InspectorPanel : ContentControl
         infoCol.Children.Add(label);
         slider.ToolTip = Loc.T("Volumen del cue: en vivo si está sonando.",
                                "Cue volume: live if it is playing.");
-        _levelVu.ToolTip = Loc.T("VU real de ESTE cue.", "THIS cue's real VU.");
+        _levelVu.ToolTip = Loc.T(
+            "VU real de ESTE cue (cues de AUDIO y vídeos con AUDIO ESPEJO por el rack nativo).",
+            "THIS cue's real VU (AUDIO cues and videos whose MIRRORED AUDIO goes through the native rack).");
 
         slider.ValueChanged += (_, e) =>
         {
@@ -800,8 +813,10 @@ public sealed class InspectorPanel : ContentControl
             slider.Value = c.Volume * 100.0;
             label.Text = VolumeLabel(c.Volume);
         };
-        // El VU por cue solo existe para AUDIO (el vídeo suena por mpv)
-        _conditional.Add((vuCol, c => c.Type == CueType.Audio));
+        // El VU por cue existe donde hay rack nativo: cues de AUDIO y cues de
+        // VÍDEO con AUDIO ESPEJO (motor HAP propio o ruta híbrida). El vídeo
+        // cuyo audio sale por mpv no es medible → sin columna VU.
+        _conditional.Add((vuCol, HasAudioAnalysis));
 
         // La salida por cue y la audición van en la columna de información
         panel = infoCol;
