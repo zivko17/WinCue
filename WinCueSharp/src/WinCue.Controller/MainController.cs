@@ -326,10 +326,9 @@ public class MainController
     ///   · no es imagen (no hay audio que enrutar);
     ///   · rate 1.0 — el varispeed retima el audio en mpv (resample+pitch);
     ///     el espejo no lo replica → ruta clásica CON audio, como siempre;
-    ///   · duración CONOCIDA y ≤ video_audio_max_minutes (default 20): el
-    ///     espejo decodifica el archivo ENTERO a RAM (~23 MB/min estéreo
-    ///     48 kHz float) — un largometraje serían GB. El streaming llega en
-    ///     el paso 4; mientras, los largos van por mpv clásico con audio.
+    ///   · duración CONOCIDA (el PLL y los timers de fin la necesitan) y
+    ///     dentro del techo de MirrorAudioMaxSeconds (con el STREAMING del
+    ///     paso 4 no hay techo: un largometraje ya puede llevar el rack).
     /// Kill-switch de directo: WINCUE_VIDEO_AUDIO=mpv desactiva la ruta
     /// entera (audio por mpv como siempre).</summary>
     private bool HybridAudioEligible(Cue cue) =>
@@ -337,8 +336,38 @@ public class MainController
         && !MediaImporter.ImageFormats.Contains(Path.GetExtension(cue.FilePath))
         && Math.Abs(RateOf(cue) - 1.0) < 0.001
         && cue.Duration > 0.0
-        && cue.Duration <=
-            Math.Max(1.0, _settings.Get("video_audio_max_minutes", 20.0)) * 60.0;
+        && cue.Duration <= MirrorAudioMaxSeconds();
+
+    /// <summary>Techo de duración para el AUDIO ESPEJO. Con STREAMING (paso
+    /// 4) el espejo ya no decodifica el archivo entero a RAM, así que
+    /// `video_audio_max_minutes` pasa a 0 = SIN LÍMITE (nuevo default) y solo
+    /// actúa como OPT-OUT explícito (&gt; 0 → techo en minutos). Si el
+    /// kill-switch WINCUE_MIRROR_STREAMING=0 fuerza la ruta RAM (decode
+    /// entero, ~23 MB/min), vuelve el techo prudente clásico de 20 min salvo
+    /// ajuste explícito del usuario.</summary>
+    private double MirrorAudioMaxSeconds()
+    {
+        double maxMin = _settings.Get("video_audio_max_minutes", 0.0);
+        if (maxMin > 0.0)
+            return maxMin * 60.0;
+        bool streaming =
+            Environment.GetEnvironmentVariable("WINCUE_MIRROR_STREAMING") != "0";
+        return streaming ? double.PositiveInfinity : 20.0 * 60.0;
+    }
+
+    /// <summary>Parámetros del AUDIO ESPEJO de un cue de vídeo: los mismos
+    /// que un cue de audio (trims/loop/fades/EQ; rate SIEMPRE 1.0 — la
+    /// elegibilidad lo garantiza) y Streaming=true (paso 4: ffmpeg → ring
+    /// acotado; el engine cae solo a RAM si el spawn falla).</summary>
+    private static AudioPlayParams MirrorPlayParams(Cue cue, double offset, double fadeIn) => new(
+        Volume: cue.Volume,
+        FadeIn: fadeIn,
+        FadeOut: cue.FadeOut,
+        Loop: cue.Loop,
+        TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
+        PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
+        Eq: EqFor(cue), Rate: 1.0,
+        Streaming: true);
 
     // ------------------------------------------------------------------
     // Conversión a HAP desde la app (preparación de show, no de directo)
@@ -974,14 +1003,8 @@ public class MainController
                     // Play emite error: OnAudioError lo registra, saca el
                     // cue del set y recupera el audio por mpv si procede.
                     _mirroredAudio.Add(cue.Id);
-                    _audio.Play(VideoAudioId(cue.Id), cue.FilePath, new AudioPlayParams(
-                        Volume: cue.Volume,
-                        FadeIn: fadeLeft,
-                        FadeOut: cue.FadeOut,
-                        Loop: cue.Loop,
-                        TrimStart: cue.TrimStart + offset, TrimEnd: cue.TrimEnd,
-                        PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
-                        Eq: EqFor(cue), Rate: 1.0));
+                    _audio.Play(VideoAudioId(cue.Id), cue.FilePath,
+                        MirrorPlayParams(cue, offset, fadeLeft));
                 }
                 RefreshVideoTally();
                 if (fadeLeft > 0.0)
@@ -1821,20 +1844,23 @@ public class MainController
         {
             _video.PreloadNext(cue.Id, cue.FilePath);
             if (HapEngineEligible(cue) && !_running.ContainsKey(cue.Id))
-                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath);
+                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath,
+                    MirrorPlayParams(cue, 0.0, cue.FadeIn));
             return;
         }
         // RUTA HÍBRIDA: el standby se prepara con los MISMOS parámetros que
         // usará el Play (ExternalAudio=true — si difirieran, el GO instantáneo
-        // no promovería), y el buffer del audio espejo se PRECALIENTA: el
-        // espejo decodifica a RAM y sin precarga arrancaría tarde en el GO.
+        // no promovería), y el audio espejo se PRECALIENTA con sus parámetros
+        // reales: en streaming el pre-spawn de ffmpeg deja el ring lleno sin
+        // consumir (GO instantáneo); en RAM decodifica el buffer como antes.
         bool hybrid = HybridAudioEligible(cue);
         var vparams = _canvas.ParamsFor(cue, 0.0);
         if (hybrid)
         {
             vparams = vparams with { ExternalAudio = true };
             if (!_running.ContainsKey(cue.Id))
-                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath);
+                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath,
+                    MirrorPlayParams(cue, 0.0, cue.FadeIn));
         }
         bool visible = CanvasMode
             ? _view.IsVideoOutputVisible(0)

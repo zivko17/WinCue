@@ -57,6 +57,10 @@ public class SettingsManager
         ["video_default_volume"]    = 100,
         ["video_loop_default"]      = false,
         ["video_fade_frames"]       = 0,
+        // Techo del AUDIO ESPEJO de los vídeos (min). 0 = SIN límite: con el
+        // streaming del paso 4 la RAM es constante — solo actúa como opt-out
+        // (>0) o como techo clásico de 20 min si WINCUE_MIRROR_STREAMING=0.
+        ["video_audio_max_minutes"] = 0,
         ["surface_preset"]          = "screen",  // "screen" | "custom" | "WxH"
         ["surface_width"]           = 0,         // tamaño del CANVAS (0 = 1920)
         ["surface_height"]          = 0,         // tamaño del CANVAS (0 = 1080)

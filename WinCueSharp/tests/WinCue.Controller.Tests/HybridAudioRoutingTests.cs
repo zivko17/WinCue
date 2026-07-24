@@ -2,14 +2,19 @@
 // HybridAudioRoutingTests.cs — Enrutado de la RUTA HÍBRIDA de audio (paso 3b)
 // =============================================================================
 // Un cue de vídeo NO-HAP (lo reproduce mpv) con rate 1.0 y duración conocida
-// ≤ video_audio_max_minutes saca su AUDIO por el AudioEngine con el id espejo
-// (VideoAudioId) y mpv corre MUDO (ExternalAudio=true → aid=no + PLL). Todo el
-// enrutado en vivo (volumen/EQ/fades/stop/pausa/VU) es EL MISMO set que el
-// motor HAP. Si el espejo falla en caliente, el controlador recupera el audio
-// por mpv (RestoreInternalAudio) — nunca un cue sin audio que antes lo tenía.
+// saca su AUDIO por el AudioEngine con el id espejo (VideoAudioId) y mpv corre
+// MUDO (ExternalAudio=true → aid=no + PLL). Todo el enrutado en vivo
+// (volumen/EQ/fades/stop/pausa/VU) es EL MISMO set que el motor HAP. Si el
+// espejo falla en caliente, el controlador recupera el audio por mpv
+// (RestoreInternalAudio) — nunca un cue sin audio que antes lo tenía.
 //
-// Todos los tests viven en UNA clase: xUnit los ejecuta en serie, y el test
-// del kill-switch (variable de entorno de proceso) no puede correr en
+// PASO 4 (streaming): el espejo arranca con Streaming=true (ffmpeg → ring) y
+// el límite de duración desaparece — video_audio_max_minutes queda como
+// OPT-OUT (>0) o como techo clásico de 20 min si WINCUE_MIRROR_STREAMING=0
+// fuerza la ruta RAM.
+//
+// Todos los tests viven en UNA clase: xUnit los ejecuta en serie, y los tests
+// de kill-switch (variables de entorno de proceso) no pueden correr en
 // paralelo con los demás.
 // =============================================================================
 
@@ -81,10 +86,37 @@ public class HybridAudioRoutingTests : ControllerTestBase
     }
 
     [Fact]
-    public void DuracionMayorQueElUmbral_RutaClasicaConAudioMpv()
+    public void EspejoArrancaConStreaming_Paso4()
     {
-        // Umbral default 20 min: el espejo decodifica a RAM — un archivo
-        // largo iría a GB. 21 min → mpv clásico con su audio de siempre.
+        // El controlador pide SIEMPRE streaming para el espejo (ffmpeg →
+        // ring); si el spawn falla, el ENGINE cae solo a la ruta RAM.
+        var cue = AddH264Cue("stream");
+        Controller.OnGoPressed();
+
+        var ap = Assert.Single(Audio.Plays,
+            p => p.CueId == MainController.VideoAudioId(cue.Id));
+        Assert.True(ap.P.Streaming);
+    }
+
+    [Fact]
+    public void SinLimiteDeDuracion_UnLargometrajeEsElegible()
+    {
+        // PASO 4: con streaming la RAM es constante → default SIN límite.
+        // Un cue de 2 h ya lleva el rack de audio nativo.
+        var cue = AddH264Cue("pelicula", 120.0 * 60.0);
+        Controller.OnGoPressed();
+
+        Assert.True(Video.Plays[0].P.ExternalAudio);
+        var ap = Assert.Single(Audio.Plays,
+            p => p.CueId == MainController.VideoAudioId(cue.Id));
+        Assert.True(ap.P.Streaming);
+    }
+
+    [Fact]
+    public void LimiteExplicito_ActuaComoOptOut()
+    {
+        // video_audio_max_minutes > 0 sigue respetándose (opt-out manual)
+        Settings.Set("video_audio_max_minutes", 20.0);
         var cue = AddH264Cue("largo", 21.0 * 60.0);
         Controller.OnGoPressed();
 
@@ -94,15 +126,30 @@ public class HybridAudioRoutingTests : ControllerTestBase
     }
 
     [Fact]
-    public void UmbralConfigurable_SubirloHabilitaElCueLargo()
+    public void KillSwitchStreaming_RestauraElTechoClasicoDe20Min()
     {
-        Settings.Set("video_audio_max_minutes", 30.0);
-        var cue = AddH264Cue("largo30", 21.0 * 60.0);
-        Controller.OnGoPressed();
+        // WINCUE_MIRROR_STREAMING=0 → el espejo decodifica ENTERO a RAM →
+        // vuelve el techo prudente de 20 min (largos por mpv clásico), pero
+        // los cortos siguen siendo elegibles por la ruta RAM.
+        var corto = AddH264Cue("corto", 10.0, c => c.TimelineLayer = 1);
+        var largo = AddH264Cue("filme", 21.0 * 60.0, c => c.TimelineLayer = 2);
+        Environment.SetEnvironmentVariable("WINCUE_MIRROR_STREAMING", "0");
+        try
+        {
+            Controller.OnGoPressed();
+            Controller.OnGoPressed();
+        }
+        finally
+        {
+            Environment.SetEnvironmentVariable("WINCUE_MIRROR_STREAMING", null);
+        }
 
-        Assert.True(Video.Plays[0].P.ExternalAudio);
+        Assert.True(Assert.Single(Video.Plays, p => p.CueId == corto.Id).P.ExternalAudio);
         Assert.Contains(Audio.Plays,
-            p => p.CueId == MainController.VideoAudioId(cue.Id));
+            p => p.CueId == MainController.VideoAudioId(corto.Id));
+        Assert.False(Assert.Single(Video.Plays, p => p.CueId == largo.Id).P.ExternalAudio);
+        Assert.DoesNotContain(Audio.Plays,
+            p => p.CueId == MainController.VideoAudioId(largo.Id));
     }
 
     [Fact]
@@ -248,13 +295,22 @@ public class HybridAudioRoutingTests : ControllerTestBase
     [Fact]
     public void Standby_DeCueElegible_PreparaConExternalAudio_YPrecalientaElEspejo()
     {
-        var cue = AddH264Cue("standby");
+        var cue = AddH264Cue("standby", 10.0, c => { c.TrimStart = 1.5; c.TrimEnd = 8.0; });
         View.VisibleOutputs.Add(0);   // salida abierta → standby GPU en pausa
         Controller.OnSetPlayhead(0);
 
         var prep = Assert.Single(Video.Prepared, p => p.CueId == cue.Id);
         Assert.True(prep.P.ExternalAudio);   // debe COINCIDIR con el Play
         Assert.Contains(MainController.VideoAudioId(cue.Id), Audio.Preloads);
+
+        // El preload lleva los parámetros REALES del espejo: el pre-spawn de
+        // streaming solo sirve en el GO si coincide en trims (paso 4)
+        var pp = Assert.Single(Audio.PreloadParams,
+            p => p.CueId == MainController.VideoAudioId(cue.Id));
+        Assert.NotNull(pp.P);
+        Assert.True(pp.P!.Streaming);
+        Assert.Equal(1.5, pp.P.TrimStart);
+        Assert.Equal(8.0, pp.P.TrimEnd);
     }
 
     [Fact]

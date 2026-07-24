@@ -224,9 +224,9 @@ public partial class SettingsWindow : Window
         Spin("video_default_volume", pb, "Volumen por defecto (%):", 0, 100);
         Check("video_loop_default", pb, Loc.T("Loop por defecto en cues nuevos", "Loop by default on new cues"));
         Spin("video_audio_max_minutes", pb,
-            Loc.T("Audio de vídeo por el rack nativo hasta (min):", "Video audio through the native rack up to (min):"), 1, 240);
-        Note(pb, Loc.T("Vídeos no-HAP de hasta esa duración sacan su audio por el motor de audio (EQ, compresor, VU por cue) con mpv mudo sincronizado. El audio se decodifica a RAM: ~23 MB/min. Más largos → audio por mpv directo.",
-                 "Non-HAP videos up to this length play their audio through the audio engine (EQ, compressor, per-cue VU) with muted, synced mpv. Audio is decoded to RAM: ~23 MB/min. Longer ones → audio via mpv directly."));
+            Loc.T("Audio de vídeo por el rack nativo hasta (min, 0 = sin límite):", "Video audio through the native rack up to (min, 0 = no limit):"), 0, 240);
+        Note(pb, Loc.T("El audio de los vídeos suena por el motor de audio (EQ, compresor, VU por cue) en STREAMING: RAM constante, sin límite de duración (0). Un valor > 0 lo limita (opt-out). Con el streaming desactivado (WINCUE_MIRROR_STREAMING=0) el audio se decodifica entero a RAM (~23 MB/min) y 0 vuelve a significar 20 min.",
+                 "Video audio plays through the audio engine (EQ, compressor, per-cue VU) via STREAMING: constant RAM, no duration limit (0). A value > 0 caps it (opt-out). With streaming disabled (WINCUE_MIRROR_STREAMING=0) audio is fully decoded to RAM (~23 MB/min) and 0 falls back to 20 min."));
 
         return root;
     }
