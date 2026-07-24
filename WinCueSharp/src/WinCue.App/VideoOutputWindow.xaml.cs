@@ -396,6 +396,18 @@ public partial class VideoOutputWindow : Window
         return ctl;
     }
 
+    /// <summary>true si ESTA salida está componiendo el cue en su compositor
+    /// GPU (tiene superficie asignada). Solo entonces el monitor PGM puede
+    /// ESPEJAR lo que sale, en vez de re-decodificar el archivo por su cuenta.</summary>
+    public bool HasCompositorSurface(int cueId) => _gpuByCue.ContainsKey(cueId);
+
+    /// <summary>Visual que ESPEJA el monitor PGM: el contenido REAL de la
+    /// ventana de salida (pila del compositor + cartela + patrones + velo del
+    /// blackout) — lo que se ve ahí es exactamente lo que va a la sala. El
+    /// host clásico HWND no forma parte del árbol WPF (airspace): por eso el
+    /// espejo solo se usa con superficies del compositor.</summary>
+    public Visual MirrorVisual => (Visual)Content;
+
     /// <summary>Opacidad (0..1) del vídeo de un cue en ESTA salida.
     /// fadeSeconds &gt; 0 = transición animada (fundidos y crossfades).
     /// Sin superficie de ese cue aquí, no-op.</summary>

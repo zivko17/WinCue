@@ -1769,16 +1769,19 @@ public class MainController
         _view.RefreshRow(index);
     }
 
-    /// <summary>Vídeo actualmente en la salida (para el monitor PGM):
-    /// (ruta, segundos reproducidos), o null si la salida está en negro.
-    /// Port de _update_program_monitor de Python.</summary>
-    public (string FilePath, double Elapsed)? GetProgramVideo()
+    /// <summary>Vídeo actualmente en la salida (para el monitor PGM): ruta,
+    /// segundos reproducidos, id del cue y SALIDA en la que se ve; null si la
+    /// salida está en negro. Port de _update_program_monitor de Python, más
+    /// el id y la salida: con el compositor GPU activo el monitor no
+    /// re-decodifica el archivo — ESPEJA la superficie que ya va a la sala
+    /// (y para encontrarla necesita saber de qué cue y de qué ventana).</summary>
+    public (string FilePath, double Elapsed, int CueId, int Screen)? GetProgramVideo()
     {
         var top = TopVideo(requirePlaying: true);
         if (top is null)
             return null;
         double offset = _running.TryGetValue(top.Id, out var run) ? run.Offset : 0.0;
-        return (top.FilePath, _video.GetElapsed(top.Id) + offset);
+        return (top.FilePath, _video.GetElapsed(top.Id) + offset, top.Id, ScreenOf(top));
     }
 
     /// <summary>Vídeo visible en la salida: el de la pista MÁS ALTA activa,

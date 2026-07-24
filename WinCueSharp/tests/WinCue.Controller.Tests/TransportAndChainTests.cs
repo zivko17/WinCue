@@ -469,9 +469,27 @@ public class TransportAndChainTests : ControllerTestBase
         Assert.NotNull(info);
         Assert.Equal(@"C:\fake\media.wav", info!.Value.FilePath);
         Assert.Equal(4.2, info.Value.Elapsed);
+        // El monitor PGM necesita el CUE y la SALIDA para poder ESPEJAR su
+        // superficie del compositor en vez de re-decodificar el archivo
+        Assert.Equal(v.Id, info.Value.CueId);
+        Assert.Equal(0, info.Value.Screen);
 
         Controller.OnStopPressed();
         Assert.Null(Controller.GetProgramVideo());
+    }
+
+    [Fact]
+    public void GetProgramVideo_ReportaLaSalidaDelCue()
+    {
+        // Un cue en la Salida 3 (video_output = 2): el monitor debe espejar
+        // ESA ventana, no la principal
+        var v = AddCue(CueType.Video, "clip", setup: c => c.VideoOutput = 2);
+        Controller.OnGoPressed();
+
+        var info = Controller.GetProgramVideo();
+        Assert.NotNull(info);
+        Assert.Equal(v.Id, info!.Value.CueId);
+        Assert.Equal(2, info.Value.Screen);
     }
 
     [Fact]

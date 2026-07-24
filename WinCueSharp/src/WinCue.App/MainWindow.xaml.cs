@@ -264,8 +264,21 @@ public partial class MainWindow : Window, IShowView
         var info = _controller.GetProgramVideo();
         if (info is null)
         {
-            if (_pgm.CurrentPath.Length > 0)
+            if (_pgm.CurrentPath.Length > 0 || _pgm.IsMirroring)
                 _pgm.Clear(Loc.T("NEGRO", "BLACK"));
+            return;
+        }
+        // PGM = lo que SALE. Con el compositor GPU la salida ya está en una
+        // superficie D3D del árbol WPF: el monitor la ESPEJA (pila entera de
+        // pistas, opacidades y blackout incluidos) y no decodifica nada. Sin
+        // compositor (ruta clásica HWND) WPF no puede ver el vídeo (airspace)
+        // → el monitor reproduce el archivo por su cuenta, como siempre.
+        int screen = Math.Clamp(info.Value.Screen, 0, _videoOutputs.Length - 1);
+        var win = _videoOutputs[screen];
+        if (win is { IsVisible: true } && win.HasCompositorSurface(info.Value.CueId))
+        {
+            _pgm.ShowMirror(win.MirrorVisual,
+                System.IO.Path.GetFileName(info.Value.FilePath));
             return;
         }
         // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí

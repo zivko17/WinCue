@@ -1,12 +1,21 @@
 // =============================================================================
 // LiveMonitorControl.cs — Mini-monitor PGM/PVW EN VIVO (mpv embebido)
 // =============================================================================
-// Sustituye al monitor de fotogramas por ffmpeg: una instancia mpv propia,
-// SILENCIADA (ao=null), renderiza dentro del panel a frame-rate completo.
-//   · PGM: reproduce el mismo archivo que la salida y se re-sincroniza por
-//     drift (>0.35 s) con el reloj real del motor; si la salida se pausa,
-//     el monitor se pausa (se detecta porque elapsed deja de avanzar).
-//   · PVW: reproduce en bucle el cue en standby.
+// Dos modos, según lo que haga falta:
+//
+//   · ESPEJO DEL COMPOSITOR (PGM con compositor GPU activo) — NO decodifica
+//     nada: pinta con un VisualBrush la MISMA superficie que va a la sala. Es
+//     lo correcto (PGM = lo que sale de verdad: pila de pistas, opacidades,
+//     blackout y cartelas incluidas) y además es GRATIS: con un HAP 4K60 el
+//     monitor de mpv obligaba a decodificar el archivo DOS veces (motor +
+//     monitor) y a leerlo dos veces del disco (~240 MB/s cada uno).
+//
+//   · mpv EMBEBIDO Y MUDO (ao=null) dentro del panel, a frame-rate completo,
+//     para lo que NO se puede espejar: la ruta clásica HWND (airspace: WPF no
+//     ve el HWND de mpv), el PVW (cue en STANDBY, que aún no sale) y el visor
+//     de EDICIÓN (fotograma pausado con scrub). En PGM clásico se re-sincroniza
+//     por drift (>0.35 s) con el reloj real del motor y se pausa en espejo
+//     (se detecta porque elapsed deja de avanzar).
 //
 // GOTCHA WPF (airspace): no se puede pintar encima de un HWND nativo, así que
 // el distintivo va en una barra superior, no superpuesto al vídeo.
@@ -33,6 +42,11 @@ public sealed class LiveMonitorControl : Border
     private readonly TextBlock _msg;
     private readonly TextBlock _status;
 
+    // ESPEJO del compositor: rectángulo pintado con un VisualBrush de la
+    // ventana de salida (sin decodificar nada; se refresca solo con ella)
+    private readonly System.Windows.Shapes.Rectangle _mirror;
+    private readonly VisualBrush _mirrorBrush;
+
     private MpvPlayer? _player;
     private static int _monitorSeq;   // numera los logs de diagnóstico por monitor
     private bool? _pauseState;        // último pause aplicado (null = re-asertar)
@@ -41,6 +55,9 @@ public sealed class LiveMonitorControl : Border
     private double _lastElapsed = -1;
 
     public string CurrentPath => _currentPath;
+
+    /// <summary>true si el monitor está ESPEJANDO una salida (sin decodificar).</summary>
+    public bool IsMirroring => _mirrorBrush.Visual is not null;
 
     public LiveMonitorControl(string badge, Color badgeColor)
     {
@@ -85,8 +102,24 @@ public sealed class LiveMonitorControl : Border
             VerticalAlignment = VerticalAlignment.Center,
         };
 
+        // Espejo: el VisualBrush apunta al contenido de la ventana de salida.
+        // Stretch Uniform = mismo encuadre que la sala (con bandas si el
+        // monitorcito no tiene su misma relación de aspecto).
+        _mirrorBrush = new VisualBrush
+        {
+            Stretch = Stretch.Uniform,
+            AlignmentX = AlignmentX.Center,
+            AlignmentY = AlignmentY.Center,
+        };
+        _mirror = new System.Windows.Shapes.Rectangle
+        {
+            Fill = _mirrorBrush,
+            Visibility = Visibility.Collapsed,
+        };
+
         var body = new Grid();
         body.Children.Add(_msg);
+        body.Children.Add(_mirror);
         body.Children.Add(_host);
 
         var root = new DockPanel();
@@ -100,10 +133,50 @@ public sealed class LiveMonitorControl : Border
     // API
     // ------------------------------------------------------------------
 
+    /// <summary>ESPEJO del compositor: el monitor deja de decodificar y pinta
+    /// la superficie REAL de la salida (lo que va a la sala). Idempotente —
+    /// se puede llamar en cada tick sin coste.</summary>
+    public void ShowMirror(Visual source, string label)
+    {
+        if (ReferenceEquals(_mirrorBrush.Visual, source))
+        {
+            if (!string.Equals(_status.Text, label, StringComparison.Ordinal))
+                _status.Text = label;
+            return;
+        }
+        StopPlayback();                            // suelta el decode del monitor
+        _mirrorBrush.Visual = source;
+        _mirror.Visibility = Visibility.Visible;
+        _host.Visibility = Visibility.Collapsed;   // el HWND taparía el espejo
+        _msg.Text = "";
+        _status.Text = label;
+    }
+
+    /// <summary>Sale del modo espejo (el monitor vuelve a poder reproducir).</summary>
+    private void StopMirror()
+    {
+        if (_mirrorBrush.Visual is null)
+            return;
+        _mirrorBrush.Visual = null;
+        _mirror.Visibility = Visibility.Collapsed;
+    }
+
+    /// <summary>Para lo que estuviera reproduciendo el mpv del monitor (sin
+    /// destruirlo: crearlo cuesta y el siguiente cue lo reutiliza).</summary>
+    private void StopPlayback()
+    {
+        _currentPath = "";
+        _lastElapsed = -1;
+        _cachedDuration = 0.0;
+        _pauseState = null;
+        try { _player?.Command("stop"); } catch (Exception) { }
+    }
+
     /// <summary>Reproduce (en silencio) el archivo dado desde startAt.
     /// Si ya es el archivo actual, solo re-sincroniza el reloj.</summary>
     public void ShowVideo(string path, double startAt, bool loop)
     {
+        StopMirror();
         if (!VideoEngine.MpvAvailable || !_host.IsLoaded)
             return;
         if (!EnsurePlayer())
@@ -136,6 +209,7 @@ public sealed class LiveMonitorControl : Border
     /// Si ya es el archivo actual, solo hace scrub.</summary>
     public void ShowPaused(string path, double at)
     {
+        StopMirror();
         if (!VideoEngine.MpvAvailable)
             return;
         if (!_host.IsLoaded)
@@ -244,14 +318,11 @@ public sealed class LiveMonitorControl : Border
 
     public void Clear(string message = "—")
     {
-        _currentPath = "";
-        _lastElapsed = -1;
-        _cachedDuration = 0.0;
-        _pauseState = null;
+        StopMirror();
+        StopPlayback();
         _msg.Text = message;
         _status.Text = "";
         _host.Visibility = Visibility.Collapsed;   // oculta el HWND nativo
-        try { _player?.Command("stop"); } catch (Exception) { }
     }
 
     /// <summary>Libera la instancia mpv (al cerrar la app).</summary>
