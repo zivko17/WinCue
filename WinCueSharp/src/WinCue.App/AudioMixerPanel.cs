@@ -68,8 +68,8 @@ public sealed class AudioMixerPanel : ContentControl
             "Limitador del bus (techo −1 dBFS): reducción de ganancia.\nLa suma de cues no puede saturar el dispositivo.",
             "Bus limiter (−1 dBFS ceiling): gain reduction.\nThe sum of cues cannot clip the device.");
         _master.VuTooltip(Loc.T(
-            "VU de PROGRAMA (loopback): lo que sale del dispositivo,\naudio + vídeo + todo.",
-            "PROGRAM VU (loopback): what leaves the device,\naudio + video + everything."));
+            "VU de PROGRAMA. Con loopback: lo que sale del dispositivo\n(audio + vídeo + todo). Con ASIO o sin loopback disponible:\nla mezcla interna de cues. La línea de abajo dice cuál.",
+            "PROGRAM VU. With loopback: what leaves the device\n(audio + video + everything). With ASIO or no loopback available:\nthe internal cue mix. The line below says which one."));
 
         _grText = new TextBlock
         {

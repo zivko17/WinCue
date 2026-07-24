@@ -141,10 +141,19 @@ public partial class SettingsWindow : Window
         RefreshAudioDevices();
         var refreshRow = Row(dev, "");
         var btnRefresh = new Button { Content = Loc.T("↻ Refrescar dispositivos", "↻ Refresh devices") };
-        btnRefresh.Click += (_, _) => RefreshAudioDevices();
+        btnRefresh.Click += (_, _) =>
+        {
+            AudioEngine.RefreshAsioDrivers();   // la lista ASIO está cacheada
+            RefreshAudioDevices();
+        };
         refreshRow.Children.Add(btnRefresh);
+        // DirectSound RETIRADO: nunca estuvo implementado (acababa en WASAPI) y
+        // en Windows moderno se emula sobre WASAPI. Un desplegable que ofrece
+        // algo que no hace es peor que uno corto. Ver SettingsManager.Migrate.
         Combo("audio_driver", dev, Loc.T("Driver:", "Driver:"),
-            ("wasapi", "WASAPI"), ("asio", "ASIO"), ("directsound", "DirectSound"));
+            ("wasapi", "WASAPI"), ("asio", "ASIO"));
+        Note(dev, Loc.T("Con driver ASIO elige arriba una entrada «[ASIO] …»: ese es el driver que se abre. Si no eliges ninguna se prueban los instalados por orden.",
+                  "With the ASIO driver pick an «[ASIO] …» entry above: that's the driver that gets opened. If you pick none, the installed ones are tried in order."));
 
         var q = Group(root, Loc.T("CALIDAD", "QUALITY"));
         Combo("audio_sample_rate", q, Loc.T("Frecuencia de muestreo:", "Sample rate:"),
@@ -446,6 +455,9 @@ public partial class SettingsWindow : Window
 
     private void RefreshAudioDevices()
     {
+        // Refrescar no puede PERDER la selección del operador (antes volvía
+        // siempre a «por defecto» y se guardaba eso sin que se notara).
+        string? selected = (_audioDevices.SelectedItem as ComboBoxItem)?.Tag?.ToString();
         _audioDevices.Items.Clear();
         _audioDevices.Items.Add(new ComboBoxItem { Content = Loc.T("(dispositivo por defecto)", "(default device)"), Tag = "" });
         foreach (var dev in AudioEngine.ListDevices())
@@ -457,6 +469,13 @@ public partial class SettingsWindow : Window
         foreach (string asio in AudioEngine.ListAsioDrivers())
             _audioDevices.Items.Add(new ComboBoxItem { Content = $"[ASIO] {asio}", Tag = asio });
         _audioDevices.SelectedIndex = 0;
+        if (selected is { Length: > 0 })
+            foreach (ComboBoxItem item in _audioDevices.Items)
+                if (Equals(item.Tag?.ToString(), selected))
+                {
+                    _audioDevices.SelectedItem = item;
+                    break;
+                }
     }
 
     private void RefreshMidiDevices()

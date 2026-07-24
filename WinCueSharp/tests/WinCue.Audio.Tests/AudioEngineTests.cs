@@ -207,6 +207,104 @@ public class AudioEngineTests : IDisposable
         engine.StopAll();
     }
 
+    // ── FALLO A: el VU de PROGRAMA tiene que funcionar con CUALQUIER driver ──
+
+    [Fact]
+    public void ProgramMeter_WithAsioDriver_FallsBackToInternalMix()
+    {
+        if (!HasAudioDevice) return;
+        // Con ASIO no hay loopback (ASIO puentea el mixer de Windows). Si no
+        // hay drivers ASIO instalados el motor cae a WASAPI y sí lo hay: en
+        // ese caso este test comprueba la otra mitad (loopback) y ya está
+        // cubierto por ProgramMeter_EmitsDeviceLevels_WhileEnginePlays.
+        using var engine = new AudioEngine(driver: "asio");
+        engine.StartProgramMeter();
+        if (AudioEngine.ListAsioDrivers().Count == 0)
+            return;   // sin ASIO instalado no hay nada que comprobar aquí
+
+        Assert.Equal(ProgramMeterSource.InternalMix, engine.ProgramMeterSource);
+    }
+
+    [Fact]
+    public void ProgramMeter_WithoutLoopback_LevelReportComesFromMixer()
+    {
+        if (!HasAudioDevice) return;
+        // Sin StartProgramMeter no hay medidor loopback → la ÚNICA vía posible
+        // del VU de programa es la mezcla interna. Es la vía que salva el VU
+        // con ASIO y con el loopback caído: tiene que emitir de verdad.
+        using var engine = new AudioEngine();
+        Assert.Equal(ProgramMeterSource.InternalMix, engine.ProgramMeterSource);
+
+        int reports = 0;
+        engine.LevelReport += (l, r) => Interlocked.Increment(ref reports);
+        engine.Play(3, MakeQuietWav(2.0));
+        Assert.True(WaitFor(() => engine.IsPlaying(3), 5_000));
+        Assert.True(WaitFor(() => Volatile.Read(ref reports) >= 3, 5_000),
+            "el VU de programa no emitió por la vía del mixer interno");
+        engine.StopAll();
+    }
+
+    [Fact]
+    public void ProgramMeterSource_IsLoopback_OnlyWhileCaptureIsAlive()
+    {
+        if (!HasAudioDevice) return;
+        using var engine = new AudioEngine();
+        engine.StartProgramMeter();
+        // El medidor se abre FUERA del hilo llamante: se espera al cambio
+        bool becameLoopback = WaitFor(
+            () => engine.ProgramMeterSource == ProgramMeterSource.DeviceLoopback, 5_000);
+        if (!becameLoopback)
+            return;   // máquina sin loopback utilizable: nada que comprobar
+
+        engine.Cleanup();
+        // Cerrado el medidor, el VU vuelve a la mezcla interna en el acto
+        Assert.Equal(ProgramMeterSource.InternalMix, engine.ProgramMeterSource);
+    }
+
+    // ── FALLO B: cambiar el driver en caliente no puede bloquear la UI ──
+
+    [Fact]
+    public void SetDevice_RepeatedHotSwitches_DoNotAccumulateOrThrow()
+    {
+        if (!HasAudioDevice) return;
+        using var engine = new AudioEngine();
+        engine.StartProgramMeter();
+        engine.Play(1, MakeQuietWav(3.0));
+        Assert.True(WaitFor(() => engine.IsPlaying(1), 5_000));
+
+        // 12 cambios de driver seguidos: ni excepciones ni estado inconsistente
+        for (int i = 0; i < 12; i++)
+            engine.SetDevice(null, i % 2 == 0 ? "asio" : "wasapi");
+
+        engine.SetDevice(null, "wasapi");
+        int reports = 0;
+        engine.LevelReport += (l, r) => Interlocked.Increment(ref reports);
+        engine.Play(1, MakeQuietWav(3.0));
+        Assert.True(WaitFor(() => engine.IsPlaying(1), 5_000));
+        Assert.True(WaitFor(() => Volatile.Read(ref reports) >= 3, 6_000),
+            "el VU de programa dejó de emitir tras varios cambios de driver");
+        engine.StopAll();
+    }
+
+    [Fact]
+    public void SetDevice_DoesNotBlockCallerThread()
+    {
+        if (!HasAudioDevice) return;
+        using var engine = new AudioEngine();
+        engine.StartProgramMeter();
+        WaitFor(() => engine.ProgramMeterSource == ProgramMeterSource.DeviceLoopback, 5_000);
+
+        // El cierre de la captura (Join del hilo de captura) y la apertura de
+        // la nueva se hacen fuera del hilo llamante: en la app ese hilo es el
+        // de UI y bloquearlo son los tirones de la barra y los relojes.
+        var sw = System.Diagnostics.Stopwatch.StartNew();
+        for (int i = 0; i < 5; i++)
+            engine.SetDevice(null, "wasapi");
+        sw.Stop();
+        Assert.True(sw.Elapsed.TotalMilliseconds < 250,
+            $"SetDevice bloqueó el hilo llamante {sw.Elapsed.TotalMilliseconds:0} ms en 5 cambios");
+    }
+
     [Fact]
     public void PlayMissingFile_EmitsError()
     {

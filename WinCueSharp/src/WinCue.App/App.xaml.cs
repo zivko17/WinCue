@@ -95,19 +95,27 @@ public partial class App : Application
         var window = new MainWindow();
         MainWindow = window;
 
-        // 5a: dispositivo por defecto; la selección por nombre llega con el
-        // diálogo de settings (fase 5c)
         _audio = new AudioEngine(
             dispatch,
             driver: settings.Get("audio_driver", "wasapi"),
             sampleRate: settings.Get("audio_sample_rate", 48000));
-        // VU de PROGRAMA por loopback WASAPI: mide lo que sale del dispositivo
-        // (audio + vídeo + todo). Con ASIO no hay loopback → VU de mixer.
+        // VU de PROGRAMA: loopback del dispositivo donde se puede y mezcla
+        // interna donde no (ASIO, o loopback caído). El strip MASTER dice cuál.
         _audio.StartProgramMeter();
-        // VU de AUDICIÓN por loopback (solo si su dispositivo ≠ principal)
+        _audio.ProgramMeterSourceChanged += _ => window.SetAudioSourceInfo(
+            VuSourceText(_audio.ProgramMeterSource), _audio.OutputDescription);
+        _audio.OutputDescriptionChanged += _ => window.SetAudioSourceInfo(
+            VuSourceText(_audio.ProgramMeterSource), _audio.OutputDescription);
+        // VU de AUDICIÓN por loopback (solo si su dispositivo ≠ principal).
+        // Los medidores se abren FUERA del hilo de UI: el estado llega por
+        // evento, no se puede leer justo después de pedirlo.
+        _audio.AuditionMeterActiveChanged += active => window.SetAuditionVuLoopback(active);
         _audio.SetAuditionMeterDevice(settings.Get("audition_device_name", ""));
         _audio.AuditionLevelReport += (l, r) => window.UpdateAuditionVu(l, r);
-        window.SetAuditionVuLoopback(_audio.AuditionMeterActive);
+        // El dispositivo/driver de settings se aplica AQUÍ y no solo al guardar
+        // Ajustes (antes el arranque ignoraba audio_device_name por completo:
+        // había que abrir y guardar Ajustes para que la salida elegida valiera).
+        ApplyAudioDevice(settings);
 
         _video = new VideoEngine(() => 0, dispatch);   // el controlador fija el provider
 
@@ -140,26 +148,30 @@ public partial class App : Application
         window.Attach(model, _controller, settings, applyEngineSettings: () =>
         {
             // Reconfigurar el dispositivo de audio en caliente tras guardar settings
-            string driver = settings.Get("audio_driver", "wasapi");
-            string devName = settings.Get("audio_device_name", "");
-            string? deviceId = null;
-            if (devName.Length > 0 && driver != "asio")
-                deviceId = AudioEngine.ListDevices()
-                    .FirstOrDefault(d => d.Name == devName)?.Id;
-            _audio.SetDevice(deviceId, driver,
-                asioDriverName: driver == "asio" ? devName : null);
+            ApplyAudioDevice(settings);
             // El medidor de audición sigue al dispositivo de audición nuevo
+            // (SetAuditionMeterDevice avisa por AuditionMeterActiveChanged)
             _audio.SetAuditionMeterDevice(settings.Get("audition_device_name", ""));
-            window.SetAuditionVuLoopback(_audio.AuditionMeterActive);
             _controller.OnMasterVolume(settings.Get("master_volume", 100));
             _remote.Apply();          // OSC/MIDI IN en caliente
             ApplyCompositorMode();    // modo compositor en caliente
         });
         _remote.Apply();
+        // Estado inicial del strip MASTER (los eventos solo avisan de CAMBIOS,
+        // y con ASIO la vía del VU nace ya en «mezcla interna» sin cambiar)
+        window.SetAudioSourceInfo(
+            VuSourceText(_audio.ProgramMeterSource), _audio.OutputDescription);
 
         // Tick de 100 ms para el panel de activos y el countdown
         _tick = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(100) };
-        _tick.Tick += (_, _) => _controller.Tick();
+        _tick.Tick += (_, _) =>
+        {
+            _controller.Tick();
+            // La captura loopback puede caerse (dispositivo desenchufado) y
+            // recuperarse sola por su reintento: reevaluar la vía del VU es
+            // leer un bool, y así el strip MASTER nunca miente.
+            _audio.RefreshProgramMeterSource();
+        };
         _tick.Start();
 
         // Log del show (logs/show-YYYYMMDD.log junto al ejecutable)
@@ -247,6 +259,29 @@ public partial class App : Application
             quit.Start();
         }
     }
+
+    /// <summary>Aplica al motor el dispositivo/driver de settings. Con driver
+    /// "asio", audio_device_name guarda el NOMBRE DEL DRIVER ASIO (entradas
+    /// «[ASIO] …» del desplegable); con WASAPI, el nombre del dispositivo.</summary>
+    private void ApplyAudioDevice(SettingsManager settings)
+    {
+        if (_audio is null)
+            return;
+        string driver = settings.Get("audio_driver", "wasapi");
+        string devName = settings.Get("audio_device_name", "");
+        string? deviceId = null;
+        if (devName.Length > 0 && driver != "asio")
+            deviceId = AudioEngine.ListDevices()
+                .FirstOrDefault(d => d.Name == devName)?.Id;
+        _audio.SetDevice(deviceId, driver,
+            asioDriverName: driver == "asio" ? devName : null);
+    }
+
+    /// <summary>Texto del origen del VU de PROGRAMA para el strip MASTER.</summary>
+    private static string VuSourceText(ProgramMeterSource source) =>
+        source == ProgramMeterSource.DeviceLoopback
+            ? Loc.T("VU: loopback del dispositivo", "VU: device loopback")
+            : Loc.T("VU: mezcla interna", "VU: internal mix");
 
     protected override void OnExit(ExitEventArgs e)
     {
