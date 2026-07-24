@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "HAP 4K60 incompresible en bucle (monitor PGM)",
+      "file_path": "demo-hap-4k60-ruido.mov", "duration": 5.0,
+      "notes": "Peor caso del monitor PGM: 237 MB/s de disco. Requiere generar-tortura.ps1. Con compositor GPU el PGM ESPEJA la salida (no debe aparecer un segundo mpv en WINCUE_MPV_LOG).",
+      "timeline_layer": 2, "loop": true,
+      "continue_mode": "NONE" }
+  ]
+}

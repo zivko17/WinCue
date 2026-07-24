@@ -21,7 +21,8 @@ $dir = $PSScriptRoot
 function Hap {
     param(
         [string]$Name, [string]$Size, [int]$Rate, [double]$Dur,
-        [string]$Format = 'hap', [string]$Audio = 'none', [string]$Pattern = 'testsrc2'
+        [string]$Format = 'hap', [string]$Audio = 'none', [string]$Pattern = 'testsrc2',
+        [switch]$Noise
     )
     $out = Join-Path $dir $Name
     $args = @(
@@ -34,6 +35,9 @@ function Hap {
         'pcmbig' { $args += @('-f', 'lavfi', '-i', "sine=frequency=220:sample_rate=96000:duration=${Dur}", '-c:a', 'pcm_s16le', '-ar', '96000') }
         'none'   { $args += @('-an') }
     }
+    # Ruido: los bloques DXT salen INCOMPRESIBLES → Snappy no aprieta y el
+    # clip pesa lo que pesaría un HAP real (banda de disco de verdad)
+    if ($Noise) { $args += @('-vf', 'noise=alls=80:allf=t+u') }
     $args += @('-c:v', 'hap', '-format', $Format, '-chunks', '4', $out)
     & ffmpeg @args
     if ($LASTEXITCODE -ne 0) { throw "ffmpeg falló generando $Name" }
@@ -54,5 +58,9 @@ Hap 'demo-hap-4k30-audio.mov'      '3840x2160' 30 4.0 'hap'   'aac' 'testsrc'
 Hap 'demo-hap-720p30-bigpcm.mov'   '1280x720'  30 6.0 'hap'   'pcmbig'
 # HAP Q 1080p30 sin audio (otra ruta de textura: DXT5-YCoCg)
 Hap 'demo-hap-q-1080p30.mov'       '1920x1080' 30 5.0 'hap_q' 'none'
+# 4K60 INCOMPRESIBLE (~1,2 GB / 5 s = 237 MB/s de disco): el peor caso real
+# del monitor PGM — con el monitor de mpv esto se decodificaba y se leía DOS
+# veces. Lo usan los shows show-pgm-4k60*.json.
+Hap 'demo-hap-4k60-ruido.mov'      '3840x2160' 60 5.0 'hap'   'aac' -Noise
 
 Write-Host "Media HAP de tortura generada."

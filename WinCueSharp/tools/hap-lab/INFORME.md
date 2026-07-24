@@ -683,3 +683,106 @@ versiones anteriores pueden tener 20 persistido — actúa como opt-out.
 ## Soak con cue LARGO (la evidencia del paso 4)
 
 (pendiente: se rellena con los números del soak)
+
+---
+
+# Verificación visual del motor nuevo — dos fallos reportados y arreglados
+
+Andrés probó el motor en pantalla y reportó dos cosas. Ambas eran reales.
+
+## Fallo A — la EQ/compresor de VÍDEO estaba bloqueada en la UI
+
+**Causa.** El editor de la pestaña `🔊 Audio` (`EqEditorControl`) gateaba por
+`CueType.Audio` en tres sitios (`SetCue`, `RefreshParams` y el tick del RTA):
+con un cue de VÍDEO seleccionado solo se veía «La EQ paramétrica es para cues
+de AUDIO» y, con el editor oculto, desaparecía también el fader de GANANCIA
+(que es el `gain_db` de ese mismo editor). El MOTOR, en cambio, lleva desde el
+paso 3/3b aplicando el rack a los vídeos: por la cadena `af` de mpv
+(`MpvAfChain` + `VideoEngine.SetEq`) y, con AUDIO ESPEJO, por la EQ NATIVA del
+rack. Era un fallo de UI puro: el enrutado ya estaba entero (verificado en
+`ApplyLiveEdits`: `gain_db` entra en `IsEqKey` y va a mpv Y al espejo).
+
+**Arreglo.** El editor se abre para AUDIO y para VÍDEO; el mensaje de «sin
+audio» queda para los tipos que de verdad no lo tienen. Y como los MEDIDORES
+sí dependen del enrutado, el controlador expone
+`CueHasAudioAnalysis(cueId)`:
+
+- AUDIO → siempre (rack nativo).
+- VÍDEO → solo si su audio va por el ESPEJO. Antes del GO se PREDICE con la
+  misma decisión que toma `Trigger` (`WillMirrorAudio`: HAP → motor propio
+  elegible; no-HAP → híbrido elegible); con el cue sonando manda el set real
+  `_mirroredAudio` (si el espejo muere en caliente, el analizador se pierde
+  con él).
+- Resto de tipos → no.
+
+Sin analizador NO se pinta un RTA muerto: se sigue viendo la curva (que es
+matemática de los parámetros, siempre válida) y una nota honesta encima del
+área del analizador. La columna VU del inspector aparece también en los vídeos
+espejados, y el tooltip del VU de PGM deja de afirmar que el sonido de los
+vídeos «no es medible aquí».
+
+**Evidencia.** Con `tests/hap-test/show-eq-video.json`: un cue H.264 espejado
+sonando muestra fader de ganancia (+3 dB), curva con la banda 1 a 90 Hz +6 dB,
+VU del cue, RTA vivo y medidor GR del compresor moviéndose; el mismo archivo a
+rate 1.5 (audio por mpv) muestra los mismos controles con la nota de «sin
+analizador» y sin columna VU; un MEMO muestra el mensaje de «este tipo de cue
+no tiene audio». Tests: `AudioAnalysisTests` (13) cubren el predicado en todas
+sus ramas y que `gain_db`/compresor de un cue de VÍDEO llegan al motor (af de
+mpv) y al espejo.
+
+## Fallo B — los HAP 4K60 no se veían en el monitor PGM
+
+**Causa.** Los mini-monitores (`LiveMonitorControl`) son instancias **mpv
+propias y mudas** que cargaban el archivo por su cuenta:
+`MainWindow.UpdateProgramMonitor` sondeaba cada 500 ms `GetProgramVideo()` y
+llamaba a `ShowVideo(path, elapsed)`. Con un HAP 4K60 eso significa
+**decodificar el archivo DOS veces** (motor propio + monitor) y **leerlo dos
+veces del disco**, y el monitor además lo hace **en software y a resolución
+completa** — su propio log lo dice: `Decoder format: 3840x2160 rgb0` +
+`VO: [gpu] 3840x2160 rgb0` — con re-sincronización por drift cada 500 ms
+encima. Con 1080p la máquina lo aguanta; con 4K60 real, no.
+
+Reproducción y medida en esta máquina (RTX + NVMe): clip HAP 4K60 de ruido
+**incompresible** (1,19 GB / 5 s = **237 MB/s**, `generar-tortura.ps1`, cue en
+bucle, compositor activo, salida a pantalla completa en el monitor 2):
+
+| Escenario | CPU del proceso (misma ventana) | mpv del monitor |
+|---|---:|---|
+| 1 cue 4K60, monitor por mpv (antes) | 17,1 s | `mpv-monitor2.log` decodifica el archivo entero |
+| 1 cue 4K60, monitor ESPEJO (después) | **7,8 s** | no existe |
+| 2 cues 4K a la vez, antes | 21,5 s | idem |
+| 2 cues 4K a la vez, después | **11,8 s** | no existe |
+
+**Opción elegida: la 1 (espejo de la salida real).** Con el compositor GPU
+activo la salida ya vive en superficies D3D dentro del árbol WPF
+(`CompositorLayerControl` con su `D3DImage`), así que el monitor las pinta con
+un `VisualBrush` del contenido de la ventana de salida. No se toca el contrato
+del `D3DImage` (auditoría 05): no se crean ni destruyen superficies, no se
+escribe fuera del `Lock` — el espejo es un consumidor más del mismo visual, y
+se refresca solo cuando la salida se refresca. Ventajas sobre la opción 2
+(abaratar el mpv del monitor):
+
+- **Correcto por definición**: PGM = lo que va a la sala. Ahora se ve la pila
+  ENTERA de pistas con sus opacidades (antes solo el archivo del cue
+  superior: con dos cues cruzando, el monitor mentía), la cartela del PANIC y
+  el velo del blackout.
+- **Gratis**: cero decodificación extra, cero lecturas extra de disco, y se
+  acabó el re-sync por drift (no hay dos relojes que casar: es el mismo
+  fotograma).
+- **Sin límites de rendimiento**: da igual el códec, la resolución o el
+  bitrate; el coste del monitor es un blit escalado.
+
+Límite conocido y deliberado: en la **ruta clásica HWND** (compositor
+desactivado) WPF no puede ver el vídeo de mpv (airspace), así que ahí el
+monitor sigue reproduciendo el archivo por su cuenta, exactamente como antes
+—comportamiento verificado sin regresión—. La elección es por cue y por
+salida: `GetProgramVideo()` devuelve ahora también el id del cue y su salida, y
+`VideoOutputWindow.HasCompositorSurface(cueId)` decide. Si la ventana de salida
+está oculta, también se cae al modo clásico.
+
+**Evidencia.** `tests/hap-test/show-pgm-4k60.json` y
+`show-pgm-4k60-doble.json`. Muestreo del recuadro del PGM 16 veces cada 400 ms:
+14-16 fotogramas distintos (monitor vivo), y la captura lado a lado del PGM
+contra la salida real muestra el MISMO fotograma compuesto, mezcla de pistas
+incluida. Tests que quedan cubiertos sin GPU: `GetProgramVideo` devuelve cue y
+salida (`TransportAndChainTests`).

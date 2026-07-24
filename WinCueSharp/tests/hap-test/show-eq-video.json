@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "H264 con espejo (rack nativo: RTA y GR reales)",
+      "file_path": "demo-h264-1080p30-audio.mp4", "duration": 5.0,
+      "timeline_layer": 2, "loop": true, "gain_db": 3.0,
+      "eq_enabled": true, "eq1_freq": 90.0, "eq1_gain": 6.0,
+      "comp_enabled": true, "comp_threshold": -28.0, "comp_ratio": 4.0,
+      "continue_mode": "NONE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "H264 a 1.5x (audio por mpv: sin analizador)",
+      "file_path": "demo-h264-1080p30-audio.mp4", "duration": 5.0,
+      "timeline_layer": 3, "rate": 1.5,
+      "continue_mode": "NONE" },
+    { "id": 3, "type": "VIDEO", "number": "3", "name": "HAP 1080p (motor propio + espejo)",
+      "file_path": "prueba-hap.mov", "duration": 10.0,
+      "timeline_layer": 4,
+      "continue_mode": "NONE" },
+    { "id": 4, "type": "MEMO", "number": "4", "name": "MEMO (sin audio)",
+      "continue_mode": "NONE" }
+  ]
+}

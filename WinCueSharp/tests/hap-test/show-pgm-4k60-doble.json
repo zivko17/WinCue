@@ -1,0 +1,14 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "HAP 4K60 incompresible (pista 2, bucle)",
+      "file_path": "demo-hap-4k60-ruido.mov", "duration": 5.0,
+      "notes": "Dos cues 4K a la vez sobre pistas distintas: el PGM debe enseñar la MEZCLA real (la pista 3 al 60 % sobre la 2), no solo el archivo del cue superior. Requiere generar-tortura.ps1.",
+      "timeline_layer": 2, "loop": true,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "HAP 4K30 al 60 % (pista 3, bucle)",
+      "file_path": "demo-hap-4k30-audio.mov", "duration": 4.0,
+      "timeline_layer": 3, "loop": true, "opacity": 60,
+      "continue_mode": "NONE" }
+  ]
+}
