@@ -1,0 +1,13 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "B H.264 claro — SALIENTE (mpv), muere a mitad del cruce",
+      "file_path": "xf-B-h264.mp4", "duration": 6.0,
+      "timeline_layer": 2, "post_wait": 3.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "A H.264 oscuro entra fundiendo 6 s (cruce > saliente)",
+      "file_path": "xf-A-h264.mp4", "duration": 10.0, "fade_in": 6.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

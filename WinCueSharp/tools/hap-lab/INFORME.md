@@ -890,11 +890,171 @@ entrante del crossfade sube ANTES de arrancar su rampa, los cues sin fundido
 también suben, y el GO no descarta el standby del cue que dispara. Suite
 completa: 450 en verde, 0 warnings.
 
-### Límite conocido que queda
+### Límite conocido que quedaba — RESUELTO (§ Fallo D)
 
-Si el **saliente acaba su duración DENTRO del fundido**, desaparece de golpe y
-la mezcla se queda en `opacidad_entrante × entrante` sobre negro (medido: la
-luma cae a 46 con las mesetas en 66 y 197). Es la semántica actual y deliberada
-del handover (`SuppressVisualFadeOut`: «su fin lo retira»), no una regresión —
-pero en directo se ve como un oscurecimiento. Si molesta, la solución es
-congelar el último fotograma del saliente hasta que acabe el cruce.
+Si el **saliente acaba su duración DENTRO del fundido**, desaparecía de golpe y
+la mezcla se quedaba en `opacidad_entrante × entrante` sobre negro (medido: la
+luma cae a 46 con las mesetas en 66 y 197). Era la semántica del handover
+(`SuppressVisualFadeOut`: «su fin lo retira»), no una regresión — pero en
+directo se ve como un oscurecimiento. Resuelto congelando el último fotograma
+del saliente hasta que acabe el cruce: ver la sección siguiente.
+
+---
+
+## Fallo D — el saliente que muere a mitad del cruce
+
+Continuación directa del límite de arriba. Objetivo: **que un crossfade se vea
+correcto dure lo que dure**, sin ningún tope artificial a la duración de los
+fundidos (los fundidos largos son legítimos: cierres de función,
+instalaciones).
+
+### Qué pasaba
+
+El crossfade en la misma pista mantiene vivo al saliente durante el fundido
+(handover). Si el saliente llega a su fin ANTES de que el cruce termine, su
+superficie del compositor se ocultaba (`ReleaseCue` → `Visibility.Collapsed`)
+y la mezcla pasaba a ser `α × entrante` sobre NEGRO. Cuanto más largo el
+crossfade, más probable.
+
+Y el saliente puede morir por **tres caminos distintos**, no solo por el fin de
+archivo:
+
+1. Fin de archivo (`EndFile` de mpv / `Ended` del player HAP).
+2. Fin de su **duración declarada** en el cue: el controlador programa
+   `VideoEndCheck` → `DurationElapsed` → `EndCue` → `_video.Stop(cueId)`.
+   **Este es el caso normal en un show real** — y el que se mide aquí.
+3. `Stop` directo de ese cue.
+
+Los tres acaban en `VideoEngine.TerminatePlayer`, y en los tres hay un cruce
+vivo encima que sigue necesitando su imagen. Por eso la decisión de congelar
+vive en `TerminatePlayer` (mirando el plazo del handover) y no en los
+manejadores de fin: colgarla del `EndFile` habría dejado fuera el caso 2, que
+es el habitual.
+
+### Arreglo elegido
+
+**Se congela solo lo VISUAL.** Lo que consume termina igual que siempre:
+decoder, player (mpv o HAP) y AUDIO del cue mueren en el acto. Lo único que se
+difiere es la ocultación de su superficie del pool, que **ya contiene el último
+fotograma pintado** — el cruce sigue mezclando contra esa imagen fija hasta
+que termina.
+
+Piezas:
+
+- `VideoEngine._handoverDeadlines[cueId]`: hasta cuándo está en handover cada
+  saliente (lo fija el GO del entrante con fundido).
+- `ReleaseGpuSlot(cueId, freezeUntilMs)` / `ReleaseHapSlot(cueId, freezeUntilMs)`:
+  el `DetachPlayer` del render context ocurre **igual y ahora** (regla de mpv:
+  antes que el core), pero los sinks NO se ocultan. El slot pasa de
+  `BusyCueId` a `FrozenCueId`: **ya no está libre**, así que el pool no lo
+  reparte y nadie pisa el fotograma.
+- `VisualFreezeRegistry` (puro, sin GPU ni WPF): único dueño de las
+  liberaciones diferidas.
+
+**No se crea ni se destruye NINGUNA superficie por cue** — el pool persistente
+de la auditoría 05 queda intacto — y toda escritura al back buffer sigue
+dentro del `Lock` del `D3DImage` (el congelado simplemente deja de escribir).
+
+### Cómo se garantiza que NO se filtran slots
+
+La lección cara de este proyecto es que una liberación diferida que no llegue
+deja el pool sin superficies. Hay **cuatro vías independientes**, cualquiera
+basta:
+
+1. **Timer propio del congelado** (`ScheduleThaw`) al vencer el plazo del
+   cruce. Es propio y no el del handover, porque `TerminatePlayer` desmonta el
+   del handover al morir el saliente.
+2. **Barrido de caducados** (`SweepExpiredFrozen`) en CADA petición de slot
+   (`AcquireGpuSlot`/`AcquireHapSlot`): la propia demanda reclama lo que se
+   quedó atrás.
+3. **Liberación explícita en todo cierre**: `Stop All`, `PANIC` (con fundido y
+   corte duro doble), `FADE ALL`, `STOP` global, recarga de show,
+   `PlayFromTimeline` (todos vía `StopEverything` → `IVideoEngine.
+   ReleaseFrozenSurfaces()`), `StopAll()`, `Cleanup()`, cambio de modo del
+   compositor (`SetGpuLayerSurfaceProvider`), toma de la pista sin cruce
+   (`TerminateSlotOccupants` con `handover=false`) y retrigger del propio cue
+   (`StartPlayback`).
+4. **Tope de seguridad por tiempo**: ningún congelado sobrevive a su plazo más
+   de `FreezeGraceMs` (2 s). El plazo lo marca el cruce, así que un crossfade
+   de 10 minutos sostiene su fotograma 10 minutos: **no hay tope duro**.
+
+Traza con `WINCUE_MPV_LOG` (`engine-trace.log`), medida real:
+
+```
+[18:16:25.718] freeze: cue=1 muere DENTRO del cruce → congelar último fotograma
+[18:16:25.722] hap: congelado cue=1 (último fotograma en pantalla)
+[18:16:25.722] freeze: cue=1 hasta t+2610 ms (congelados=1)
+[18:16:28.333] unfreeze: cue=1 (release, quedan=0)          ← ruta HAP
+[18:17:12.794] freeze: cue=1 muere DENTRO del cruce → congelar último fotograma
+[18:17:12.794] ReleaseGpuSlot cue=1 (detach, congelado)
+[18:17:13.049] freeze: cue=1 hasta t+2735 ms (congelados=1)
+[18:17:15.785] unfreeze: cue=1 (release, quedan=0)          ← ruta mpv
+```
+
+`quedan=0` en ambas: el pool vuelve entero.
+
+### Antes / después (medido en la salida real, 60 fps)
+
+Shows de medida nuevos, con el cruce (6 s) **más largo que lo que le queda al
+saliente** (3 s): `tests/hap-test/show-congelado-hap.json` (saliente por el
+motor HAP) y `show-congelado-mpv.json` (saliente por mpv). El saliente es el
+clip CLARO (meseta 197) y el entrante el OSCURO (66): si el saliente
+desaparece, la mezcla se hunde muy por debajo de la meseta baja.
+
+Todo automatizado en **`tests/hap-test/medir-crossfade.ps1`** (captura
+`ddagrab` + `ffv1`, show desatendido con `--stress … --stress-loops 1`, luma
+por fotograma con `signalstats` y resumen). El «antes» se midió compilando el
+commit base en un worktree aparte, con el mismo show y la misma captura.
+
+| Escenario | Antes | Después |
+|---|---|---|
+| Saliente **HAP** muere a mitad del cruce (`show-congelado-hap.json`) | **mínimo 42,2** · **154 fotogramas** por debajo de la meseta baja (66,4) | **mínimo 66,4** · **0 fotogramas** por debajo |
+| Saliente **mpv** muere a mitad del cruce (`show-congelado-mpv.json`) | **mínimo 44,1** · **136 fotogramas** por debajo | **mínimo 66,4** · **0 fotogramas** por debajo |
+| HAP↔HAP normal (`show-glitch-hap.json`) | limpio | limpio (0 bajones) — sin regresión |
+| H.264↔H.264 normal (`show-glitch-h264.json`) | limpio | limpio (0 bajones) — sin regresión |
+| HAP↔H.264 normal (`show-glitch-mixto.json`) | limpio | limpio (0 bajones) — sin regresión |
+
+La rampa del «después» es monótona de 196 a 66 **sin discontinuidad** en el
+instante en que muere el saliente (antes había un salto seco de 125 → 43 justo
+ahí, y luego una subida hasta 66):
+
+```
+antes:  132 131 131 131 130 130 | 42 42 42 42 42 42   ← el saliente se va
+después:130 130 130 129 129 129 | 128 128 127 127 127 126   ← rampa continua
+```
+
+### Aviso suave de fundido incoherente (sin bloquear nada)
+
+El caso de arriba ya no se ve mal, pero **sigue siendo información que el
+operador quiere tener**: la segunda mitad del cruce se hace contra una imagen
+fija. `WinCue.Core/FadeSanity.cs` (puro) marca dos situaciones:
+
+- `fade_in`/`fade_out` mayores que la **duración efectiva** del cue (con trim
+  aplicado): la rampa se recorta contra el final del bloque.
+- **crossfade mayor que lo que le queda al saliente** de su misma pista al
+  entrar — exactamente el caso de esta sección.
+
+Se pinta discreto: **⚠ ámbar** bajo los campos de fundido de «Tiempo y
+bucles» del inspector y sobre la esquina del bloque en el **timeline**, con un
+tooltip que explica QUÉ VA A PASAR («se completará con su último fotograma
+congelado…»). Sin `MessageBox`, sin impedir guardar y **sin ningún tope duro
+de duración**. Localizado ES/EN.
+
+El dato de «cuánto le queda al saliente» sale de la proyección del timeline
+(`TimelineCanvas.OutgoingRemaining`), que es quien la conoce; el inspector lo
+recibe cableado desde `MainWindow`.
+
+### Tests sin GPU
+
+- `VisualFreezeRegistryTests` (9): congelar/liberar, idempotencia, liberación
+  total (STOP ALL/PANIC/recarga), tope de seguridad por tiempo, fundido
+  larguísimo que SIGUE congelado mientras dura, doble congelado del mismo cue
+  y un `release` que falla sin bloquear a los demás.
+- `CrossfadeFreezeTests` (8): el controlador pide la liberación explícita en
+  STOP ALL, PANIC con fundido, PANIC ×2 (corte duro), FADE ALL, STOP global,
+  recarga de show, `PlayFromTimeline` y cierre de la app.
+- `FadeSanityTests` (16): los BORDES del aviso — cabe justo, trim que recorta
+  la duración efectiva, loop infinito, duración desconocida, audio sin cruce
+  de opacidad y fundidos larguísimos que SÍ caben (no avisan).
+
+Suite completa: **483 en verde, 0 warnings**, smoke exit 0.
