@@ -1,0 +1,21 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "MEMO", "number": "0",
+      "name": "SOAK LARGO (paso 4) — un cue híbrido de 6 MIN con el audio espejo en STREAMING; el modo --stress lo relanza en bucle",
+      "notes": "LA evidencia del paso 4: el espejo del cue largo ya no decodifica el archivo entero a RAM (antes ~23 MB/min → el límite video_audio_max_minutes lo vetaba) sino que ffmpeg alimenta un ring de ~3 s → el working set debe quedarse PLANO durante los 6 minutos y el arranque del espejo ser casi instantáneo (trazas del PLL: apenas correcciones al arrancar). Requiere compositor GPU (video_compositor=true) y la media de tests/hap-test (generar-hibrido.ps1). Una vuelta ≈ 6 min.",
+      "continue_mode": "AUTO_CONTINUE" },
+
+    { "id": 2, "type": "VIDEO", "number": "1", "name": "H264 360p30 de 6 MIN con audio AAC (HÍBRIDO: espejo en STREAMING + mpv mudo + PLL)",
+      "file_path": "../hap-test/demo-h264-360s-audio.mp4", "duration": 360.0,
+      "timeline_layer": 2, "fade_in": 0.5, "fade_out": 0.5, "post_wait": 362.0,
+      "continue_mode": "AUTO_CONTINUE" },
+
+    { "id": 3, "type": "STOP", "number": "2", "name": "STOP ALL con fundido (barrido: nada queda colgado)",
+      "fade_out": 1.0, "post_wait": 1.5,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 4, "type": "WAIT", "number": "3", "name": "respiro final — aquí el runner detecta la vuelta completa",
+      "duration": 1.0,
+      "continue_mode": "NONE" }
+  ]
+}

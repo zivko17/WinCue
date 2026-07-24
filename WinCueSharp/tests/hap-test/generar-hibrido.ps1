@@ -48,5 +48,9 @@ H264 'demo-h264-1080p60-audio.mp4'   '1920x1080' 60 3.0 'aac'
 # 720p30 con pcm 96 kHz GRANDE en .mov — espejo tardío (frenada del PLL);
 # el contenedor .mov además ejercita el sondeo de códec (no-HAP → híbrido)
 H264 'demo-h264-720p30-bigpcm.mov'   '1280x720'  30 6.0 'pcmbig'
+# 360p30 de 6 MINUTOS con audio — el cue LARGO del paso 4 (streaming del
+# espejo): antes el pre-decode a RAM lo vetaba (límite 20 min por defecto y
+# ~140 MB de float); ahora el ring acotado debe dejar el working set PLANO
+H264 'demo-h264-360s-audio.mp4'      '640x360'   30 360.0 'aac'
 
 Write-Host "Media H.264 híbrida generada."
