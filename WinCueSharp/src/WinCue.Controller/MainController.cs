@@ -1040,6 +1040,13 @@ public class MainController
                         MirrorPlayParams(cue, offset, fadeLeft));
                 }
                 RefreshVideoTally();
+                // AL AIRE = AL FRENTE de su pista. El z de la superficie se
+                // fija cuando el cue la TOMA, y con la precarga en STANDBY eso
+                // puede ocurrir mucho antes del GO: el entrante de un
+                // crossfade se quedaba DEBAJO del saliente (fundido invisible
+                // y corte seco al morir el saliente). Va ANTES de la opacidad
+                // para que ni un fotograma se componga en el orden viejo.
+                _view.RaiseVideoCueToFront(cue.Id);
                 if (fadeLeft > 0.0)
                 {
                     // CROSSFADE en la misma pista: el saliente queda DEBAJO

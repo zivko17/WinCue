@@ -293,8 +293,25 @@ public sealed class FakeView : IShowView
     public bool IsVideoOutputVisible(int screen) => VisibleOutputs.Contains(screen);
 
     public readonly Dictionary<int, double> CueOpacities = new();
-    public void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0) =>
+
+    /// <summary>Bitácora ORDENADA de lo que le pasa a la pila del compositor:
+    /// ("raise", cue, 0, 0) y ("opacity", cue, opacidad, fade). El orden es lo
+    /// que se comprueba en el crossfade — el entrante debe subir al frente
+    /// ANTES de empezar su rampa de opacidad.</summary>
+    public readonly List<(string Op, int CueId, double Value, double Fade)> CompositorLog = new();
+
+    public void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0)
+    {
         CueOpacities[cueId] = opacity;
+        CompositorLog.Add(("opacity", cueId, opacity, fadeSeconds));
+    }
+
+    public readonly List<int> RaisedCues = new();
+    public void RaiseVideoCueToFront(int cueId)
+    {
+        RaisedCues.Add(cueId);
+        CompositorLog.Add(("raise", cueId, 0.0, 0.0));
+    }
 }
 
 // ---------------------------------------------------------------------------

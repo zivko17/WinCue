@@ -78,6 +78,14 @@ public interface IShowView
     /// cues de la misma pista). Default: no-op (fakes / modo clásico).</summary>
     void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0) { }
 
+    /// <summary>Sube la superficie del cue al FRENTE de su pista (compositor
+    /// GPU). Se llama en el GO, no al crear la superficie: un cue precargado
+    /// en STANDBY toma su superficie mucho antes de salir al aire, y si el z
+    /// se quedara con el de entonces, el entrante de un crossfade fundiría
+    /// POR DEBAJO del saliente (fundido invisible + corte seco al morir el
+    /// saliente). Default: no-op (fakes / modo clásico).</summary>
+    void RaiseVideoCueToFront(int cueId) { }
+
     /// <summary>true si la ventana de esa salida ya está visible. La precarga
     /// en pausa del standby solo se hace entonces (no debe ABRIR ventanas al
     /// mover el playhead en modo EDIT). Default: false (fakes).</summary>

@@ -658,6 +658,12 @@ public partial class MainWindow : Window, IShowView
             w?.SetCueOpacity(cueId, opacity, fadeSeconds);
     }
 
+    public void RaiseVideoCueToFront(int cueId)
+    {
+        foreach (var w in _videoOutputs)
+            w?.RaiseCueToFront(cueId);
+    }
+
     /// <summary>Superficie PERSISTENTE del compositor para un slot del pool
     /// (la usa App para el provider del motor; auditoría 05).</summary>
     public CompositorLayerControl GetCompositorSurface(int screen, int layer, int slotSeq)

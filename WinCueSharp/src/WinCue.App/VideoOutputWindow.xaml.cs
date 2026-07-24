@@ -44,6 +44,23 @@ public partial class VideoOutputWindow : Window
 
     private bool _shutdown;
 
+    /// <summary>Traza del compositor al mismo engine-trace.log que el motor
+    /// (solo con WINCUE_MPV_LOG puesto): el z y la opacidad de cada cue son
+    /// LA evidencia cuando un crossfade no se ve — sin esto hubo que
+    /// instrumentar a mano para cazar el fundido que iba por debajo.</summary>
+    internal static void Trace(string msg)
+    {
+        string? dir = Environment.GetEnvironmentVariable("WINCUE_MPV_LOG");
+        if (string.IsNullOrEmpty(dir))
+            return;
+        try
+        {
+            System.IO.File.AppendAllText(System.IO.Path.Combine(dir, "engine-trace.log"),
+                $"[{DateTime.Now:HH:mm:ss.fff}] VIEW {msg}\r\n");
+        }
+        catch (Exception) { }
+    }
+
     // MODO CLÁSICO: 8 superficies HWND apiladas (una por pista): el índice 0
     // es la de ARRIBA. mpv renderiza sobre el HWND del panel de su pista;
     // las vacías se ocultan (un panel WinForms pinta su fondo negro).
@@ -53,6 +70,8 @@ public partial class VideoOutputWindow : Window
     // MODO COMPOSITOR GPU: una superficie POR CUE, apiladas por pista (z) —
     // dos cues pueden convivir en la misma pista durante un crossfade
     private readonly Dictionary<int, CompositorLayerControl> _gpuByCue = new();
+    // Pista de cada superficie: el z se recalcula en el GO (RaiseCueToFront)
+    private readonly Dictionary<CompositorLayerControl, int> _gpuLayerOf = new();
     private int _gpuSeq;   // desempate de z dentro de la misma pista
     private readonly Grid _gpuHost;
 
@@ -368,11 +387,29 @@ public partial class VideoOutputWindow : Window
         _blackoutVeil.BeginAnimation(OpacityProperty, anim);
     }
 
+    /// <summary>z de una superficie dentro de la pila: la PISTA manda (0 = la
+    /// de arriba) y, dentro de una pista, el ÚLTIMO en pedirlo va encima.</summary>
+    private int NextZ(int layer) =>
+        (7 - Math.Clamp(layer, 0, 7)) * 100_000 + (++_gpuSeq & 0xFFFF);
+
+    /// <summary>Sube la superficie de un cue al frente de su pista. Lo llama
+    /// el controlador en el GO: el z de AssignCue se fijó cuando el cue tomó
+    /// su superficie, que con la precarga en STANDBY puede ser MUCHO antes de
+    /// salir al aire (y detrás de vídeos que arrancaron después).</summary>
+    public void RaiseCueToFront(int cueId)
+    {
+        if (!_gpuByCue.TryGetValue(cueId, out var ctl))
+            return;
+        int z = NextZ(_gpuLayerOf.GetValueOrDefault(ctl, 0));
+        Panel.SetZIndex(ctl, z);
+        Trace($"RaiseCueToFront cue={cueId} z={z}");
+    }
+
     /// <summary>Superficie PERSISTENTE del compositor para un SLOT del pool
     /// (auditoría 05): el control y su binding D3DImage viven toda la sesión.
-    /// Los cues pasan por él vía AssignCue/ReleaseCue — al asignar sube el z
-    /// de su pista (dentro de la misma pista, el más reciente encima:
-    /// crossfade A→B) y se mapea para la opacidad por cue.</summary>
+    /// Los cues pasan por él vía AssignCue/ReleaseCue — al asignar toma un z
+    /// de su pista y se mapea para la opacidad por cue. El z DEFINITIVO lo
+    /// pone el GO (RaiseCueToFront).</summary>
     public CompositorLayerControl GetCompositorSurface(int layer, int slotSeq)
     {
         if (!IsVisible)
@@ -380,18 +417,24 @@ public partial class VideoOutputWindow : Window
         ShowHwndMode(false);
 
         var ctl = new CompositorLayerControl();
+        _gpuLayerOf[ctl] = Math.Clamp(layer, 0, 7);
         ctl.CueAssigned = cueId =>
         {
             _gpuByCue[cueId] = ctl;
-            int z = (7 - Math.Clamp(layer, 0, 7)) * 100_000 + (++_gpuSeq & 0xFFFF);
+            int z = NextZ(layer);
             Panel.SetZIndex(ctl, z);
+            Trace($"AssignCue cue={cueId} layer={layer} z={z}");
         };
         ctl.CueReleased = cueId =>
         {
             if (_gpuByCue.TryGetValue(cueId, out var cur) && ReferenceEquals(cur, ctl))
                 _gpuByCue.Remove(cueId);
         };
-        ctl.Cleared = () => _gpuHost.Children.Remove(ctl);   // pipeline muerto
+        ctl.Cleared = () =>                                  // pipeline muerto
+        {
+            _gpuLayerOf.Remove(ctl);
+            _gpuHost.Children.Remove(ctl);
+        };
         _gpuHost.Children.Add(ctl);
         return ctl;
     }
@@ -415,6 +458,8 @@ public partial class VideoOutputWindow : Window
     {
         if (!_gpuByCue.TryGetValue(cueId, out var target))
             return;
+        Trace($"SetCueOpacity cue={cueId} op={opacity} fade={fadeSeconds} " +
+            $"z={Panel.GetZIndex(target)}");
         double value = Math.Clamp(opacity, 0.0, 1.0);
         if (fadeSeconds > 0.0)
         {
