@@ -216,6 +216,11 @@ public sealed class TimelinePanel : Border
 
     /// <summary>Recalcular la proyección tras cualquier cambio del modelo.</summary>
     public void RefreshFromModel() => _canvas.RefreshFromModel();
+
+    /// <summary>Segundos que le quedan al vídeo SALIENTE de la misma pista
+    /// cuando el cue dado entra (null = no hay cruce). Lo consume el aviso de
+    /// fundido incoherente del inspector.</summary>
+    public double? OutgoingRemaining(int cueId) => _canvas.OutgoingRemaining(cueId);
 }
 
 /// <summary>Lienzo: proyección temporal de la lista, bloques, grupos y cursor.</summary>
@@ -243,6 +248,8 @@ public sealed class TimelineCanvas : FrameworkElement
     private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xee, 0xee, 0xee)));
     private static readonly Brush FadeBrush = Frozen(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)));
     private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)));
+    // Ámbar de AVISO (fundido que no cabe): el mismo tono del inspector
+    private static readonly Brush WarnBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)));
     private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Color.FromArgb(110, 0x2e, 0xcc, 0x71)));
     private static readonly Brush GoBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
     private static readonly Pen GoPen = MakeGoPen();
@@ -326,6 +333,10 @@ public sealed class TimelineCanvas : FrameworkElement
         public double RampStart = -1; // rampa de un FADE sobre este bloque (abs)
         public double RampLen;
         public bool RampToSilence;    // FADE a volumen 0 sin parar: resto en silencio
+
+        // AVISO SUAVE de fundido incoherente (calculado en la reproyección)
+        public FadeIssues Issues;
+        public double? Headroom;      // s que le quedan al saliente al entrar
     }
 
     private sealed class Span
@@ -476,6 +487,47 @@ public sealed class TimelineCanvas : FrameworkElement
         InvalidateVisual();
     }
 
+    /// <summary>Segundos que le QUEDAN al vídeo SALIENTE de la misma pista
+    /// cuando este cue entra, según la proyección del timeline. null = no hay
+    /// saliente vivo (no hay cruce) o el saliente no acaba nunca (loop).
+    /// Es el dato que convierte "fade_in de 8 s" en "el cruce no cabe".</summary>
+    public double? OutgoingRemaining(int cueId)
+    {
+        var block = _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == cueId);
+        if (block is null || block.Cue.Type != CueType.Video)
+            return null;
+        Block? prev = null;
+        foreach (var b in _blocks)
+        {
+            if (b.Ghost || b.Cue.Id == cueId || b.Cue.Type != CueType.Video)
+                continue;
+            if (b.Layer != block.Layer || b.Dimmed)
+                continue;
+            if (b.Start > block.Start + 0.001)
+                continue;                                  // entra después
+            if (b.Cue.Loop)
+                return null;                               // no acaba nunca
+            if (b.Start + b.Dur <= block.Start + 0.001)
+                continue;                                  // ya había acabado
+            if (prev is null || b.Start > prev.Start)
+                prev = b;
+        }
+        return prev is null ? null : prev.Start + prev.Dur - block.Start;
+    }
+
+    /// <summary>Marca en cada bloque sus avisos de fundido incoherente (aviso
+    /// SUAVE: pinta un ⚠ y explica qué pasará; no impide NADA). Se calcula
+    /// una vez por reproyección, no por frame.</summary>
+    private void MarkFadeIssues()
+    {
+        foreach (var b in _blocks)
+        {
+            b.Headroom = b.Ghost ? null : OutgoingRemaining(b.Cue.Id);
+            b.Issues = b.Ghost ? FadeIssues.None
+                               : FadeSanity.Check(b.Cue, b.Headroom);
+        }
+    }
+
     // ------------------------------------------------------------------
     // Proyección: lista de cues → bloques con tiempo y capa
     // ------------------------------------------------------------------
@@ -549,6 +601,8 @@ public sealed class TimelineCanvas : FrameworkElement
             span.MinLayer = Math.Min(min, max);
             span.MaxLayer = Math.Max(min, max);
         }
+
+        MarkFadeIssues();   // avisos de fundido con las pistas ya asignadas
     }
 
     /// <summary>Coloca una secuencia (nivel raíz o hijos de un grupo ENTER)
@@ -1118,6 +1172,18 @@ public sealed class TimelineCanvas : FrameworkElement
         if (b.CutAt is not null)
             dc.DrawLine(CutPen, new Point(x + bw, y - 1), new Point(x + bw, y + bh + 1));
 
+        // AVISO SUAVE de fundido incoherente: un ⚠ ámbar sobre la esquina del
+        // fundido que no cabe. No cambia nada del comportamiento — la
+        // explicación está en el tooltip y en el inspector.
+        if (b.Issues != FadeIssues.None && bw > 14)
+        {
+            var warn = Label("⚠", WarnBrush, 12);
+            bool atStart = b.Issues.HasFlag(FadeIssues.CrossfadeTooLong)
+                || b.Issues.HasFlag(FadeIssues.FadeInTooLong);
+            double wx = atStart ? x + 2 : x + bw - warn.Width - 2;
+            dc.DrawText(warn, new Point(wx, y + 1));
+        }
+
         if (bw > 30)
         {
             string text = $"{cue.DisplayNumber} · {cue.Name}";
@@ -1356,6 +1422,7 @@ public sealed class TimelineCanvas : FrameworkElement
                 Cursor = HitSpanChip(p) is not null || over is not null
                     || HitSpan(p) is not null
                     ? Cursors.SizeAll : Cursors.Arrow;
+            UpdateFadeTip(over);
             return;
         }
         if (!_dragMoved &&
@@ -1409,6 +1476,18 @@ public sealed class TimelineCanvas : FrameworkElement
         // Reproyección en vivo: el resto del show se desplaza con el arrastre
         RebuildLayout();
         InvalidateVisual();
+    }
+
+    /// <summary>Tooltip del bloque bajo el ratón: solo lo pone cuando hay un
+    /// aviso de fundido que explicar (si no, el timeline no lleva tooltips).</summary>
+    private void UpdateFadeTip(Block? over)
+    {
+        string? tip = over is null || over.Issues == FadeIssues.None
+            ? null
+            : FadeSanity.Explain(over.Issues,
+                FadeSanity.EffectiveDuration(over.Cue), over.Headroom);
+        if (!Equals(ToolTip, tip))
+            ToolTip = tip;
     }
 
     protected override void OnMouseUp(MouseButtonEventArgs e)

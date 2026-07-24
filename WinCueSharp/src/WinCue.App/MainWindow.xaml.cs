@@ -93,6 +93,9 @@ public partial class MainWindow : Window, IShowView
         Inspector.SpectrumProvider = cueId => _controller.GetAudioSpectrum(cueId);
         Inspector.GainReductionProvider = cueId => _controller.GetAudioGainReduction(cueId);
         Inspector.AudioAnalysisProvider = cueId => _controller.CueHasAudioAnalysis(cueId);
+        // Aviso de fundido incoherente: la proyección del timeline es quien
+        // sabe cuánto le queda al saliente de la misma pista al entrar el cue
+        Inspector.CrossfadeHeadroomProvider = cueId => Timeline.OutgoingRemaining(cueId);
 
         // Panel AUDIO (mesa): faders master/audición/cues + VU + GR limitador
         Mixer.MasterGainReductionProvider = () => _controller.GetMasterGainReduction();

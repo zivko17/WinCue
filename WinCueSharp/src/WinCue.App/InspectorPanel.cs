@@ -36,6 +36,12 @@ public sealed class InspectorPanel : ContentControl
     /// enrutado: con AUDIO ESPEJO sí; con el audio por mpv, no.</summary>
     public Func<int, bool>? AudioAnalysisProvider;
 
+    /// <summary>Segundos que le quedan al vídeo SALIENTE de la misma pista
+    /// cuando este cue entra (lo sabe la proyección del timeline), o null si
+    /// no hay saliente / no acaba nunca. Alimenta el aviso de fundido
+    /// incoherente; sin cablear, ese aviso concreto no se emite.</summary>
+    public Func<int, double?>? CrossfadeHeadroomProvider;
+
     private readonly EqEditorControl _eqEditor = new();
 
     private readonly TabControl _tabs = new()
@@ -231,6 +237,10 @@ public sealed class InspectorPanel : ContentControl
         // Actualizar cabecera si cambió nombre/número (sin repoblar el resto)
         _header.Text = $"Cue {_cue.DisplayNumber} · {_cue.Type.ToString().ToUpperInvariant()} · {_cue.Name}";
 
+        // El aviso de fundido incoherente depende de fades, trim y duración
+        if (FadeWarnKeys.Contains(key))
+            UpdateFadeWarning(_cue);
+
         // Sincronía barra de trim ↔ campos numéricos / archivo
         if (key is "trim_start" or "trim_end")
         {
@@ -375,6 +385,45 @@ public sealed class InspectorPanel : ContentControl
         return scroll;
     }
 
+    // ── Aviso de fundido incoherente (Tiempo y bucles) ─────────────────
+    private const string FadeWarnKey = "__fade_warn";
+
+    /// <summary>Campos cuya edición puede volver coherente (o incoherente) un
+    /// fundido: al commitear cualquiera de ellos se recalcula el aviso.</summary>
+    private static readonly HashSet<string> FadeWarnKeys = new(StringComparer.Ordinal)
+    { "fade_in", "fade_out", "trim_start", "trim_end", "duration", "loop", "file_path" };
+
+    private readonly TextBlock _fadeWarn = new()
+    {
+        // Ámbar de aviso — el mismo tono del resto de la app; discreto
+        Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)),
+        TextWrapping = TextWrapping.Wrap,
+        MaxWidth = 280,
+        FontSize = 11,
+        Margin = new Thickness(0, 2, 0, 4),
+        Visibility = Visibility.Collapsed,
+    };
+
+    /// <summary>Pinta (o esconde) el aviso. NO impide nada: ni bloquea el
+    /// guardado ni recorta el valor — solo cuenta qué va a pasar.</summary>
+    private void UpdateFadeWarning(Cue cue)
+    {
+        double? remaining = cue.Type == CueType.Video
+            ? CrossfadeHeadroomProvider?.Invoke(cue.Id) : null;
+        var issues = FadeSanity.Check(cue, remaining);
+        string? text = FadeSanity.ShortText(issues);
+        if (text is null)
+        {
+            _fadeWarn.Visibility = Visibility.Collapsed;
+            _fadeWarn.ToolTip = null;
+            return;
+        }
+        _fadeWarn.Text = text;
+        _fadeWarn.ToolTip = FadeSanity.Explain(
+            issues, FadeSanity.EffectiveDuration(cue), remaining);
+        _fadeWarn.Visibility = Visibility.Visible;
+    }
+
     private UIElement BuildTimeLoops()
     {
         // Sin scroll: campos arriba y la barra de trim ESTIRADA al alto restante
@@ -399,6 +448,10 @@ public sealed class InspectorPanel : ContentControl
         Header(cols[1], Loc.T("FUNDIDOS Y RECORTE", "FADES & TRIM"));
         TimeF(cols[1], "fade_in", "Fade in:", c => c.FadeIn);
         TimeF(cols[1], "fade_out", "Fade out:", c => c.FadeOut);
+        // AVISO SUAVE (nunca bloqueo): un fundido más largo que el tiempo
+        // sobre el que puede actuar. Los fundidos largos siguen permitidos.
+        cols[1].Children.Add(_fadeWarn);
+        _loaders[FadeWarnKey] = UpdateFadeWarning;
         TimeF(cols[1], "trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
         TimeF(cols[1], "trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
 
