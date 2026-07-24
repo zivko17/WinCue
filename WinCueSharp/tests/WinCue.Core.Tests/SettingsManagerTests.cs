@@ -105,7 +105,10 @@ public class SettingsManagerTests : IDisposable
             }
             """);
         var sm = new SettingsManager(SettingsPath);
-        Assert.Equal("directsound", sm.Get<string>("audio_driver"));
+        // El archivo no tiene settings_schema → v1 → migra hasta v3, y ahí
+        // "directsound" (opción retirada, nunca implementada) pasa a "wasapi",
+        // que es lo que el motor abría de facto.
+        Assert.Equal("wasapi", sm.Get<string>("audio_driver"));
         Assert.Equal(80, sm.Get<int>("master_volume"));
         Assert.Equal("per_cue", sm.Get<string>("go_mode"));
         // Clave no presente en el archivo → default
@@ -129,5 +132,53 @@ public class SettingsManagerTests : IDisposable
         sm.Set("master_volume", 10);
         sm.ResetDefaults();
         Assert.Equal(100, sm.Get<int>("master_volume"));
+    }
+
+    // ── v2→v3: retirada del driver "directsound" (nunca implementado) ──
+
+    [Fact]
+    public void MigrationV3_DirectSoundDriver_BecomesWasapi()
+    {
+        File.WriteAllText(SettingsPath, """
+            {
+              "settings_schema": 2,
+              "audio_driver": "directsound",
+              "audio_device_name": "Altavoces"
+            }
+            """);
+        var sm = new SettingsManager(SettingsPath);
+        Assert.Equal("wasapi", sm.Get<string>("audio_driver"));
+        // El dispositivo elegido NO se toca: seguía saliendo por WASAPI
+        Assert.Equal("Altavoces", sm.Get<string>("audio_device_name"));
+        Assert.Equal(3, sm.Get<int>("settings_schema"));
+    }
+
+    [Fact]
+    public void MigrationV3_AsioDriver_IsPreserved()
+    {
+        File.WriteAllText(SettingsPath, """
+            {
+              "settings_schema": 2,
+              "audio_driver": "asio",
+              "audio_device_name": "ASIO4ALL v2"
+            }
+            """);
+        var sm = new SettingsManager(SettingsPath);
+        Assert.Equal("asio", sm.Get<string>("audio_driver"));
+        Assert.Equal("ASIO4ALL v2", sm.Get<string>("audio_device_name"));
+    }
+
+    [Fact]
+    public void MigrationV3_IsIdempotent_AndPersisted()
+    {
+        File.WriteAllText(SettingsPath, """
+            { "settings_schema": 2, "audio_driver": "directsound" }
+            """);
+        _ = new SettingsManager(SettingsPath);
+        // Reabrir: ya está en v3, la migración no vuelve a correr y el valor
+        // migrado quedó ESCRITO en disco
+        var sm2 = new SettingsManager(SettingsPath);
+        Assert.Equal("wasapi", sm2.Get<string>("audio_driver"));
+        Assert.Equal(3, sm2.Get<int>("settings_schema"));
     }
 }

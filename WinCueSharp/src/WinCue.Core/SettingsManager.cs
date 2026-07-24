@@ -32,7 +32,7 @@ public class SettingsManager
 
     /// <summary>Versión del esquema de settings. Se sube al introducir cambios
     /// de default que requieren migrar archivos antiguos (ver Migrate).</summary>
-    private const int CurrentSchema = 2;
+    private const int CurrentSchema = 3;
 
     public static JsonObject CreateDefaults() => new()
     {
@@ -41,7 +41,13 @@ public class SettingsManager
         // ── Audio ────────────────────────────────────────────────────
         ["audio_device_index"] = -1,
         ["audio_device_name"]  = "",
-        ["audio_driver"]       = "wasapi",   // "wasapi" | "asio" | "directsound"
+        // Solo "wasapi" | "asio". DirectSound se retiró en el esquema 3: en
+        // Windows moderno se EMULA sobre WASAPI (más latencia, cero ventajas)
+        // y además nunca estuvo implementado — elegirlo abría un WasapiOut.
+        // Ofrecer una opción que miente es peor que no ofrecerla.
+        // Con driver "asio", audio_device_name guarda el NOMBRE DEL DRIVER
+        // ASIO (las entradas «[ASIO] …» del desplegable de dispositivos).
+        ["audio_driver"]       = "wasapi",   // "wasapi" | "asio"
         ["audio_buffer_size"]  = 512,        // samples
         ["audio_sample_rate"]  = 48000,      // 44100 | 48000 | 96000
         ["master_volume"]      = 100,        // 0–100
@@ -224,7 +230,12 @@ public class SettingsManager
     /// v1→v2: las salidas de vídeo 2-4 pasan del default histórico «0 = monitor
     /// principal» (sin sentido para una salida secundaria y causa de lanzarlas
     /// sin querer sobre el operador) a «-1 = deshabilitada». Solo se tocan las
-    /// que siguen en 0; si ya tienen un monitor asignado, se respetan.</summary>
+    /// que siguen en 0; si ya tienen un monitor asignado, se respetan.
+    /// v2→v3: se retira el driver "directsound". Nunca estuvo implementado
+    /// (AudioEngine.CreateOutput solo distingue "asio"; todo lo demás acababa
+    /// en WasapiOut) y en Windows moderno DirectSound se emula sobre WASAPI.
+    /// Los settings que lo tuvieran pasan a "wasapi", que es lo que ya estaban
+    /// usando de facto — así el desplegable deja de mentir.</summary>
     private void Migrate(int fileSchema)
     {
         if (fileSchema < 2)
@@ -232,6 +243,10 @@ public class SettingsManager
                 { "video_output_screen2", "video_output_screen3", "video_output_screen4" })
                 if (Get<int>(key, -1) == 0)
                     _data[key] = -1;
+
+        if (fileSchema < 3 &&
+            !string.Equals(Get("audio_driver", "wasapi"), "asio", StringComparison.OrdinalIgnoreCase))
+            _data["audio_driver"] = "wasapi";
 
         _data["settings_schema"] = CurrentSchema;
         Save();
