@@ -175,8 +175,8 @@ public partial class MainWindow : Window, IShowView
         // Monitores en vivo: PGM arriba (con VU estéreo del PROGRAMA) y
         // PVW abajo (con VU estéreo de la AUDICIÓN local)
         MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR,
-            Loc.T("Nivel L/R del PROGRAMA (cues de AUDIO del mixer; el sonido de los vídeos sale por mpv y no es medible aquí)",
-                  "L/R level of PROGRAM (AUDIO cues from the mixer; video sound goes through mpv and isn't measurable here)")));
+            Loc.T("Nivel L/R del PROGRAMA. Por loopback mide TODO lo que sale del dispositivo (cues, audio de los vídeos, sistema); con ASIO o si el loopback no está disponible, mide la mezcla interna de cues. El strip MASTER del panel Audio dice cuál de las dos.",
+                  "L/R level of PROGRAM. Via loopback it measures EVERYTHING leaving the device (cues, video audio, system); with ASIO or if loopback isn't available, it measures the internal cue mix. The MASTER strip in the Audio panel says which one.")));
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
             Loc.T("Nivel L/R de la AUDICIÓN local (🎧)", "L/R level of the local AUDITION (🎧)")));
         _pvw.Clear("—");
@@ -577,6 +577,20 @@ public partial class MainWindow : Window, IShowView
         Mixer.SetAuditionLevel(left, right);
     }
 
+    // Origen del VU de PGM y salida realmente abierta (los empuja App desde
+    // los eventos del motor: los medidores se abren fuera del hilo de UI).
+    private string _vuSourceInfo = "";
+    private string _realOutputInfo = "";
+
+    /// <summary>De dónde sale el VU de PROGRAMA y qué salida se abrió de
+    /// verdad. Lo cablea App a los eventos del AudioEngine.</summary>
+    public void SetAudioSourceInfo(string vuSource, string realOutput)
+    {
+        _vuSourceInfo = vuSource;
+        _realOutputInfo = realOutput;
+        UpdateMixerDeviceInfo();
+    }
+
     /// <summary>Línea de dispositivo/driver del strip MASTER del panel Audio.</summary>
     private void UpdateMixerDeviceInfo()
     {
@@ -585,7 +599,12 @@ public partial class MainWindow : Window, IShowView
         if (dev.Length == 0)
             dev = Loc.T("Dispositivo por defecto", "Default device");
         int sr = _settings.Get("audio_sample_rate", 48000);
-        Mixer.SetDeviceInfo($"{driver} · {dev} · {sr / 1000.0:0.#} kHz");
+        string line = $"{driver} · {dev} · {sr / 1000.0:0.#} kHz";
+        if (_realOutputInfo.Length > 0)
+            line += $"\n→ {_realOutputInfo}";
+        if (_vuSourceInfo.Length > 0)
+            line += $"\n{_vuSourceInfo}";
+        Mixer.SetDeviceInfo(line);
     }
 
     public nint GetVideoOutputHandle()
