@@ -238,6 +238,12 @@ public sealed class FakeVideoEngine : IVideoEngine
     public int CleanupCalls;
     public void Cleanup() => CleanupCalls++;
 
+    /// <summary>Peticiones de liberar superficies CONGELADAS del crossfade
+    /// (-1 = todas). Sin ellas el pool del compositor podría quedarse sin
+    /// slots tras un STOP ALL / PANIC / recarga de show.</summary>
+    public readonly List<int> FrozenReleases = new();
+    public void ReleaseFrozenSurfaces(int cueId = -1) => FrozenReleases.Add(cueId);
+
     public readonly HashSet<int> PausedCues = new();
 
     public void EndNaturally(int cueId)

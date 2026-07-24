@@ -1549,6 +1549,12 @@ public class MainController
             _audio.StopAll(fade);
         }
 
+        // CONGELADOS del crossfade: ya no hay cruce que servir. Es el camino
+        // explícito de STOP ALL, PANIC, FADE ALL, recarga de show y
+        // PlayFromTimeline — una liberación diferida que no llegara dejaría el
+        // pool de superficies del compositor sin slots (auditoría 05).
+        _video.ReleaseFrozenSurfaces();
+
         _paused = false;
         _view.UpdateTransport(false);
         _view.UpdateCountdown(null);

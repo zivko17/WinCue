@@ -92,6 +92,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         public required int Layer;
         public required string Spec;  // firma tamaño+vistas (reutilización exacta)
         public int? BusyCueId;
+        /// <summary>CONGELADO: el cue murió dentro de un crossfade y su
+        /// superficie sigue en pantalla con el último fotograma. El slot NO
+        /// está libre (repartirlo pisaría ese fotograma).</summary>
+        public int? FrozenCueId;
     }
     private readonly List<GpuSlot> _gpuPool = new();
     private int _gpuSlotSeq;
@@ -113,6 +117,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         public required int Layer;
         public required string Spec;   // "WxH" de la superficie
         public int? BusyCueId;
+        /// <summary>CONGELADO (misma semántica que en GpuSlot): la superficie
+        /// conserva el último fotograma hasta que el cruce acabe.</summary>
+        public int? FrozenCueId;
     }
     private readonly List<HapSlot> _hapPool = new();
 
@@ -130,6 +137,25 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     // Red de seguridad del crossfade en la misma pista: si el saliente no
     // tiene fin propio (loop), se termina al acabar el fundido
     private readonly Dictionary<int, System.Threading.Timer> _handoverTimers = new();
+
+    /// <summary>CONGELAR EL ÚLTIMO FOTOGRAMA DEL SALIENTE. Si un vídeo llega a
+    /// su fin natural mientras un crossfade sigue vivo, su player y su audio
+    /// terminan como siempre, pero la superficie del pool NO se oculta: se
+    /// queda con el último fotograma pintado hasta que el cruce acabe (antes
+    /// desaparecía de golpe y la mezcla caía sobre NEGRO — luma medida 46 con
+    /// las mesetas en 66/197). El registro garantiza la liberación por todos
+    /// los caminos; ver VisualFreezeRegistry.</summary>
+    private readonly VisualFreezeRegistry _freeze = new(Trace);
+    /// <summary>Plazo (Environment.TickCount64) hasta el que cada saliente
+    /// está en handover — lo fija el GO del entrante con fundido. Es la
+    /// ÚNICA condición del congelado: si el saliente muere antes de ese
+    /// plazo, su superficie se queda. Da igual QUIÉN lo mate (fin de archivo,
+    /// fin de la duración declarada del cue o Stop del propio cue): en los
+    /// tres casos hay un cruce vivo encima que necesita su imagen.</summary>
+    private readonly Dictionary<int, long> _handoverDeadlines = new();
+    /// <summary>Timer propio de cada congelado (no depende del de handover,
+    /// que TerminatePlayer desmonta al morir el saliente).</summary>
+    private readonly Dictionary<int, System.Threading.Timer> _thawTimers = new();
     private readonly Dictionary<int, bool> _playWhenReady = new();
     private readonly Dictionary<int, VideoPlayParams> _playParams = new();
     private readonly Dictionary<int, double> _volumes = new();
@@ -191,6 +217,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// cueId)). null = volver al modo clásico HWND.</summary>
     public void SetGpuLayerSurfaceProvider(Func<int, int, int, IVideoLayerSurface>? provider)
     {
+        // Cambio de modo del compositor: las superficies congeladas cuelgan de
+        // las viejas — soltarlas ANTES de cambiar de proveedor (si no, el slot
+        // quedaría reservado para siempre por un cue que ya no existe).
+        ReleaseFrozenSurfaces();
         _gpuSurfaces = provider;
         _gpuFailed = false;
     }
@@ -330,7 +360,29 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys).ToList())
             if (GetState(cueId) == MediaCueState.Playing)
                 Stop(cueId);
+        // STOP ALL / PANIC / corte duro: no queda cruce que servir — ninguna
+        // superficie congelada debe sobrevivir a un barrido general.
+        ReleaseFrozenSurfaces();
     }
+
+    /// <summary>Libera las superficies CONGELADAS (último fotograma del
+    /// saliente de un crossfade): la del cue dado, o TODAS con -1. Es el
+    /// camino explícito de STOP ALL, PANIC, fin/recarga de show y cambio de
+    /// modo del compositor — sin él una liberación diferida podría no llegar
+    /// nunca y dejar el pool sin superficies (auditoría 05).</summary>
+    public void ReleaseFrozenSurfaces(int cueId = -1)
+    {
+        if (cueId >= 0)
+        {
+            _freeze.Release(cueId);
+            return;
+        }
+        _freeze.ReleaseAll();
+    }
+
+    /// <summary>Congelados vivos (diagnóstico; los tests lo usan para probar
+    /// que ningún camino de cierre deja slots reservados).</summary>
+    public int FrozenSurfaceCount => _freeze.Count;
 
     public bool IsPlaying(int cueId) =>
         GetState(cueId) == MediaCueState.Playing &&
@@ -554,6 +606,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     public void Cleanup()
     {
         DiscardStandby();
+        // Congelados primero: sueltan sus sinks mientras los pipelines viven
+        ReleaseFrozenSurfaces();
+        foreach (int cueId in _handoverTimers.Keys.ToList())
+            if (_handoverTimers.Remove(cueId, out var h))
+                h.Dispose();
+        _handoverDeadlines.Clear();
         foreach (int cueId in _syncPlls.Keys.ToList())
             StopSyncPll(cueId);
         foreach (int cueId in _fadeTimers.Keys.ToList())
@@ -649,6 +707,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             EmitError(cueId, "Archivo no está en caché. Llama a Load() primero.");
             return;
         }
+
+        // El cue vuelve a salir: si tenía un fotograma congelado de un cruce
+        // anterior, ya no vale de nada (y su slot debe volver al pool)
+        ReleaseFrozenSurfaces(cueId);
 
         var p = _playParams.GetValueOrDefault(cueId, new VideoPlayParams());
         int layer = Math.Clamp(p.Layer, 0, 7);
@@ -967,6 +1029,37 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             SetState(otherId, MediaCueState.Stopped);
             TerminatePlayer(otherId);
         }
+        // Sin cruce, quien toma la pista la toma ENTERA: los fotogramas
+        // congelados de cruces anteriores en esa (salida, pista) sobran.
+        if (!handover)
+            ReleaseFrozenOnSlot(screen, layer);
+    }
+
+    /// <summary>Suelta los congelados de una (salida, pista) concreta.</summary>
+    private void ReleaseFrozenOnSlot(int screen, int layer)
+    {
+        var ids = _gpuPool
+            .Where(s => s.FrozenCueId is not null && s.Screen == screen && s.Layer == layer)
+            .Select(s => s.FrozenCueId!.Value)
+            .Concat(_hapPool
+                .Where(s => s.FrozenCueId is not null && s.Screen == screen && s.Layer == layer)
+                .Select(s => s.FrozenCueId!.Value))
+            .ToList();
+        foreach (int id in ids)
+            ReleaseFrozenSurfaces(id);
+    }
+
+    /// <summary>Plazo del CONGELADO si el cue muere con un cruce vivo encima
+    /// (fin de archivo, fin de su duración declarada o Stop del propio cue).
+    /// null = no hay cruce que servir → liberación normal.</summary>
+    private long? FreezeDeadlineFor(int cueId)
+    {
+        if (!_handoverDeadlines.TryGetValue(cueId, out long deadline))
+            return null;
+        if (Environment.TickCount64 >= deadline)
+            return null;   // el cruce ya terminó: no hay nada que sostener
+        Trace($"freeze: cue={cueId} muere DENTRO del cruce → congelar último fotograma");
+        return deadline;
     }
 
     // ------------------------------------------------------------------
@@ -1114,10 +1207,16 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     {
         if (_handoverTimers.Remove(cueId, out var prev))
             prev.Dispose();
+        _handoverDeadlines[cueId] =
+            Environment.TickCount64 + (long)(Math.Max(0.05, seconds) * 1000);
         var timer = new System.Threading.Timer(_ => Post(() =>
         {
             if (_handoverTimers.Remove(cueId, out var t))
                 t.Dispose();
+            _handoverDeadlines.Remove(cueId);
+            // El cruce acabó: si el saliente sigue vivo se retira, y si murió
+            // dentro del fundido se suelta su fotograma congelado.
+            ReleaseFrozenSurfaces(cueId);
             // OJO: cubre AMBOS motores — el saliente de un crossfade puede
             // ser un player HAP (antes solo se miraba _players y el HAP
             // quedaba vivo debajo del entrante para siempre)
@@ -1227,9 +1326,16 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         _playerSlots.Remove(cueId);
         if (_handoverTimers.Remove(cueId, out var handover))
             handover.Dispose();
+        // CONGELADO: ¿muere con un cruce vivo encima? La decisión se toma AQUÍ
+        // y no en los manejadores de fin, porque el saliente puede morir por
+        // tres caminos distintos (fin de archivo, fin de la duración declarada
+        // del cue vía Stop del controlador, o Stop directo) y en los tres hay
+        // un crossfade que sigue necesitando su imagen.
+        long? freezeUntil = FreezeDeadlineFor(cueId);
+        _handoverDeadlines.Remove(cueId);
         // Regla de mpv: el render context se libera ANTES que el core
         // (ReleaseGpuSlot hace el Detach; el pipeline del pool sobrevive)
-        ReleaseGpuSlot(cueId);
+        ReleaseGpuSlot(cueId, freezeUntil);
         if (_players.Remove(cueId, out var player))
             player.Dispose();
         // Motor HAP: parar hilos y liberar la sesión ANTES de soltar el slot
@@ -1238,9 +1344,34 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             Trace($"hap: terminate cue={cueId}");
             hap.Dispose();
-            ReleaseHapSlot(cueId);
+            ReleaseHapSlot(cueId, freezeUntil);
         }
     }
+
+    /// <summary>Programa el DESCONGELADO al vencer el plazo del cruce. Timer
+    /// propio: el del handover lo desmonta TerminatePlayer al morir el
+    /// saliente, así que no sirve para sostener la liberación diferida.</summary>
+    private void ScheduleThaw(int cueId, long deadlineMs)
+    {
+        if (_thawTimers.Remove(cueId, out var prev))
+            prev.Dispose();
+        int ms = (int)Math.Clamp(deadlineMs - Environment.TickCount64, 50, int.MaxValue);
+        _thawTimers[cueId] = new System.Threading.Timer(
+            _ => Post(() => ReleaseFrozenSurfaces(cueId)), null,
+            ms, System.Threading.Timeout.Infinite);
+    }
+
+    private void DisposeThawTimer(int cueId)
+    {
+        if (_thawTimers.Remove(cueId, out var timer))
+            timer.Dispose();
+    }
+
+    /// <summary>TOPE DE SEGURIDAD por tiempo: ningún congelado sobrevive a su
+    /// plazo. Se barre en cada petición de slot, así que la propia demanda de
+    /// superficies reclama las que se hubieran quedado atrás.</summary>
+    private void SweepExpiredFrozen() =>
+        _freeze.ReleaseExpired(Environment.TickCount64);
 
     // ------------------------------------------------------------------
     // Pool de pipelines GPU persistentes (auditoría 05)
@@ -1259,9 +1390,13 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     private GpuSlot AcquireGpuSlot(int cueId, int screen, int layer,
         int surfW, int surfH, IReadOnlyList<CanvasView>? views)
     {
+        SweepExpiredFrozen();
         string spec = GpuSpec(surfW, surfH, views);
+        // Un slot CONGELADO no está libre: repartirlo pisaría el fotograma
+        // que el crossfade todavía está mezclando.
         var slot = _gpuPool.FirstOrDefault(s =>
-            s.BusyCueId is null && s.Screen == screen && s.Layer == layer
+            s.BusyCueId is null && s.FrozenCueId is null
+            && s.Screen == screen && s.Layer == layer
             && s.Spec == spec);
         if (slot is null)
         {
@@ -1294,17 +1429,35 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// <summary>Suelta el slot del cue: Detach del render context (regla mpv:
     /// antes que el core) y sinks ocultos. El pipeline queda LIBRE en el pool
     /// — el interop jamás se desmonta por cue (esa era LA fuga de VRAM).
-    /// Si el Detach falla (hilo dañado), el pipeline se descarta entero.</summary>
-    private void ReleaseGpuSlot(int cueId)
+    /// Si el Detach falla (hilo dañado), el pipeline se descarta entero.
+    /// Con <paramref name="freezeUntilMs"/> el Detach ocurre igual (el core
+    /// muere ahora) pero los sinks NO se ocultan: la superficie se queda con
+    /// el último fotograma hasta ese plazo — CONGELADO del saliente.</summary>
+    private void ReleaseGpuSlot(int cueId, long? freezeUntilMs = null)
     {
         var slot = _gpuPool.FirstOrDefault(s => s.BusyCueId == cueId);
         if (slot is null)
             return;
-        Trace($"ReleaseGpuSlot cue={cueId} (detach)");
+        Trace($"ReleaseGpuSlot cue={cueId} (detach{(freezeUntilMs is null ? "" : ", congelado")})");
         bool ok = slot.Pipeline.DetachPlayer();
+        slot.BusyCueId = null;
+        if (ok && freezeUntilMs is long deadline)
+        {
+            slot.FrozenCueId = cueId;
+            _freeze.Freeze(cueId, deadline, () =>
+            {
+                DisposeThawTimer(cueId);
+                if (slot.FrozenCueId != cueId)
+                    return;
+                slot.FrozenCueId = null;
+                foreach (var s in slot.Sinks)
+                    s.ReleaseCue(cueId);
+            });
+            ScheduleThaw(cueId, deadline);
+            return;
+        }
         foreach (var s in slot.Sinks)
             s.ReleaseCue(cueId);
-        slot.BusyCueId = null;
         if (!ok)
         {
             _gpuPool.Remove(slot);
@@ -1423,9 +1576,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// mpv: SetSurface + SetFrameCopier + FrameRendered→InvalidateFrame.</summary>
     private HapSlot AcquireHapSlot(int cueId, int screen, int layer, int surfW, int surfH)
     {
+        SweepExpiredFrozen();
         string spec = $"{Math.Max(16, surfW)}x{Math.Max(16, surfH)}";
         var slot = _hapPool.FirstOrDefault(s =>
-            s.BusyCueId is null && s.Screen == screen && s.Layer == layer
+            s.BusyCueId is null && s.FrozenCueId is null
+            && s.Screen == screen && s.Layer == layer
             && s.Spec == spec);
         if (slot is null)
         {
@@ -1451,15 +1606,33 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     /// <summary>Suelta el slot HAP del cue: sink oculto y pipeline LIBRE en el
     /// pool (jamás se desmonta por cue — misma regla que ReleaseGpuSlot).
-    /// Llamar con el player YA parado (su sesión de texturas liberada).</summary>
-    private void ReleaseHapSlot(int cueId)
+    /// Llamar con el player YA parado (su sesión de texturas liberada).
+    /// Con <paramref name="freezeUntilMs"/>, el sink NO se oculta: la
+    /// superficie de presentación conserva el último fotograma dibujado
+    /// (el ring de texturas del cue sí muere) — CONGELADO del saliente.</summary>
+    private void ReleaseHapSlot(int cueId, long? freezeUntilMs = null)
     {
         var slot = _hapPool.FirstOrDefault(s => s.BusyCueId == cueId);
         if (slot is null)
             return;
+        slot.BusyCueId = null;
+        if (freezeUntilMs is long deadline)
+        {
+            Trace($"hap: congelado cue={cueId} (último fotograma en pantalla)");
+            slot.FrozenCueId = cueId;
+            _freeze.Freeze(cueId, deadline, () =>
+            {
+                DisposeThawTimer(cueId);
+                if (slot.FrozenCueId != cueId)
+                    return;
+                slot.FrozenCueId = null;
+                slot.Sink.ReleaseCue(cueId);
+            });
+            ScheduleThaw(cueId, deadline);
+            return;
+        }
         Trace($"hap: release slot cue={cueId}");
         slot.Sink.ReleaseCue(cueId);
-        slot.BusyCueId = null;
     }
 
     // ------------------------------------------------------------------

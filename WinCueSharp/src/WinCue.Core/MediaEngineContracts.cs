@@ -272,5 +272,12 @@ public interface IVideoEngine
     /// durante un crossfade. null = modo clásico. Default: no-op (fakes).</summary>
     void SetGpuLayerSurfaceProvider(Func<int, int, int, IVideoLayerSurface>? provider) { }
 
+    /// <summary>Libera las superficies CONGELADAS (el último fotograma del
+    /// saliente de un crossfade se mantiene en pantalla hasta que el cruce
+    /// acaba). cueId concreto, o -1 = todas. Camino EXPLÍCITO de STOP ALL,
+    /// PANIC, fin/recarga de show: una liberación diferida que no llegue
+    /// dejaría el pool de superficies sin slots. Default: no-op (fakes).</summary>
+    void ReleaseFrozenSurfaces(int cueId = -1) { }
+
     void Cleanup();
 }
