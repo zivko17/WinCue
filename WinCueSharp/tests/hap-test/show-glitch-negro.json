@@ -1,0 +1,17 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "A H.264 oscuro (arranque)",
+      "file_path": "xf-A-h264.mp4", "duration": 12.0,
+      "timeline_layer": 2, "post_wait": 2.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "B HAP claro — saliente que ACABA dentro del cruce",
+      "file_path": "xf-B-hap.mov", "duration": 4.0,
+      "timeline_layer": 2, "post_wait": 2.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 3, "type": "VIDEO", "number": "3", "name": "A H.264 entra fundiendo 4 s (del standby)",
+      "file_path": "xf-A-h264.mp4", "duration": 8.0, "fade_in": 4.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

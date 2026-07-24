@@ -1,0 +1,25 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "A H.264 (saliente)",
+      "file_path": "xf-A-h264.mp4", "duration": 12.0,
+      "timeline_layer": 2, "post_wait": 4.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 2, "type": "VIDEO", "number": "2", "name": "B H.264 entra fundiendo 2 s",
+      "file_path": "xf-B-h264.mp4", "duration": 12.0, "fade_in": 2.0,
+      "timeline_layer": 2, "post_wait": 4.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 3, "type": "VIDEO", "number": "3", "name": "A H.264 entra fundiendo 2 s",
+      "file_path": "xf-A-h264.mp4", "duration": 12.0, "fade_in": 2.0,
+      "timeline_layer": 2, "post_wait": 4.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 4, "type": "VIDEO", "number": "4", "name": "B H.264 entra fundiendo 2 s",
+      "file_path": "xf-B-h264.mp4", "duration": 12.0, "fade_in": 2.0,
+      "timeline_layer": 2, "post_wait": 4.0,
+      "continue_mode": "AUTO_CONTINUE" },
+    { "id": 5, "type": "VIDEO", "number": "5", "name": "A H.264 entra fundiendo 2 s (fin)",
+      "file_path": "xf-A-h264.mp4", "duration": 4.0, "fade_in": 2.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

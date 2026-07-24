@@ -786,3 +786,115 @@ está oculta, también se cae al modo clásico.
 contra la salida real muestra el MISMO fotograma compuesto, mezcla de pistas
 incluida. Tests que quedan cubiertos sin GPU: `GetProgramVideo` devuelve cue y
 salida (`TransportAndChainTests`).
+
+## Fallo C — el «glitch en negro» al cruzar dos vídeos
+
+Reportado en directo: «al hacer un crossfade con dos vídeos en la salida ha
+hecho un extraño cuando se estaban mezclando, como un glitch en negro».
+
+### Cómo se midió (método reproducible)
+
+Medir un fundido a ojo no vale. Se generó media de MEDIDA
+(`tests/hap-test/generar-crossfade.ps1`): dos clips 1080p30 de **luminancia
+plana y constante** —A gris oscuro (YAVG 66 en la salida) y B gris claro
+(YAVG 197)— con un cuadrado pequeño en movimiento (área y color fijos: da
+movimiento visible sin mover la media). Con eso, **un crossfade correcto es una
+rampa limpia entre las dos mesetas**, y cualquier cosa que se salga —un bajón
+por debajo de la meseta baja (negro mezclándose) o una rampa de 0 s (corte
+seco)— es el fallo, con número.
+
+La salida real (monitor 2, pantalla completa, compositor GPU) se captura por
+**Desktop Duplication** a 60 fps y sin pérdidas
+(`ffmpeg -filter_complex ddagrab=output_idx=1:framerate=60,hwdownload,format=bgra -c:v ffv1`)
+y se saca la luma de CADA fotograma con `signalstats` (`lavfi.signalstats.YAVG`).
+Los shows corren desatendidos con `--stress <show> --stress-loops 1` y
+`WINCUE_MPV_LOG=<dir>` para cruzar la captura con `engine-trace.log`, que ahora
+traza también el **z y la opacidad de cada superficie**
+(`VideoOutputWindow.Trace`) — sin eso el fallo es invisible desde fuera.
+
+Shows de verificación: `tests/hap-test/show-glitch-hap.json` (HAP↔HAP),
+`show-glitch-h264.json` (H.264↔H.264), `show-glitch-mixto.json` (HAP↔H.264,
+alternando) y `show-glitch-negro.json` (corte seco + saliente que acaba dentro
+del cruce). Cuatro crossfades de 2 s por show.
+
+### Causa RAÍZ
+
+**El z (orden de apilado) de la superficie del compositor se fijaba cuando el
+cue TOMABA la superficie, no cuando SALÍA AL AIRE.** Con la precarga en
+STANDBY, un cue toma su superficie mucho antes del GO; si otro vídeo arranca
+entre medias, ese otro coge un z MAYOR y el cue precargado sale al aire
+**DEBAJO** de él. Resultado: el entrante funde su opacidad de 0 a 1 *tapado*
+por el saliente —**el crossfade no se ve**— y la imagen pega un **salto seco**
+cuando el saliente muere (handover: fundido + 0,25 s).
+
+Evidencia directa del `engine-trace.log` (antes del arreglo):
+
+```
+AssignCue cue=3 layer=2 z=500002           ← standby del cue 3 (aún no ha salido)
+AssignCue cue=2 layer=2 z=500003           ← el cue 2 (HAP) SALE con z MAYOR
+StartPlayback cue=3 ... standby=3          ← promoción del standby
+SetCueOpacity cue=3 op=1 fade=2 z=500002   ← funde 0→1 POR DEBAJO del cue 2
+```
+
+Y en la captura, ese cruce: `197 197 … 197 | 66 66 …` — **rampa de 0,00 s** (un
+solo fotograma) donde debía haber 2 s.
+
+Segundo síntoma de la misma familia: **el standby del cue que se dispara se
+descartaba justo antes de dispararlo**. `GoCue` hacía `SetPlayhead(idx + 1)`
+ANTES de `Trigger(idx)`, y mover el playhead prepara el standby del SIGUIENTE
+cue, lo que **descarta el del actual**. El GO instantáneo no se promovía
+JAMÁS: cada GO pagaba la carga entera de mpv y el entrante llegaba al cruce con
+la superficie **sin pintar**. En un corte seco entre dos vídeos de la misma
+pista eso se medía como **un fotograma de NEGRO PURO** (YAVG 16) entre los dos
+clips: `66 | 16 | 197`.
+
+**La hipótesis de partida —la rampa de opacidad arranca antes del primer
+fotograma y se mezcla NEGRO— queda DESCARTADA como origen del bajón**: un
+`D3DImage` sin `AddDirtyRect` todavía no dibuja NADA (no dibuja negro), así que
+una superficie sin primer fotograma no aporta negro a la mezcla. Medido: en
+HAP↔HAP y H.264↔H.264 las rampas salen limpias, sin un solo fotograma por
+debajo de las mesetas, aun llegando el primer fotograma con retraso.
+
+### Arreglo elegido
+
+1. **Al aire = al frente.** `IShowView.RaiseVideoCueToFront(cueId)` →
+   `VideoOutputWindow.RaiseCueToFront`: el controlador sube la superficie del
+   cue al frente de su pista **en el GO**, justo ANTES de tocar su opacidad
+   (para que no se componga ni un fotograma con el orden viejo). El z de
+   `AssignCue` queda como valor inicial; el definitivo lo pone el GO.
+2. **Disparar antes de avanzar.** `GoCue` hace ahora `Trigger(idx)` y DESPUÉS
+   `SetPlayhead(idx + 1)`: el cue sale al aire con **su** standby (primer
+   fotograma ya pintado en la superficie) y el playhead avanza a tiempo de
+   preparar el siguiente. Recupera el GO instantáneo, que no se promovía nunca.
+
+Se descartó *retrasar la rampa hasta el `FrameReady` del entrante* (opción (a)
+del encargo): no arregla el corte seco (donde no hay rampa), retrasaría el
+cruce, y la medida demuestra que una superficie sin pintar no aporta negro. Y
+se deja apuntado el **STANDBY real del motor HAP** (opción (b): demux + primer
+fotograma decodificado y RENDERIZADO, en pausa): sería lo más fiel al resto del
+sistema y quitaría del GO los 4-70 ms de demux medidos, pero con los dos
+arreglos de arriba el cruce ya sale limpio y medido.
+
+### Antes / después (medido en la salida real, 60 fps)
+
+| Escenario (4 cruces de 2 s por show) | Antes | Después |
+|---|---|---|
+| HAP↔HAP (`show-glitch-hap.json`) | 4 rampas limpias 1,93-1,97 s | igual (sin regresión) |
+| H.264↔H.264 (`show-glitch-h264.json`) | 4 rampas limpias 1,95-1,98 s | igual (sin regresión) |
+| HAP↔H.264 (`show-glitch-mixto.json`) | **1 de los 4 cruces: rampa de 0,00 s** (corte seco 197→66), reproducido 2/2 | **4 rampas de 1,92-1,97 s** |
+| Corte seco entre dos vídeos (`show-glitch-negro.json`) | **1 fotograma de NEGRO PURO** (YAVG 16) entre clips | **0 fotogramas negros** (66 → 197 directo) |
+| Bajones por debajo de las mesetas durante los cruces | 0 | 0 |
+
+Tests sin GPU: `CrossfadeStackTests` (4) — el cue sube al frente en el GO, el
+entrante del crossfade sube ANTES de arrancar su rampa, los cues sin fundido
+también suben, y el GO no descarta el standby del cue que dispara. Suite
+completa: 450 en verde, 0 warnings.
+
+### Límite conocido que queda
+
+Si el **saliente acaba su duración DENTRO del fundido**, desaparece de golpe y
+la mezcla se queda en `opacidad_entrante × entrante` sobre negro (medido: la
+luma cae a 46 con las mesetas en 66 y 197). Es la semántica actual y deliberada
+del handover (`SuppressVisualFadeOut`: «su fin lo retira»), no una regresión —
+pero en directo se ve como un oscurecimiento. Si molesta, la solución es
+congelar el último fotograma del saliente hasta que acabe el cruce.
