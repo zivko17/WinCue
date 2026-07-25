@@ -29,8 +29,8 @@ public partial class MainWindow : Window, IShowView
     private readonly DispatcherTimer _statusTimer;
 
     // Mini-monitores PVW/PGM en vivo (mpv embebido y silenciado)
-    private readonly LiveMonitorControl _pvw = new("PVW", Color.FromRgb(0x27, 0x86, 0x5a));
-    private readonly LiveMonitorControl _pgm = new("PGM", Color.FromRgb(0xc0, 0x39, 0x2b));
+    private readonly LiveMonitorControl _pvw = new("PVW", Theme.GoDeep);
+    private readonly LiveMonitorControl _pgm = new("PGM", Theme.Pgm);
     private DispatcherTimer? _pgmTimer;
 
     // VU estéreo junto a cada monitor: PGM = programa, PVW = audición local
@@ -182,7 +182,8 @@ public partial class MainWindow : Window, IShowView
             Loc.T("Nivel L/R del PROGRAMA. Por loopback mide TODO lo que sale del dispositivo (cues, audio de los vídeos —incluidos los que van con AUDIO ESPEJO por el rack—, sistema); con ASIO o si el loopback no está disponible, mide la mezcla interna de cues. El strip MASTER del panel Audio dice cuál de las dos.",
                   "L/R level of PROGRAM. Via loopback it measures EVERYTHING leaving the device (cues, video audio —including videos whose MIRRORED AUDIO goes through the rack—, system); with ASIO or if loopback isn't available, it measures the internal cue mix. The MASTER strip in the Audio panel says which one.")));
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
-            Loc.T("Nivel L/R de la AUDICIÓN local (🎧)", "L/R level of the local AUDITION (🎧)")));
+            Loc.T($"Nivel L/R de la AUDICIÓN local ({Icons.Headphones})",
+                  $"L/R level of the local AUDITION ({Icons.Headphones})")));
         _pvw.Clear("—");
         _pgm.Clear(Loc.T("NEGRO", "BLACK"));
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -295,7 +296,7 @@ public partial class MainWindow : Window, IShowView
         if (cue is null || cue.FilePath.Length == 0 || cue.Type != CueType.Video)
         {
             if (cue is { Type: CueType.Audio, FilePath.Length: > 0 })
-                _pvw.Clear(Loc.T("♪ AUDIO (onda en el inspector)", "♪ AUDIO (waveform in the inspector)"));
+                _pvw.Clear($"{Icons.Audio} {Loc.T("AUDIO (onda en el inspector)", "AUDIO (waveform in the inspector)")}");
             else if (_pvw.CurrentPath.Length > 0 || cue is null)
                 _pvw.Clear("—");
             return;
@@ -355,17 +356,17 @@ public partial class MainWindow : Window, IShowView
         _statusHistory.Add($"[{DateTime.Now:HH:mm:ss}] {message}");
         if (_statusHistory.Count > 300)
             _statusHistory.RemoveAt(0);
-        if (message.Contains("[AVISO]") || message.Contains('⚠')
+        if (message.Contains("[AVISO]") || message.Contains(Icons.Warning)
             || message.Contains("Error", StringComparison.OrdinalIgnoreCase)
             || message.Contains("falló", StringComparison.OrdinalIgnoreCase))
         {
-            LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
+            LogButton.Foreground = Theme.StandbyBrush;
         }
     }
 
     private void OnShowStatusLog(object sender, RoutedEventArgs e)
     {
-        LogButton.Foreground = new SolidColorBrush(Color.FromRgb(0x9a, 0x9a, 0x9a));
+        LogButton.Foreground = Theme.Solid(Theme.TextMutedAlt);
 
         var text = new TextBox
         {
@@ -374,8 +375,8 @@ public partial class MainWindow : Window, IShowView
                 : Loc.T("(sin mensajes todavía)", "(no messages yet)"),
             IsReadOnly = true,
             TextWrapping = TextWrapping.Wrap,
-            Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Background = Theme.WindowBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
             BorderThickness = new Thickness(0),
             Padding = new Thickness(8),
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
@@ -389,8 +390,8 @@ public partial class MainWindow : Window, IShowView
             Child = new Border
             {
                 Width = 560, Height = 320,
-                Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+                Background = Theme.WindowBgBrush,
+                BorderBrush = Theme.BorderBrush,
                 BorderThickness = new Thickness(1),
                 Child = text,
             },
@@ -447,7 +448,7 @@ public partial class MainWindow : Window, IShowView
         int missing = _controller?.MissingMediaCount() ?? 0;
         RelocateButton.Visibility = missing > 0 ? Visibility.Visible : Visibility.Collapsed;
         if (missing > 0)
-            RelocateButton.Content = $"🔗 Relocalizar ({missing})";
+            RelocateButton.Content = $"{Icons.Relocate} Relocalizar ({missing})";
     }
 
     private void OnRelocateMedia(object sender, RoutedEventArgs e)
@@ -485,7 +486,7 @@ public partial class MainWindow : Window, IShowView
     }
 
     public void UpdateTransport(bool paused) =>
-        PauseButton.Content = paused ? "▶ REANUDAR" : "⏸ PAUSA";
+        PauseButton.Content = paused ? $"{Icons.Play} REANUDAR" : $"{Icons.Pause} PAUSA";
 
     public void UpdateCountdown(double? secondsRemaining)
     {
@@ -753,7 +754,7 @@ public partial class MainWindow : Window, IShowView
     public void SetOutputContent(string? videoName) =>
         TallyLabel.Text = videoName is null
             ? Loc.T("SALIDA: NEGRO", "OUTPUT: BLACK")
-            : Loc.T($"SALIDA: ▣ {videoName}", $"OUTPUT: ▣ {videoName}");
+            : Loc.T($"SALIDA: {Icons.Video} {videoName}", $"OUTPUT: {Icons.Video} {videoName}");
 
     public void SetOutputDetails(string details)
     {
@@ -914,22 +915,22 @@ public partial class MainWindow : Window, IShowView
                 if (c.Armed)
                     total += c.PreWait + Math.Max(0.0, c.Duration);
             double remaining = Math.Max(0.0, total - elapsed);
-            ShowClockMode.Text = Loc.T("SHOW · RESTANTE ▾", "SHOW · REMAINING ▾");
+            ShowClockMode.Text = $"{Loc.T("SHOW · RESTANTE", "SHOW · REMAINING")} {Icons.Expanded}";
             ShowClockText.Text = FormatClock(remaining);
             // En modo SHOW el reloj va en el verde "armado" de la salida
             // (mismo #1e7e34 aclarado para leerse sobre fondo oscuro);
             // agotado sigue en rojo, y en EDIT queda el ámbar de trabajo.
             ShowClockText.Foreground = remaining <= 0.0 && _showStartTicks is not null
-                ? new SolidColorBrush(Color.FromRgb(0xc0, 0x39, 0x2b))
+                ? Theme.PgmBrush
                 : ModeToggle.IsChecked == true
-                    ? new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71))
-                    : new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00));
+                    ? Theme.GoBrush
+                    : Theme.StandbyBrush;
         }
         else
         {
-            ShowClockMode.Text = Loc.T("SHOW · TRANSCURRIDO ▾", "SHOW · ELAPSED ▾");
+            ShowClockMode.Text = $"{Loc.T("SHOW · TRANSCURRIDO", "SHOW · ELAPSED")} {Icons.Expanded}";
             ShowClockText.Text = FormatClock(elapsed);
-            ShowClockText.Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71));
+            ShowClockText.Foreground = Theme.GoBrush;
         }
     }
 
@@ -939,7 +940,7 @@ public partial class MainWindow : Window, IShowView
     private void OnShowMode(object sender, RoutedEventArgs e)
     {
         ModeToggle.Content = Loc.T("Modo: SHOW", "Mode: SHOW");
-        ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0x1e, 0x7e, 0x34));
+        ModeToggle.Background = Theme.Solid(Theme.GoButton);
         ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
         BottomTabs.SelectedIndex = 0;   // en SHOW, abajo SIEMPRE el timeline
@@ -966,7 +967,7 @@ public partial class MainWindow : Window, IShowView
             return;
         }
         ModeToggle.Content = Loc.T("Modo: EDIT", "Mode: EDIT");
-        ModeToggle.Background = new SolidColorBrush(Color.FromRgb(0xc9, 0xa2, 0x27));
+        ModeToggle.Background = Theme.GoldBrush;
         ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
         UpdateShowClock();   // el reloj vuelve al ámbar de edición
@@ -981,14 +982,15 @@ public partial class MainWindow : Window, IShowView
         {
             VideoOutButton.Background = Brushes.Black;
             VideoOutButton.Foreground = Brushes.Red;
-            VideoOutButton.Content = "⬛ BLACKOUT ▾";
+            VideoOutButton.Content = $"{Icons.BlackFrame} BLACKOUT {Icons.Expanded}";
             return;
         }
         VideoOutButton.Foreground = Brushes.White;
-        VideoOutButton.Content = Loc.T("🖵 Salida vídeo ▾", "🖵 Video output ▾");
-        VideoOutButton.Background = new SolidColorBrush(active
-            ? Color.FromRgb(0x1e, 0x7e, 0x34)
-            : Color.FromRgb(0x7e, 0x1e, 0x1e));
+        VideoOutButton.Content =
+            $"{Icons.VideoOutput} {Loc.T("Salida vídeo", "Video output")} {Icons.Expanded}";
+        VideoOutButton.Background = Theme.Solid(active
+            ? Theme.GoButton
+            : Theme.PanicButton);
     }
 
     private void SetEditingEnabled(bool enabled)
@@ -1321,7 +1323,7 @@ public partial class MainWindow : Window, IShowView
         menu.Items.Add(Mi(Loc.T("Guardar como…", "Save as…"), "",
             () => OnSaveShowAs(sender, e)));
         menu.Items.Add(new Separator());
-        menu.Items.Add(Mi(Loc.T("📦 Exportar show portable…", "📦 Export portable show…"), "",
+        menu.Items.Add(Mi($"{Icons.Package} {Loc.T("Exportar show portable…", "Export portable show…")}", "",
             () => OnExportPortable(sender, e)));
         menu.PlacementTarget = (Button)sender;
         menu.Placement = System.Windows.Controls.Primitives.PlacementMode.Bottom;
@@ -1456,7 +1458,7 @@ public partial class MainWindow : Window, IShowView
                 matches++;
         }
         if (q.Length > 0)
-            FlashStatus(Loc.T($"🔍 {matches} cue(s) coinciden con «{q}»", $"🔍 {matches} cue(s) match «{q}»"));
+            FlashStatus($"{Icons.Search} {Loc.T($"{matches} cue(s) coinciden con «{q}»", $"{matches} cue(s) match «{q}»")}");
     }
 
     private void OnSearchKeyDown(object sender, KeyEventArgs e)
@@ -1558,23 +1560,23 @@ public partial class MainWindow : Window, IShowView
         if (cue is not null)
         {
             bool running = _controller.RunningCueIds.Contains(cue.Id);
-            menu.Items.Add(Mi("▶ Disparar (sin mover playhead)", "",
+            menu.Items.Add(Mi($"{Icons.Play} Disparar (sin mover playhead)", "",
                 () => _controller.TriggerCueId(cue.Id)));
             if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
             {
-                menu.Items.Add(Mi(Loc.T("🎧 Audición (cascos)", "🎧 Audition (headphones)"), "",
+                menu.Items.Add(Mi($"{Icons.Headphones} {Loc.T("Audición (cascos)", "Audition (headphones)")}", "",
                     () => _controller.AuditionToggle(row)));
-                menu.Items.Add(Mi("𝄞 Normalizar sonoridad (−16 LUFS)", "",
+                menu.Items.Add(Mi($"{Icons.Clef} Normalizar sonoridad (−16 LUFS)", "",
                     () => NormalizeLoudness(selRows), edit));
             }
             // Solo vídeos aún no-HAP; en modo SHOW queda deshabilitado (la
             // conversión es tarea de preparación, no de directo)
             if (MainController.IsHapConvertible(cue))
-                menu.Items.Add(Mi(Loc.T("🎞 Convertir a HAP (motor propio)", "🎞 Convert to HAP (native engine)"), "",
+                menu.Items.Add(Mi($"{Icons.Film} {Loc.T("Convertir a HAP (motor propio)", "Convert to HAP (native engine)")}", "",
                     () => _controller.ConvertCueToHap(row), edit));
-            menu.Items.Add(Mi("⏸ Pausar / reanudar", "Ctrl+P",
+            menu.Items.Add(Mi($"{Icons.Pause} Pausar / reanudar", "Ctrl+P",
                 () => _controller.OnPauseCueToggle(row), running && cue.IsMedia()));
-            menu.Items.Add(Mi("■ Detener", "S",
+            menu.Items.Add(Mi($"{Icons.Stop} Detener", "S",
                 () => _controller.OnStopSelected(row), running));
             menu.Items.Add(new Separator());
 
@@ -1583,14 +1585,14 @@ public partial class MainWindow : Window, IShowView
                 () => _controller.PasteCues(row), edit));
             menu.Items.Add(Mi("Duplicar", "Ctrl+D",
                 () => _controller.DuplicateCues(selRows), edit));
-            menu.Items.Add(Mi(Loc.T("🗑 Eliminar", "🗑 Delete"), "Supr", () =>
+            menu.Items.Add(Mi($"{Icons.Delete} {Loc.T("Eliminar", "Delete")}", "Supr", () =>
             {
                 foreach (int r in selRows.OrderByDescending(i => i))
                     _controller.OnDeleteCue(r);
             }, edit));
             menu.Items.Add(new Separator());
 
-            menu.Items.Add(Mi(Loc.T("▸ Agrupar selección", "▸ Group selection"), "Ctrl+G",
+            menu.Items.Add(Mi($"{Icons.Group} {Loc.T("Agrupar selección", "Group selection")}", "Ctrl+G",
                 () => _controller.OnGroupSelected(selRows), edit));
             if (cue.Type == CueType.Group)
             {
@@ -1601,18 +1603,22 @@ public partial class MainWindow : Window, IShowView
             }
             menu.Items.Add(new Separator());
 
-            menu.Items.Add(Mi("✎ Renombrar", "F2", () =>
+            menu.Items.Add(Mi($"{Icons.Edit} Renombrar", "F2", () =>
             {
                 BottomTabs.SelectedIndex = 1;   // pestaña del inspector
                 Inspector.FocusName();
             }, edit));
             menu.Items.Add(ColorSubmenu(
                 color => CommitRowField(row, "color", color), edit));
-            menu.Items.Add(Mi(cue.Armed ? "✕ Desarmar" : Loc.T("✓ Armar", "✓ Arm"), "",
+            menu.Items.Add(Mi(cue.Armed
+                    ? $"{Icons.Cross} Desarmar"
+                    : $"{Icons.Check} {Loc.T("Armar", "Arm")}", "",
                 () => CommitRowField(row, "armed", !cue.Armed), edit));
-            menu.Items.Add(Mi(cue.Flagged ? Loc.T("⚐ Quitar flag", "⚐ Clear flag") : Loc.T("⚑ Poner flag", "⚑ Set flag"), "",
+            menu.Items.Add(Mi(cue.Flagged
+                    ? $"{Icons.FlagOff} {Loc.T("Quitar flag", "Clear flag")}"
+                    : $"{Icons.Flag} {Loc.T("Poner flag", "Set flag")}", "",
                 () => CommitRowField(row, "flagged", !cue.Flagged), edit));
-            menu.Items.Add(Mi("№ Renumerar todos (1..n)", "",
+            menu.Items.Add(Mi($"{Icons.Number} Renumerar todos (1..n)", "",
                 () => _controller.RenumberCues(), edit));
             menu.Items.Add(new Separator());
         }
@@ -1623,11 +1629,11 @@ public partial class MainWindow : Window, IShowView
         }
 
         menu.Items.Add(InsertSubmenu(row, edit));
-        menu.Items.Add(Mi("＋ Importar archivos…", "",
+        menu.Items.Add(Mi($"{Icons.Import} Importar archivos…", "",
             () => OnImportFiles(this, new RoutedEventArgs()), edit));
         // Acción de show: preparar TODOS los vídeos para el motor propio
         if (_model.Cues.Any(MainController.IsHapConvertible))
-            menu.Items.Add(Mi(Loc.T("🎞 Convertir todos los vídeos a HAP", "🎞 Convert all videos to HAP"), "",
+            menu.Items.Add(Mi($"{Icons.Film} {Loc.T("Convertir todos los vídeos a HAP", "Convert all videos to HAP")}", "",
                 () => _controller.ConvertAllVideosToHap(), edit));
         return menu;
     }
@@ -1637,11 +1643,11 @@ public partial class MainWindow : Window, IShowView
         var sub = new MenuItem { Header = "Insertar cue", IsEnabled = enabled };
         foreach (var (label, type) in new (string, CueType)[]
         {
-            ("♪ Audio", CueType.Audio), ("▣ Vídeo", CueType.Video),
-            ("⏱ Wait", CueType.Wait), ("◢ Fade", CueType.Fade),
-            ("▶ Start", CueType.Start), ("■ Stop", CueType.Stop),
-            ("⚙ Script", CueType.Script), ("✎ Memo", CueType.Memo),
-            ("▸ Grupo", CueType.Group),
+            ($"{Icons.Audio} Audio", CueType.Audio), ($"{Icons.Video} Vídeo", CueType.Video),
+            ($"{Icons.Wait} Wait", CueType.Wait), ($"{Icons.Fade} Fade", CueType.Fade),
+            ($"{Icons.Start} Start", CueType.Start), ($"{Icons.Stop} Stop", CueType.Stop),
+            ($"{Icons.Script} Script", CueType.Script), ($"{Icons.Memo} Memo", CueType.Memo),
+            ($"{Icons.Group} Grupo", CueType.Group),
         })
         {
             var t = type;
@@ -1703,19 +1709,19 @@ public partial class MainWindow : Window, IShowView
         int done = 0;
         foreach (var cue in cues)
         {
-            FlashStatus($"𝄞 Midiendo sonoridad de «{cue.Name}»… ({++done}/{cues.Count})");
+            FlashStatus($"{Icons.Clef} Midiendo sonoridad de «{cue.Name}»… ({++done}/{cues.Count})");
             double? lufs = await System.Threading.Tasks.Task.Run(
                 () => MediaImporter.MeasureLufs(cue.FilePath));
             if (lufs is null)
             {
-                FlashStatus($"𝄞 «{cue.Name}»: no se pudo medir (¿ffmpeg en PATH?)");
+                FlashStatus($"{Icons.Clef} «{cue.Name}»: no se pudo medir (¿ffmpeg en PATH?)");
                 continue;
             }
             double gain = Math.Clamp(Math.Round(target - lufs.Value, 1), -24.0, 12.0);
             int row = _model.IndexOfId(cue.Id);
             if (row >= 0)
                 CommitRowField(row, "gain_db", gain);
-            FlashStatus($"𝄞 «{cue.Name}»: {lufs:0.1} LUFS → ganancia {gain:+0.0;-0.0} dB");
+            FlashStatus($"{Icons.Clef} «{cue.Name}»: {lufs:0.1} LUFS → ganancia {gain:+0.0;-0.0} dB");
         }
     }
 
@@ -1918,7 +1924,7 @@ public partial class MainWindow : Window, IShowView
         {
             _gotoBuffer += c;
             _gotoBufferTicks = System.Diagnostics.Stopwatch.GetTimestamp();
-            FlashStatus($"Ir a cue: {_gotoBuffer}▌  (Enter salta · Retroceso borra)");
+            FlashStatus($"Ir a cue: {_gotoBuffer}{Icons.Bar}  (Enter salta · Retroceso borra)");
             e.Handled = true;
             return true;
         }
@@ -1930,7 +1936,7 @@ public partial class MainWindow : Window, IShowView
             case Key.Back:
                 _gotoBuffer = _gotoBuffer[..^1];
                 FlashStatus(_gotoBuffer.Length > 0
-                    ? $"Ir a cue: {_gotoBuffer}▌" : "");
+                    ? $"Ir a cue: {_gotoBuffer}{Icons.Bar}" : "");
                 e.Handled = true;
                 return true;
             case Key.Enter:
@@ -2014,15 +2020,15 @@ public partial class MainWindow : Window, IShowView
         public string Title => $"{_info.Number} · {_info.Name}";
 
         public string TimeText => _info.PreWaitRemaining is double p
-            ? $"⏳ espera −{p:0.0}s"
+            ? $"{Icons.Hourglass} espera −{p:0.0}s"
             : _info.Remaining is double r
                 ? $"-{TimeSpan.FromSeconds(r):m\\:ss\\.f}"
                 : $"{TimeSpan.FromSeconds(_info.Elapsed):m\\:ss\\.f}";
 
         /// <summary>Ámbar durante el pre_wait, verde reproduciendo.</summary>
         public Brush TimeBrush => _info.PreWaitRemaining is not null
-            ? new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00))
-            : new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71));
+            ? Theme.StandbyBrush
+            : Theme.GoBrush;
 
         public double Fraction => _info.Fraction ?? 0.0;
 

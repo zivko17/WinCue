@@ -46,8 +46,8 @@ public sealed class InspectorPanel : ContentControl
 
     private readonly TabControl _tabs = new()
     {
-        Background = new SolidColorBrush(Color.FromRgb(0x25, 0x25, 0x26)),
-        BorderBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
+        Background = Theme.PanelBgBrush,
+        BorderBrush = Theme.Solid(Theme.Divider),
     };
 
     private Cue? _cue;
@@ -67,12 +67,12 @@ public sealed class InspectorPanel : ContentControl
     {
         FontWeight = FontWeights.Bold,
         Margin = new Thickness(8, 6, 8, 2),
-        Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)),
+        Foreground = Theme.WarnBrush,
     };
 
     // Visor de edición (fotograma de referencia para trim y geometría)
     private readonly LiveMonitorControl _editPreview =
-        new(Loc.T("EDICIÓN", "EDITING"), Color.FromRgb(0xe8, 0xa2, 0x00));
+        new(Loc.T("EDICIÓN", "EDITING"), Theme.Warn);
     private readonly StackPanel _previewHost = new()
     {
         Width = 280,
@@ -84,7 +84,7 @@ public sealed class InspectorPanel : ContentControl
     {
         // Marco AZUL = canvas de salida: mpv recorta exactamente en ese borde,
         // así que lo que quede fuera del marco es lo que se pierde en la salida.
-        _editPreview.BorderBrush = new SolidColorBrush(Color.FromRgb(0x2a, 0x6f, 0xb0));
+        _editPreview.BorderBrush = Theme.Solid(Theme.Blue);
         _editPreview.BorderThickness = new Thickness(2);
         _editPreview.Height = 176;   // vídeo ≈ 16:9 dentro del panel de 280 px
 
@@ -94,7 +94,7 @@ public sealed class InspectorPanel : ContentControl
             Text = Loc.T("El marco azul es el CANVAS de salida: lo que quede fuera se recorta. Arrastra el trim para ver el fotograma de corte.",
                    "The blue frame is the output CANVAS: whatever falls outside is cropped. Drag the trim to see the cut frame."),
             FontSize = 10,
-            Foreground = Brushes.Gray,
+            Foreground = Theme.TextNoteBrush,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 0),
         });
@@ -128,7 +128,7 @@ public sealed class InspectorPanel : ContentControl
             _cue is null ? null : SpectrumProvider?.Invoke(_cue.Id);
         _eqEditor.GainReductionProvider = () =>
             _cue is null ? 0f : GainReductionProvider?.Invoke(_cue.Id) ?? 0f;
-        _audioTab = Tab("🔊 Audio", BuildAudioTab());
+        _audioTab = Tab($"{Icons.Volume} Audio", BuildAudioTab());
         _tabs.Items.Add(_audioTab);
 
         IsEnabled = false;   // sin cue seleccionado
@@ -301,7 +301,7 @@ public sealed class InspectorPanel : ContentControl
         ColorSwatches(cols[0]);
         var armedRow = ChkRow(cols[0]);
         Chk(armedRow, "armed", Loc.T("Armado", "Armed"), c => c.Armed);
-        Chk(armedRow, "flagged", "⚑ Flag", c => c.Flagged);
+        Chk(armedRow, "flagged", $"{Icons.Flag} Flag", c => c.Flagged);
         TxtMultiline(cols[0], "notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
             c => c.Notes);
 
@@ -396,7 +396,7 @@ public sealed class InspectorPanel : ContentControl
     private readonly TextBlock _fadeWarn = new()
     {
         // Ámbar de aviso — el mismo tono del resto de la app; discreto
-        Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)),
+        Foreground = Theme.WarnBrush,
         TextWrapping = TextWrapping.Wrap,
         MaxWidth = 280,
         FontSize = 11,
@@ -512,13 +512,13 @@ public sealed class InspectorPanel : ContentControl
         {
             Content = Loc.T("Superficie completa — llena el canvas", "Full surface — fills the canvas"),
             GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Foreground = Theme.TextPrimaryBrush,
         };
         _rbCustom = new RadioButton
         {
             Content = Loc.T("Posición manual — escala, posición y giro", "Manual position — scale, position and rotation"),
             GroupName = "geo_mode_grp", Margin = new Thickness(0, 2, 0, 2),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Foreground = Theme.TextPrimaryBrush,
         };
         _rbFull.Checked += (_, _) => OnGeoModeChanged(false);
         _rbCustom.Checked += (_, _) => OnGeoModeChanged(true);
@@ -546,7 +546,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = Loc.T("Rotación:", "Rotation:"), Width = 112,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         foreach (int deg in new[] { 0, 90, 180, 270 })
         {
@@ -554,8 +554,8 @@ public sealed class InspectorPanel : ContentControl
             {
                 Content = $"{deg}°", Width = 46, Tag = deg,
                 Margin = new Thickness(0, 0, 4, 0),
-                Background = new SolidColorBrush(Color.FromRgb(0x3c, 0x3c, 0x3c)),
-                Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+                Background = Theme.ButtonBgBrush,
+                Foreground = Theme.TextPrimaryBrush,
             };
             tb.Click += (_, _) =>
             {
@@ -569,9 +569,9 @@ public sealed class InspectorPanel : ContentControl
 
         var btnRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
-        var btnCenter = new Button { Content = Loc.T("⌖ Centrar", "⌖ Center"), Padding = new Thickness(10, 4, 10, 4) };
+        var btnCenter = new Button { Content = $"{Icons.Target} {Loc.T("Centrar", "Center")}", Padding = new Thickness(10, 4, 10, 4) };
         var btnReset = new Button
-        { Content = Loc.T("↺ Restablecer", "↺ Reset"), Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
+        { Content = $"{Icons.Reset} {Loc.T("Restablecer", "Reset")}", Padding = new Thickness(10, 4, 10, 4), Margin = new Thickness(6, 0, 0, 0) };
         btnCenter.Click += (_, _) =>
         {
             Commit("translate_x", 0.0);
@@ -597,7 +597,7 @@ public sealed class InspectorPanel : ContentControl
         compRow.Children.Add(new TextBlock
         {
             Text = Loc.T("Opacidad %:", "Opacity %:"), VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
             Margin = new Thickness(0, 0, 4, 0),
         });
         var opacityBox = MakeTextBox(48);
@@ -618,7 +618,7 @@ public sealed class InspectorPanel : ContentControl
         outRow.Children.Add(new TextBlock
         {
             Text = Loc.T("Salida:", "Output:"), VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
             Margin = new Thickness(0, 0, 4, 0),
         });
         var screenCombo = new ComboBox { MinWidth = 170 };
@@ -641,7 +641,7 @@ public sealed class InspectorPanel : ContentControl
         var outNote = new TextBlock
         {
             Text = Loc.T("El monitor de cada salida se asigna en Settings → Vídeo.", "Each output's monitor is set in Settings → Video."),
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = Theme.TextDimBrush,
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
         };
@@ -651,7 +651,7 @@ public sealed class InspectorPanel : ContentControl
             Text = Loc.T(
                 "MODO CANVAS activo: el cue se coloca en el canvas y cada salida muestra su recorte (Settings → Vídeo).",
                 "CANVAS MODE active: the cue is placed on the canvas and each output shows its crop (Settings → Video)."),
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = Theme.TextDimBrush,
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
             Visibility = Visibility.Collapsed,
@@ -718,7 +718,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = label, Width = 112,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         var slider = new Slider
         {
@@ -783,7 +783,7 @@ public sealed class InspectorPanel : ContentControl
     {
         var levelsHost = new Border
         {
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x33, 0x33, 0x33)),
+            BorderBrush = Theme.Solid(Theme.Divider),
             BorderThickness = new Thickness(0, 0, 1, 0),
             Child = BuildLevels(),
             MaxWidth = 320,   // columna compacta: el ancho es para la EQ/comp
@@ -810,7 +810,7 @@ public sealed class InspectorPanel : ContentControl
             Text = "VOL",
             FontSize = 10,
             FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = Theme.TextDimBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         var slider = new Slider
@@ -829,7 +829,7 @@ public sealed class InspectorPanel : ContentControl
             Text = "VU",
             FontSize = 10,
             FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = Theme.TextDimBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
         _levelVu.Margin = new Thickness(0, 4, 0, 0);
@@ -846,7 +846,7 @@ public sealed class InspectorPanel : ContentControl
         {
             FontFamily = new FontFamily("Consolas"),
             FontSize = 15,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)),
+            Foreground = Theme.GoBrush,
         };
         infoCol.Children.Add(label);
         slider.ToolTip = Loc.T("Volumen del cue: en vivo si está sonando.",
@@ -917,7 +917,7 @@ public sealed class InspectorPanel : ContentControl
         // ── Audición local ──────────────────────────────────────────────
         var audBtn = new Button
         {
-            Content = Loc.T("🎧 Audición (cascos)", "🎧 Audition (headphones)"),
+            Content = $"{Icons.Headphones} {Loc.T("Audición (cascos)", "Audition (headphones)")}",
             Margin = new Thickness(0, 8, 0, 0),
             Padding = new Thickness(12, 5, 12, 5),
             HorizontalAlignment = HorizontalAlignment.Left,
@@ -963,7 +963,7 @@ public sealed class InspectorPanel : ContentControl
             Text = text,
             FontSize = 10,
             FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = Theme.TextDimBrush,
             Margin = new Thickness(0, 10, 0, 2),
         });
 
@@ -972,7 +972,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = text,
             FontStyle = FontStyles.Italic,
-            Foreground = Brushes.Gray,
+            Foreground = Theme.TextNoteBrush,
             TextWrapping = TextWrapping.Wrap,
             Margin = new Thickness(0, 4, 0, 2),
         });
@@ -985,7 +985,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = label, Width = 185,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         panel.Children.Add(row);
         return row;
@@ -1042,7 +1042,7 @@ public sealed class InspectorPanel : ContentControl
         panel.Children.Add(new TextBlock
         {
             Text = label,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
             Margin = new Thickness(0, 6, 0, 2),
         });
         var tb = MakeTextBox(0);
@@ -1127,7 +1127,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = label, Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         CmbInto(row, key, read, items);
     }
@@ -1161,7 +1161,7 @@ public sealed class InspectorPanel : ContentControl
         var cb = new CheckBox
         {
             Content = label,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Foreground = Theme.TextPrimaryBrush,
             Margin = new Thickness(0, 0, 16, 0),
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -1182,9 +1182,9 @@ public sealed class InspectorPanel : ContentControl
                 Background = hex.Length > 0
                     ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
                     : Brushes.Transparent,
-                BorderBrush = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
-                Content = hex.Length == 0 ? "∅" : "",
-                Foreground = Brushes.Gray,
+                BorderBrush = Theme.TextFaintBrush,
+                Content = hex.Length == 0 ? Icons.NoColor : "",
+                Foreground = Theme.TextNoteBrush,
                 Tag = name,
             };
             btn.Click += (_, _) => Commit("color", name);
@@ -1201,10 +1201,10 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = Loc.T("Archivo:", "File:"), Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         var tb = MakeTextBox(300);
-        var browse = new Button { Content = "…", Margin = new Thickness(4, 0, 0, 0) };
+        var browse = new Button { Content = Icons.Browse, Margin = new Thickness(4, 0, 0, 0) };
         WireTextCommit(tb, "file_path", () => tb.Text);
         browse.Click += (_, _) =>
         {
@@ -1226,7 +1226,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Text = Loc.T("Cue objetivo:", "Target cue:"), Width = 210,
             VerticalAlignment = VerticalAlignment.Center,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
         });
         var combo = new ComboBox { MinWidth = 260 };
         combo.SelectionChanged += (_, _) =>
@@ -1262,9 +1262,9 @@ public sealed class InspectorPanel : ContentControl
     {
         var tb = new TextBox
         {
-            Background = new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2a)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x44, 0x44, 0x44)),
+            Background = Theme.ControlBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+            BorderBrush = Theme.Solid(Theme.BorderControl),
             Padding = new Thickness(4, 2, 4, 2),
             VerticalAlignment = VerticalAlignment.Center,
         };

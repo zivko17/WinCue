@@ -47,10 +47,10 @@ public sealed class AudioMixerPanel : ContentControl
     /// <summary>GR del limitador del bus master (dB ≥ 0), para el medidor.</summary>
     public Func<float>? MasterGainReductionProvider;
 
-    private static readonly Brush FgDim = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
-    private static readonly Brush AccentPgm = Frozen(new SolidColorBrush(Color.FromRgb(0xc0, 0x39, 0x2b)));
-    private static readonly Brush AccentPvw = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
-    private static readonly Brush DbGreen = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
+    private static readonly Brush FgDim = Frozen(new SolidColorBrush(Theme.TextDimmer));
+    private static readonly Brush AccentPgm = Frozen(new SolidColorBrush(Theme.Pgm));
+    private static readonly Brush AccentPvw = Frozen(new SolidColorBrush(Theme.Go));
+    private static readonly Brush DbGreen = Frozen(new SolidColorBrush(Theme.Go));
 
     private readonly Strip _master;
     private readonly Strip _audition;
@@ -74,7 +74,7 @@ public sealed class AudioMixerPanel : ContentControl
         _grText = new TextBlock
         {
             FontFamily = new FontFamily("Consolas"), FontSize = 11,
-            Foreground = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00))),
+            Foreground = Theme.WarnBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
             Text = "",
         };
@@ -86,7 +86,7 @@ public sealed class AudioMixerPanel : ContentControl
         };
         _master.Extras.Children.Add(_deviceInfo);
 
-        _audition = Strip.Build(Loc.T("🎧 AUDICIÓN", "🎧 AUDITION"), AccentPvw, withVu: true);
+        _audition = Strip.Build($"{Icons.Headphones} {Loc.T("AUDICIÓN", "AUDITION")}", AccentPvw, withVu: true);
         _audition.VuTooltip(Loc.T("VU de la preescucha (PVW).", "Audition (PVW) VU."));
         _audition.Extras.Children.Add(new TextBlock
         {
@@ -108,7 +108,9 @@ public sealed class AudioMixerPanel : ContentControl
         strips.Children.Add(_audition.Root);
         strips.Children.Add(new Border
         {
-            Width = 1, Background = Frozen(new SolidColorBrush(Color.FromRgb(0x3a, 0x3a, 0x3a))),
+            // Gris #3a3a3a: sin token de SEPARADOR con ese valor; se usa el del
+            // botón alternativo, que es exactamente el mismo gris
+            Width = 1, Background = Frozen(new SolidColorBrush(Theme.ButtonBgAlt)),
             Margin = new Thickness(6, 12, 6, 12),
         });
         strips.Children.Add(_cueHost);
@@ -316,8 +318,8 @@ public sealed class AudioMixerPanel : ContentControl
             {
                 Width = 132, Margin = new Thickness(5, 8, 5, 8),
                 Padding = new Thickness(8, 6, 8, 6),
-                Background = Frozen(new SolidColorBrush(Color.FromRgb(0x2a, 0x2a, 0x2b))),
-                BorderBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x3a, 0x3a, 0x3a))),
+                Background = Frozen(new SolidColorBrush(Theme.ToolbarBg)),
+                BorderBrush = Frozen(new SolidColorBrush(Theme.ButtonBgAlt)),
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
                 Child = grid,
             };
@@ -371,14 +373,14 @@ public sealed class AudioMixerPanel : ContentControl
             MirrorAudio = info.MirrorAudio;
             bool isAudio = info.Type == CueType.Audio;
             bool withVu = isAudio || info.MirrorAudio;
-            string glyph = isAudio ? "♪" : "🎬";
+            string glyph = isAudio ? Icons.Audio : Icons.Clapper;
             Init($"{glyph} {info.Number} · {info.Name}",
-                 isAudio ? Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0x86, 0xde)))
-                         : Frozen(new SolidColorBrush(Color.FromRgb(0xbe, 0x2e, 0xde))),
+                 isAudio ? Frozen(new SolidColorBrush(Theme.InfoAlt))
+                         : Frozen(new SolidColorBrush(Theme.MagentaAlt)),
                  withVu: withVu);
             Root.ToolTip = $"{info.Number} · {info.Name}\n" + Loc.T(
-                "Clic en el título: editar en Inspector → 🔊 Audio",
-                "Click the title: edit in Inspector → 🔊 Audio");
+                $"Clic en el título: editar en Inspector → {Icons.Volume} Audio",
+                $"Click the title: edit in Inspector → {Icons.Volume} Audio");
             TitleText.Cursor = System.Windows.Input.Cursors.Hand;
             TitleText.MouseLeftButtonUp += (_, _) => activate(CueId);
 
@@ -414,9 +416,9 @@ public sealed class AudioMixerPanel : ContentControl
     /// que crece de ARRIBA hacia abajo (como en una mesa), escala 0-12 dB.</summary>
     private sealed class GrBar : FrameworkElement
     {
-        private static readonly Brush Bg = Frozen(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)));
-        private static readonly Pen Frame = MakePen(Color.FromRgb(0x4a, 0x4a, 0x4a));
-        private static readonly Brush Fill = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)));
+        private static readonly Brush Bg = Frozen(new SolidColorBrush(Theme.MeterBg));
+        private static readonly Pen Frame = MakePen(Theme.BorderMeter);
+        private static readonly Brush Fill = Frozen(new SolidColorBrush(Theme.Warn));
 
         private double _db;
 

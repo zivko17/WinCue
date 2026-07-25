@@ -11,29 +11,29 @@ namespace WinCue.App;
 
 public sealed class VuMeterControl : FrameworkElement
 {
-    private static readonly Brush BgBrush = Make(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x20)));
-    private static readonly Pen FramePen = MakePen(Color.FromRgb(0x4a, 0x4a, 0x4a), 1);
-    private static readonly Pen TickPen = MakePen(Color.FromArgb(90, 0x77, 0x77, 0x77), 1);
+    private static readonly Brush BgBrush = Make(new SolidColorBrush(Theme.MeterBg));
+    private static readonly Pen FramePen = MakePen(Theme.BorderMeter, 1);
+    private static readonly Pen TickPen = MakePen(Theme.Alpha(Theme.TextDimmer, 90), 1);
     private static readonly Brush BarBrush = Make(new LinearGradientBrush(
         new GradientStopCollection
         {
-            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 0.0),
-            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 0.62),
-            new GradientStop(Color.FromRgb(0xe8, 0xc0, 0x00), 0.80),
-            new GradientStop(Color.FromRgb(0xc0, 0x39, 0x2b), 1.0),
+            new GradientStop(Theme.Go, 0.0),
+            new GradientStop(Theme.Go, 0.62),
+            new GradientStop(Theme.Standby, 0.80),
+            new GradientStop(Theme.Pgm, 1.0),
         }, 0));
-    private static readonly Brush PeakBrush = Make(new SolidColorBrush(Colors.White));
+    private static readonly Brush PeakBrush = Make(new SolidColorBrush(Theme.White));
 
     private static readonly Brush BarBrushVertical = Make(new LinearGradientBrush(
         new GradientStopCollection
         {
-            new GradientStop(Color.FromRgb(0xc0, 0x39, 0x2b), 0.0),
-            new GradientStop(Color.FromRgb(0xe8, 0xc0, 0x00), 0.20),
-            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 0.38),
-            new GradientStop(Color.FromRgb(0x2e, 0xcc, 0x71), 1.0),
+            new GradientStop(Theme.Pgm, 0.0),
+            new GradientStop(Theme.Standby, 0.20),
+            new GradientStop(Theme.Go, 0.38),
+            new GradientStop(Theme.Go, 1.0),
         }, 90));
 
-    private static readonly Brush ClipBrush = Make(new SolidColorBrush(Color.FromRgb(0xff, 0x20, 0x20)));
+    private static readonly Brush ClipBrush = Make(new SolidColorBrush(Theme.Clip));
 
     private readonly bool _vertical;
     private double _level;          // 0..1

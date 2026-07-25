@@ -3,22 +3,21 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinCue.App"
         Title="{local:Loc Es=WinCue — Configuración, En=WinCue — Settings}" Width="760" Height="640"
-        Background="#1a1a1a" WindowStartupLocation="CenterOwner"
+        Background="{DynamicResource SunkenBg}" WindowStartupLocation="CenterOwner"
         ShowInTaskbar="False">
 
     <Window.Resources>
-        <SolidColorBrush x:Key="Fg" Color="#dddddd"/>
-        <SolidColorBrush x:Key="FgDim" Color="#999999"/>
-        <SolidColorBrush x:Key="Accent" Color="#e8a200"/>
+        <!-- Los colores vienen de la paleta central (Theme.cs), publicada en
+             Application.Resources desde App.OnStartup → {DynamicResource}. -->
 
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="VerticalAlignment" Value="Center"/>
         </Style>
         <Style TargetType="Button">
-            <Setter Property="Background" Value="#3c3c3c"/>
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
-            <Setter Property="BorderBrush" Value="#555"/>
+            <Setter Property="Background" Value="{DynamicResource ButtonBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
             <Setter Property="Padding" Value="10,4"/>
             <Setter Property="Margin" Value="4,0"/>
             <!-- Hover con borde ámbar (sin el azul-claro feo de WPF) -->
@@ -35,10 +34,10 @@
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
                                 <Setter TargetName="bd" Property="Opacity" Value="0.75"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -47,15 +46,15 @@
             </Setter>
         </Style>
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="Margin" Value="0,3"/>
         </Style>
         <Style TargetType="ComboBox">
             <Setter Property="Margin" Value="0,3"/>
             <Setter Property="MinWidth" Value="220"/>
             <Setter Property="MinHeight" Value="26"/>
-            <Setter Property="Foreground" Value="#e6e6e6"/>
-            <Setter Property="Background" Value="#2a2a2a"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrightAlt}"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
             <!-- Plantilla propia: la de WPF no respetaba el color del texto de
                  la opción SELECCIONADA en la caja cerrada (salía casi negro).
                  Aquí la caja es oscura y el texto claro, garantizado. -->
@@ -68,10 +67,10 @@
                                                       RelativeSource={RelativeSource TemplatedParent}}">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="#2a2a2a" BorderBrush="#555"
+                                        <Border Background="{DynamicResource ControlBg}" BorderBrush="{DynamicResource Border}"
                                                 BorderThickness="1" CornerRadius="2">
                                             <Path HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                  Margin="0,0,8,0" Fill="#bbbbbb"
+                                                  Margin="0,0,8,0" Fill="{DynamicResource TextTertiary}"
                                                   Data="M 0 0 L 4 4 L 8 0 Z"/>
                                         </Border>
                                     </ControlTemplate>
@@ -81,12 +80,12 @@
                                               Content="{TemplateBinding SelectionBoxItem}"
                                               ContentTemplate="{TemplateBinding SelectionBoxItemTemplate}"
                                               Margin="9,0,24,0" VerticalAlignment="Center"
-                                              TextElement.Foreground="#e6e6e6"/>
+                                              TextElement.Foreground="{DynamicResource TextBrightAlt}"/>
                             <Popup IsOpen="{TemplateBinding IsDropDownOpen}" Placement="Bottom"
                                    AllowsTransparency="True" Focusable="False" PopupAnimation="Slide">
                                 <Border MinWidth="{TemplateBinding ActualWidth}"
                                         MaxHeight="{TemplateBinding MaxDropDownHeight}"
-                                        Background="#262626" BorderBrush="#555" BorderThickness="1">
+                                        Background="{DynamicResource ListBg}" BorderBrush="{DynamicResource Border}" BorderThickness="1">
                                     <ScrollViewer>
                                         <ItemsPresenter/>
                                     </ScrollViewer>
@@ -101,21 +100,21 @@
              WPF tiene un estado 'ratón encima' que pinta blanco y mataba el
              texto claro. Item oscuro + texto claro + resaltado azul. -->
         <Style TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="#e6e6e6"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextBrightAlt}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="ComboBoxItem">
-                        <Border x:Name="itemBg" Background="#262626"
+                        <Border x:Name="itemBg" Background="{DynamicResource ListBg}"
                                 Padding="8,5" SnapsToDevicePixels="True">
                             <ContentPresenter/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
-                                <Setter TargetName="itemBg" Property="Background" Value="#37527a"/>
+                                <Setter TargetName="itemBg" Property="Background" Value="{DynamicResource SelectionBg}"/>
                                 <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="itemBg" Property="Background" Value="#2f6f4f"/>
+                                <Setter TargetName="itemBg" Property="Background" Value="{DynamicResource Teal}"/>
                                 <Setter Property="Foreground" Value="White"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
@@ -124,15 +123,15 @@
             </Setter>
         </Style>
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="#2a2a2a"/>
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
-            <Setter Property="BorderBrush" Value="#444"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderControl}"/>
             <Setter Property="Padding" Value="4,3"/>
             <Setter Property="Margin" Value="0,3"/>
         </Style>
         <Style TargetType="GroupBox">
-            <Setter Property="Foreground" Value="{StaticResource FgDim}"/>
-            <Setter Property="BorderBrush" Value="#333"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextMuted}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Divider}"/>
             <Setter Property="Margin" Value="0,4,0,10"/>
             <Setter Property="Padding" Value="10,6"/>
         </Style>
@@ -148,12 +147,12 @@
                     Click="OnResetDefaults"/>
             <StackPanel Orientation="Horizontal" HorizontalAlignment="Right">
                 <Button Content="{local:Loc Es=Cancelar, En=Cancel}" Width="90" Click="OnCancel"/>
-                <Button Content="{local:Loc Es=Guardar, En=Save}" Width="90" Background="#1e7e34"
+                <Button Content="{local:Loc Es=Guardar, En=Save}" Width="90" Background="{DynamicResource GoButton}"
                         FontWeight="Bold" Click="OnSave"/>
             </StackPanel>
         </DockPanel>
 
         <!-- Las pestañas se rellenan desde código (BuildPages) -->
-        <TabControl x:Name="Tabs" Background="#1e1e1e" BorderBrush="#333"/>
+        <TabControl x:Name="Tabs" Background="{DynamicResource WindowBg}" BorderBrush="{DynamicResource Divider}"/>
     </DockPanel>
 </Window>

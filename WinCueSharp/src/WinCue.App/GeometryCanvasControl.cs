@@ -16,14 +16,14 @@ namespace WinCue.App;
 
 public sealed class GeometryCanvasControl : FrameworkElement
 {
-    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14)));
-    private static readonly Brush CanvasBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x00, 0x00, 0x00)));
-    private static readonly Pen CanvasPen = FrozenPen(Color.FromRgb(0x2a, 0x6f, 0xb0), 2);
-    private static readonly Pen GridPen = FrozenPen(Color.FromArgb(70, 0x66, 0x66, 0x66), 1);
-    private static readonly Pen CrossPen = FrozenPen(Color.FromArgb(110, 0x88, 0x88, 0x88), 1);
-    private static readonly Brush VideoBrush = Frozen(new SolidColorBrush(Color.FromArgb(70, 0xe8, 0xa2, 0x00)));
-    private static readonly Pen VideoPen = FrozenPen(Color.FromRgb(0xe8, 0xa2, 0x00), 2);
-    private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x99, 0x99, 0x99)));
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.GeometryBg));
+    private static readonly Brush CanvasBrush = Frozen(new SolidColorBrush(Theme.Black));
+    private static readonly Pen CanvasPen = FrozenPen(Theme.GeometryFrame, 2);
+    private static readonly Pen GridPen = FrozenPen(Theme.Alpha(Theme.GeometryGrid, 70), 1);
+    private static readonly Pen CrossPen = FrozenPen(Theme.Alpha(Theme.GeometryCross, 110), 1);
+    private static readonly Brush VideoBrush = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Warn, 70)));
+    private static readonly Pen VideoPen = FrozenPen(Theme.Warn, 2);
+    private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Theme.TextMuted));
 
     /// <summary>Arrastre del vídeo: (translateX, translateY) en px de canvas.</summary>
     public event Action<double, double>? Translated;

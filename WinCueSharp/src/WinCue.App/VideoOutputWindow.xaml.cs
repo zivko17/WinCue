@@ -139,7 +139,7 @@ public partial class VideoOutputWindow : Window
         _identifyOverlay = new Border
         {
             Visibility = Visibility.Collapsed,
-            Background = new SolidColorBrush(Color.FromArgb(0xa0, 0, 0, 0)),
+            Background = Theme.Solid(Theme.Alpha(Theme.Black, 0xa0)),
             BorderThickness = new Thickness(14),
             Child = _identifyText,
         };

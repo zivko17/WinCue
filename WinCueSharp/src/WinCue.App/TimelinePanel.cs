@@ -118,15 +118,16 @@ public sealed class TimelinePanel : Border
 
     public TimelinePanel()
     {
-        Background = new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x22));
+        // Gris de la barra del mezclador: el MISMO valor que ya tenía (#202022)
+        Background = new SolidColorBrush(Theme.MeterBgAlt);
 
         var header = new DockPanel { Margin = new Thickness(6, 3, 6, 2) };
 
         var title = new TextBlock
         {
-            Text = Loc.T("⏱ TIMELINE DEL SHOW", "⏱ SHOW TIMELINE"),
+            Text = $"{Icons.Timeline} {Loc.T("TIMELINE DEL SHOW", "SHOW TIMELINE")}",
             FontWeight = FontWeights.Bold,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)),
+            Foreground = Theme.StandbyBrush,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(4, 0, 12, 0),
         };
@@ -135,11 +136,11 @@ public sealed class TimelinePanel : Border
         var right = new StackPanel { Orientation = Orientation.Horizontal };
         _chkXfade = new CheckBox
         {
-            Content = Loc.T("🔀 Crossfade al solapar", "🔀 Crossfade on overlap"),
+            Content = $"{Icons.Crossfade} {Loc.T("Crossfade al solapar", "Crossfade on overlap")}",
             IsChecked = true,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 10, 0),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xbb, 0xbb, 0xbb)),
+            Foreground = Theme.TextTertiaryBrush,
             FontSize = 11,
             ToolTip = Loc.T(
                 "ACTIVADO: dos medias consecutivas de la MISMA capa que se " +
@@ -162,8 +163,8 @@ public sealed class TimelinePanel : Border
         _chkXfade.Checked += (_, _) => OnXfadeToggle(true);
         _chkXfade.Unchecked += (_, _) => OnXfadeToggle(false);
         right.Children.Add(_chkXfade);
-        right.Children.Add(HeaderButton("−", () => _canvas.ZoomStep(1 / 1.4)));
-        right.Children.Add(HeaderButton("＋", () => _canvas.ZoomStep(1.4)));
+        right.Children.Add(HeaderButton(Icons.ZoomOut, () => _canvas.ZoomStep(1 / 1.4)));
+        right.Children.Add(HeaderButton(Icons.ZoomIn, () => _canvas.ZoomStep(1.4)));
         right.Children.Add(HeaderButton(Loc.T("Ajustar", "Fit"), () => _canvas.ZoomToFit()));
         DockPanel.SetDock(right, Dock.Right);
         header.Children.Add(right);
@@ -172,10 +173,10 @@ public sealed class TimelinePanel : Border
         {
             Text = Loc.T(
                 "arrastrar: tiempo · sobre el anterior = SOLAPAR (paralelo) · " +
-                "vertical: pista · Ctrl+rueda: zoom · ▸GO = disparo manual",
+                $"vertical: pista · Ctrl+rueda: zoom · {Icons.Go}GO = disparo manual",
                 "drag: time · over the previous = OVERLAP (parallel) · " +
-                "vertical: track · Ctrl+wheel: zoom · ▸GO = manual trigger"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)),
+                $"vertical: track · Ctrl+wheel: zoom · {Icons.Go}GO = manual trigger"),
+            Foreground = Theme.TextDimmerBrush,
             FontSize = 10,
             VerticalAlignment = VerticalAlignment.Center,
             HorizontalAlignment = HorizontalAlignment.Right,
@@ -197,9 +198,9 @@ public sealed class TimelinePanel : Border
             Content = text,
             Padding = new Thickness(8, 0, 8, 1),
             Margin = new Thickness(3, 0, 0, 0),
-            Background = new SolidColorBrush(Color.FromRgb(0x3c, 0x3c, 0x3c)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+            Background = Theme.ButtonBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+            BorderBrush = Theme.BorderBrush,
             FontSize = 12,
         };
         b.Click += (_, _) => onClick();
@@ -234,31 +235,31 @@ public sealed class TimelineCanvas : FrameworkElement
     private const double SnapSeconds = 0.1;
     private const double InstantFootprint = 0.3;   // huella temporal de un cue instantáneo
 
-    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x18, 0x18, 0x1a)));
-    private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x21)));
-    private static readonly Brush LayerBBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x22, 0x22, 0x25)));
-    private static readonly Brush RulerBg = Frozen(new SolidColorBrush(Color.FromRgb(0x26, 0x26, 0x29)));
-    private static readonly Brush TickBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)));
-    private static readonly Pen TickPen = FrozenPen(Color.FromRgb(0x55, 0x55, 0x58), 1);
-    private static readonly Pen TickMinorPen = FrozenPen(Color.FromRgb(0x30, 0x30, 0x33), 1);
-    private static readonly Pen PlayheadPen = FrozenPen(Color.FromRgb(0xc0, 0x39, 0x2b), 2);
-    private static readonly Pen EditCursorPen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
-    private static readonly Brush EditCursorBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)));
-    private static readonly Pen SelectedPen = FrozenPen(Color.FromRgb(0xff, 0xff, 0xff), 1.5);
-    private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xee, 0xee, 0xee)));
-    private static readonly Brush FadeBrush = Frozen(new SolidColorBrush(Color.FromArgb(90, 0, 0, 0)));
-    private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)));
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.TimelineBg));
+    private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Theme.TimelineLayerA));
+    private static readonly Brush LayerBBrush = Frozen(new SolidColorBrush(Theme.TimelineLayerB));
+    private static readonly Brush RulerBg = Frozen(new SolidColorBrush(Theme.TimelineRulerBg));
+    private static readonly Brush TickBrush = Frozen(new SolidColorBrush(Theme.TextDim));
+    private static readonly Pen TickPen = FrozenPen(Theme.TimelineTick, 1);
+    private static readonly Pen TickMinorPen = FrozenPen(Theme.TimelineTickMinor, 1);
+    private static readonly Pen PlayheadPen = FrozenPen(Theme.Pgm, 2);
+    private static readonly Pen EditCursorPen = FrozenPen(Theme.Standby, 2);
+    private static readonly Brush EditCursorBrush = Frozen(new SolidColorBrush(Theme.Standby));
+    private static readonly Pen SelectedPen = FrozenPen(Theme.White, 1.5);
+    private static readonly Brush LabelBrush = Frozen(new SolidColorBrush(Theme.TextBright));
+    private static readonly Brush FadeBrush = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Black, 90)));
+    private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Theme.TextFaint));
     // Ámbar de AVISO (fundido que no cabe): el mismo tono del inspector
-    private static readonly Brush WarnBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00)));
-    private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Color.FromArgb(110, 0x2e, 0xcc, 0x71)));
-    private static readonly Brush GoBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x2e, 0xcc, 0x71)));
+    private static readonly Brush WarnBrush = Frozen(new SolidColorBrush(Theme.Warn));
+    private static readonly Brush ProgressBrush = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Go, 110)));
+    private static readonly Brush GoBrush = Frozen(new SolidColorBrush(Theme.Go));
     private static readonly Pen GoPen = MakeGoPen();
-    private static readonly Pen CutPen = FrozenPen(Color.FromRgb(0xc0, 0x39, 0x2b), 3);
+    private static readonly Pen CutPen = FrozenPen(Theme.Pgm, 3);
     private static readonly Pen GhostPen = MakeGhostPen();
 
     private static Pen MakeGhostPen()
     {
-        var p = new Pen(new SolidColorBrush(Color.FromArgb(200, 0xdd, 0xdd, 0xdd)), 1)
+        var p = new Pen(new SolidColorBrush(Theme.Alpha(Theme.TextPrimary, 200)), 1)
         { DashStyle = new DashStyle(new double[] { 3, 2 }, 0) };
         p.Freeze();
         return p;
@@ -266,25 +267,11 @@ public sealed class TimelineCanvas : FrameworkElement
 
     private static Pen MakeGoPen()
     {
-        var p = new Pen(new SolidColorBrush(Color.FromArgb(150, 0x2e, 0xcc, 0x71)), 1)
+        var p = new Pen(new SolidColorBrush(Theme.Alpha(Theme.Go, 150)), 1)
         { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
         p.Freeze();
         return p;
     }
-
-    /// <summary>Colores de bloque por tipo (espejo de la columna Tipo de la tabla).</summary>
-    private static readonly Dictionary<CueType, string> TypeColors = new()
-    {
-        [CueType.Audio] = "#4a86b8",
-        [CueType.Video] = "#9b59b6",
-        [CueType.Wait] = "#666666",
-        [CueType.Fade] = "#e8a200",
-        [CueType.Start] = "#2ecc71",
-        [CueType.Stop] = "#c0392b",
-        [CueType.Script] = "#16a085",
-        [CueType.Memo] = "#777777",
-        [CueType.Group] = "#c9a227",
-    };
 
     public Action<int, string, object?>? CommitField;
     public Action<int, int>? MoveCueRequested;
@@ -422,7 +409,7 @@ public sealed class TimelineCanvas : FrameworkElement
     // Mini-onda de los bloques de audio (picos por archivo, calculados aparte)
     private readonly Dictionary<string, (float[] Mins, float[] Maxs, double Dur)> _peaks = new();
     private readonly HashSet<string> _peaksLoading = new();
-    private static readonly Pen WavePen = FrozenPen(Color.FromArgb(110, 0xff, 0xff, 0xff), 1);
+    private static readonly Pen WavePen = FrozenPen(Theme.Alpha(Theme.White, 110), 1);
 
     public TimelineCanvas()
     {
@@ -911,7 +898,7 @@ public sealed class TimelineCanvas : FrameworkElement
             var (_, _, box, color) = SpanGeometry(span, lh);
             if (box.Right < 0 || box.Left > w)
                 continue;
-            var fill = new SolidColorBrush(Color.FromArgb(30, color.R, color.G, color.B));
+            var fill = new SolidColorBrush(Theme.Alpha(color, 30));
             fill.Freeze();
             dc.DrawRoundedRectangle(fill, null, box, 4, 4);
         }
@@ -923,7 +910,7 @@ public sealed class TimelineCanvas : FrameworkElement
             if (x < -20 || x > w)
                 continue;
             dc.DrawLine(GoPen, new Point(x, RulerH), new Point(x, h));
-            dc.DrawText(Label("▸GO", GoBrush, 9), new Point(x + 2, h - 13));
+            dc.DrawText(Label($"{Icons.Go}GO", GoBrush, 9), new Point(x + 2, h - 13));
         }
 
         // Bloques (el arrastrado, encima)
@@ -977,7 +964,7 @@ public sealed class TimelineCanvas : FrameworkElement
             {
                 dc.DrawLine(PlayheadPen, new Point(x, 0), new Point(x, h));
                 dc.DrawText(Label(FmtTime(cs), Frozen(
-                    new SolidColorBrush(Color.FromRgb(0xff, 0x8a, 0x7a))), 10),
+                    new SolidColorBrush(Theme.Danger)), 10),
                     new Point(x + 4, RulerH + 1));
             }
         }
@@ -1004,11 +991,10 @@ public sealed class TimelineCanvas : FrameworkElement
         SpanGeometry(Span span, double lh)
     {
         var group = span.Group;
-        string hex = group.Color.Length > 0
+        var color = group.Color.Length > 0
             && CueConstants.CueColors.TryGetValue(group.Color, out var gc) && gc.Length > 0
-            ? gc
-            : TypeColors[CueType.Group];
-        var color = (Color)ColorConverter.ConvertFromString(hex);
+            ? (Color)ColorConverter.ConvertFromString(gc)
+            : Theme.TypeGroup;
 
         double x0 = SecToX(span.Start) - 4;
         double x1 = SecToX(span.End) + 4;
@@ -1017,7 +1003,7 @@ public sealed class TimelineCanvas : FrameworkElement
         var box = new Rect(x0, y, Math.Max(12, x1 - x0), bh);
 
         string mode = group.GroupMode.ToString().ToUpperInvariant();
-        var lbl = Label($"▸ {group.DisplayNumber} · {group.Name} · {mode}",
+        var lbl = Label($"{Icons.Group} {group.DisplayNumber} · {group.Name} · {mode}",
             Frozen(new SolidColorBrush(Colors.White)), 10);
         double cw = Math.Min(lbl.WidthIncludingTrailingWhitespace + 12,
             Math.Max(30, box.Width));
@@ -1042,14 +1028,13 @@ public sealed class TimelineCanvas : FrameworkElement
         }
         else
         {
-            border = new Pen(new SolidColorBrush(
-                Color.FromArgb(200, color.R, color.G, color.B)), 1.6);
+            border = new Pen(new SolidColorBrush(Theme.Alpha(color, 200)), 1.6);
             border.Freeze();
         }
         dc.DrawRoundedRectangle(null, border, box, 4, 4);
 
         // Asa: chip sólido con el nombre — de aquí se arrastra el grupo entero
-        var chipFill = new SolidColorBrush(Color.FromArgb(235, color.R, color.G, color.B));
+        var chipFill = new SolidColorBrush(Theme.Alpha(color, 235));
         chipFill.Freeze();
         dc.DrawRoundedRectangle(chipFill, null, chip, 3, 3);
         dc.DrawText(lbl, new Point(chip.X + 5, chip.Y + 1));
@@ -1087,11 +1072,10 @@ public sealed class TimelineCanvas : FrameworkElement
         if (x + bw < 0 || x > ActualWidth)
             return;
 
-        string hex = cue.Color.Length > 0
+        var baseColor = cue.Color.Length > 0
             && CueConstants.CueColors.TryGetValue(cue.Color, out var ch) && ch.Length > 0
-            ? ch
-            : TypeColors.GetValueOrDefault(cue.Type, "#555555");
-        var baseColor = (Color)ColorConverter.ConvertFromString(hex);
+            ? (Color)ColorConverter.ConvertFromString(ch)
+            : Theme.ForCueType(cue.Type);
         var fill = new LinearGradientBrush(baseColor, Darken(baseColor, 0.65), 90);
         fill.Freeze();
 
@@ -1177,7 +1161,7 @@ public sealed class TimelineCanvas : FrameworkElement
         // explicación está en el tooltip y en el inspector.
         if (b.Issues != FadeIssues.None && bw > 14)
         {
-            var warn = Label("⚠", WarnBrush, 12);
+            var warn = Label(Icons.Warning, WarnBrush, 12);
             bool atStart = b.Issues.HasFlag(FadeIssues.CrossfadeTooLong)
                 || b.Issues.HasFlag(FadeIssues.FadeInTooLong);
             double wx = atStart ? x + 2 : x + bw - warn.Width - 2;
@@ -1188,12 +1172,12 @@ public sealed class TimelineCanvas : FrameworkElement
         {
             string text = $"{cue.DisplayNumber} · {cue.Name}";
             if (b.Ghost)
-                text = "↗ " + text;
+                text = $"{Icons.Jump} " + text;
             if (cue.Loop || cue.PlayCount > 1)
-                text += cue.Loop ? " ∞" : $" ×{cue.PlayCount}";
+                text += cue.Loop ? $" {Icons.Loop}" : $" ×{cue.PlayCount}";
             // 📌 = pista fijada a mano
             if (b.ManualLayer && !b.Ghost)
-                text = "📌 " + text;
+                text = $"{Icons.Pin} " + text;
             var label = Label(text, LabelBrush, 11);
             label.MaxTextWidth = Math.Max(1, bw - 10);
             label.MaxLineCount = 1;
@@ -1882,16 +1866,16 @@ public sealed class TimelineCanvas : FrameworkElement
             bool active = _activeElapsed.ContainsKey(cue.Id) ||
                 (cue.Type == CueType.Group && _activeElapsed.Keys.Any(id =>
                     _model.GetById(id) is Cue c && _model.IsDescendant(c, cue.Id)));
-            menu.Items.Add(MainWindow.Mi("▶ Disparar", "",
+            menu.Items.Add(MainWindow.Mi($"{Icons.Play} Disparar", "",
                 () => TriggerRequested?.Invoke(cue.Id)));
-            menu.Items.Add(MainWindow.Mi("■ Detener", "",
+            menu.Items.Add(MainWindow.Mi($"{Icons.Stop} Detener", "",
                 () => StopRequested?.Invoke(cue.Id), active));
             menu.Items.Add(new Separator());
             if (cue.TimelineLayer >= 0)
-                menu.Items.Add(MainWindow.Mi("📌 Soltar a capa automática", "",
+                menu.Items.Add(MainWindow.Mi($"{Icons.Pin} Soltar a capa automática", "",
                     () => CommitField?.Invoke(cue.Id, "timeline_layer", -1), edit));
             if (cue.IsMedia() && (cue.FadeIn > 0.01 || cue.FadeOut > 0.01))
-                menu.Items.Add(MainWindow.Mi("◢ Quitar fades (in/out) de este cue", "",
+                menu.Items.Add(MainWindow.Mi($"{Icons.Fade} Quitar fades (in/out) de este cue", "",
                     () =>
                     {
                         CommitField?.Invoke(cue.Id, "fade_in", 0.0);
@@ -1920,14 +1904,15 @@ public sealed class TimelineCanvas : FrameworkElement
                         var f = first.Cue;
                         var s = second.Cue;
                         menu.Items.Add(MainWindow.Mi(
-                            $"🔀 Crossfade con «{other.Cue.Name}» ({xf:0.#} s, capa {other.Layer + 1})",
+                            $"{Icons.Crossfade} Crossfade con «{other.Cue.Name}» ({xf:0.#} s, capa {other.Layer + 1})",
                             "", () => ApplyCrossLayerFade(f, s, xf), edit));
                     }
                 }
             }
             menu.Items.Add(MainWindow.ColorSubmenu(
                 color => CommitField?.Invoke(cue.Id, "color", color), edit));
-            menu.Items.Add(MainWindow.Mi(cue.Armed ? "✕ Desarmar" : "✓ Armar", "",
+            menu.Items.Add(MainWindow.Mi(
+                cue.Armed ? $"{Icons.Cross} Desarmar" : $"{Icons.Check} Armar", "",
                 () => CommitField?.Invoke(cue.Id, "armed", !cue.Armed), edit));
         }
         else
@@ -1935,7 +1920,7 @@ public sealed class TimelineCanvas : FrameworkElement
             if (_editCursor is not null)
             {
                 menu.Items.Add(MainWindow.Mi(
-                    "▶ Reproducir desde el cursor", "doble clic en la regla",
+                    $"{Icons.Play} Reproducir desde el cursor", "doble clic en la regla",
                     PlayFromCursor));
                 menu.Items.Add(new Separator());
             }

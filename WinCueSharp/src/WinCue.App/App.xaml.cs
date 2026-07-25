@@ -74,8 +74,8 @@ public partial class App : Application
             args.Handled = true;
             if (!SmokeMode)
                 (MainWindow as MainWindow)?.FlashStatus(Loc.T(
-                    $"⚠ ERROR INTERNO — detalle en {Path.GetFileName(file ?? "logs/")} (la app intenta continuar)",
-                    $"⚠ INTERNAL ERROR — details in {Path.GetFileName(file ?? "logs/")} (the app tries to continue)"));
+                    $"{Icons.Warning} ERROR INTERNO — detalle en {Path.GetFileName(file ?? "logs/")} (la app intenta continuar)",
+                    $"{Icons.Warning} INTERNAL ERROR — details in {Path.GetFileName(file ?? "logs/")} (the app tries to continue)"));
         };
         AppDomain.CurrentDomain.UnhandledException += (_, args) =>
             DumpCrash("AppDomain.UnhandledException (fatal, hilo no-UI)", args.ExceptionObject);
@@ -84,6 +84,10 @@ public partial class App : Application
             DumpCrash("TaskScheduler.UnobservedTaskException", args.Exception);
             args.SetObserved();
         };
+
+        // Paleta central ANTES de construir la ventana: el XAML la consume con
+        // {DynamicResource ...} y no existe hasta que se publica aquí.
+        Theme.Install(Resources);
 
         Action<Action> dispatch = action => Dispatcher.BeginInvoke(action);
         var settings = SettingsManager.Instance;

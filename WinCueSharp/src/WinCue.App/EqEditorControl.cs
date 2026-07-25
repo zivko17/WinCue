@@ -66,10 +66,10 @@ public sealed class EqEditorControl : ContentControl
 
     private static readonly Color[] BandUiColors =
     {
-        Color.FromRgb(0xc0, 0x39, 0x2b),
-        Color.FromRgb(0xe8, 0xa2, 0x00),
-        Color.FromRgb(0x2e, 0xcc, 0x71),
-        Color.FromRgb(0x2a, 0x6f, 0xb0),
+        Theme.Pgm,
+        Theme.Warn,
+        Theme.Go,
+        Theme.Blue,
     };
 
     public EqEditorControl()
@@ -92,7 +92,7 @@ public sealed class EqEditorControl : ContentControl
         {
             Text = Loc.T("GANANCIA", "GAIN"),
             FontSize = 9,
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = new SolidColorBrush(Theme.TextDim),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         DockPanel.SetDock(gainTitle, Dock.Top);
@@ -101,7 +101,7 @@ public sealed class EqEditorControl : ContentControl
         {
             Text = "0.0 dB",
             FontFamily = new FontFamily("Consolas"),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)),
+            Foreground = new SolidColorBrush(Theme.Standby),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         DockPanel.SetDock(_gainLabel, Dock.Bottom);
@@ -196,7 +196,7 @@ public sealed class EqEditorControl : ContentControl
         rtaRow.Children.Add(new TextBlock
         {
             Text = "RTA +",
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = new SolidColorBrush(Theme.TextDim),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 3, 0),
         });
@@ -212,7 +212,7 @@ public sealed class EqEditorControl : ContentControl
         var rtaLabel = new TextBlock
         {
             Text = $"{EqCurveCanvas.RtaGainDb:0} dB",
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = new SolidColorBrush(Theme.TextDim),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 11,
             VerticalAlignment = VerticalAlignment.Center,
@@ -230,7 +230,7 @@ public sealed class EqEditorControl : ContentControl
 
         _readout = new TextBlock
         {
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = new SolidColorBrush(Theme.TextDim),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 10,
             Margin = new Thickness(0, 4, 0, 0),
@@ -263,8 +263,8 @@ public sealed class EqEditorControl : ContentControl
             Text = Loc.T(
                 "Sin analizador (RTA/GR): el audio de este vídeo lo saca mpv. La ganancia, la EQ y el compresor SÍ actúan —y la curva es real—, pero solo hay medidores cuando el audio va por el rack (AUDIO ESPEJO).",
                 "No analyzer (RTA/GR): this video's audio is played by mpv. Gain, EQ and compressor DO work —and the curve is real— but there are meters only when audio goes through the rack (MIRRORED AUDIO)."),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xc9, 0xa8, 0x4a)),
-            Background = new SolidColorBrush(Color.FromArgb(0xcc, 0x14, 0x14, 0x16)),
+            Foreground = new SolidColorBrush(Theme.GoldSoft),
+            Background = new SolidColorBrush(Theme.Alpha(Theme.EqBg, 0xcc)),
             FontSize = 10,
             Padding = new Thickness(6, 4, 6, 4),
             Margin = new Thickness(8, 6, 8, 0),
@@ -292,7 +292,7 @@ public sealed class EqEditorControl : ContentControl
         compPars.Children.Add(CompRow("Makeup", _compMakeup, "dB"));
         compPars.Children.Add(new TextBlock
         {
-            Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+            Foreground = new SolidColorBrush(Theme.TextDim),
             FontFamily = new FontFamily("Consolas"),
             FontSize = 10,
             Margin = new Thickness(0, 4, 0, 0),
@@ -316,7 +316,7 @@ public sealed class EqEditorControl : ContentControl
         {
             Text = Loc.T("Este tipo de cue no tiene audio: la ganancia, la EQ y el compresor son para cues de AUDIO y de VÍDEO.",
                          "This cue type has no audio: gain, EQ and compressor are for AUDIO and VIDEO cues."),
-            Foreground = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+            Foreground = new SolidColorBrush(Theme.TextFaint),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };
@@ -344,7 +344,7 @@ public sealed class EqEditorControl : ContentControl
         var cb = new CheckBox
         {
             Content = label,
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
+            Foreground = new SolidColorBrush(Theme.TextPrimary),
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
         };
@@ -378,7 +378,7 @@ public sealed class EqEditorControl : ContentControl
     private static TextBlock FieldLabel(string text) => new()
     {
         Text = text,
-        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+        Foreground = new SolidColorBrush(Theme.TextDim),
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(4, 0, 3, 0),
         FontSize = 11,
@@ -390,9 +390,9 @@ public sealed class EqEditorControl : ContentControl
         {
             Width = 44,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x1a)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+            Background = new SolidColorBrush(Theme.SunkenBg),
+            Foreground = new SolidColorBrush(Theme.TextPrimary),
+            BorderBrush = new SolidColorBrush(Theme.Border),
         };
         void CommitBox()
         {
@@ -414,9 +414,9 @@ public sealed class EqEditorControl : ContentControl
         {
             Width = 52,
             VerticalContentAlignment = VerticalAlignment.Center,
-            Background = new SolidColorBrush(Color.FromRgb(0x1a, 0x1a, 0x1a)),
-            Foreground = new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)),
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+            Background = new SolidColorBrush(Theme.SunkenBg),
+            Foreground = new SolidColorBrush(Theme.TextPrimary),
+            BorderBrush = new SolidColorBrush(Theme.Border),
         };
         void CommitBox()
         {
@@ -434,7 +434,7 @@ public sealed class EqEditorControl : ContentControl
     private static TextBlock Hz() => new()
     {
         Text = "Hz",
-        Foreground = new SolidColorBrush(Color.FromRgb(0x88, 0x88, 0x88)),
+        Foreground = new SolidColorBrush(Theme.TextDim),
         VerticalAlignment = VerticalAlignment.Center,
         Margin = new Thickness(2, 0, 10, 0),
     };
@@ -510,15 +510,15 @@ public sealed class EqCurveCanvas : FrameworkElement
     private const double DbRange = 18.0;   // eje Y: ±18 dB
     private const double FMin = 20.0, FMax = 20000.0;
 
-    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x16)));
-    private static readonly Pen GridPen = FrozenPen(Color.FromRgb(0x2c, 0x2c, 0x30), 1);
-    private static readonly Pen ZeroPen = FrozenPen(Color.FromRgb(0x4a, 0x4a, 0x50), 1);
-    private static readonly Brush GridText = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.EqBg));
+    private static readonly Pen GridPen = FrozenPen(Theme.EqGrid, 1);
+    private static readonly Pen ZeroPen = FrozenPen(Theme.EqZero, 1);
+    private static readonly Brush GridText = Frozen(new SolidColorBrush(Theme.TextDimmer));
     // RTA estilo analizador pro: área con degradado + contorno + picos
     private static readonly Brush RtaFill = FrozenGradient(
-        Color.FromArgb(0x86, 0x2e, 0xcc, 0x71), Color.FromArgb(0x10, 0x2e, 0xcc, 0x71));
-    private static readonly Pen RtaLine = FrozenPen(Color.FromArgb(0xdd, 0x5f, 0xf2, 0x9e), 1.3);
-    private static readonly Pen RtaPeakPen = FrozenPen(Color.FromArgb(0xb4, 0xd9, 0xff, 0xe9), 1);
+        Theme.Alpha(Theme.Go, 0x86), Theme.Alpha(Theme.Go, 0x10));
+    private static readonly Pen RtaLine = FrozenPen(Theme.Alpha(Theme.RtaLine, 0xdd), 1.3);
+    private static readonly Pen RtaPeakPen = FrozenPen(Theme.Alpha(Theme.RtaPeak, 0xb4), 1);
 
     private static Brush FrozenGradient(Color top, Color bottom)
     {
@@ -531,17 +531,17 @@ public sealed class EqCurveCanvas : FrameworkElement
     /// sesión; solo afecta a la pantalla, nunca al audio). Solo se toca
     /// desde el hilo de UI.</summary>
     public static double RtaGainDb { get; set; } = 18.0;
-    private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2.2);
-    private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x66, 0x5e, 0x30), 1.5);
-    private static readonly Pen CurveGlowPen = FrozenPen(Color.FromArgb(0x46, 0xe8, 0xc0, 0x00), 5.5);
-    private static readonly Brush CurveFill = Frozen(new SolidColorBrush(Color.FromArgb(0x22, 0xe8, 0xc0, 0x00)));
+    private static readonly Pen CurvePen = FrozenPen(Theme.Standby, 2.2);
+    private static readonly Pen CurveOffPen = FrozenPen(Theme.EqCurveOff, 1.5);
+    private static readonly Pen CurveGlowPen = FrozenPen(Theme.Alpha(Theme.Standby, 0x46), 5.5);
+    private static readonly Brush CurveFill = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Standby, 0x22)));
 
     private static readonly Color[] BandColors =
     {
-        Color.FromRgb(0xc0, 0x39, 0x2b),   // 1 grave — rojo
-        Color.FromRgb(0xe8, 0xa2, 0x00),   // 2 medio-grave — ámbar
-        Color.FromRgb(0x2e, 0xcc, 0x71),   // 3 medio-agudo — verde
-        Color.FromRgb(0x2a, 0x6f, 0xb0),   // 4 agudo — azul
+        Theme.Pgm,    // 1 grave — rojo
+        Theme.Warn,   // 2 medio-grave — ámbar
+        Theme.Go,     // 3 medio-agudo — verde
+        Theme.Blue,   // 4 agudo — azul
     };
 
     public Action<string, object?>? Commit;
@@ -734,19 +734,18 @@ public sealed class EqCurveCanvas : FrameworkElement
             double r = hot ? 8.5 : 7;
             if (hot)
             {
-                var halo = new SolidColorBrush(Color.FromArgb(0x38, c.R, c.G, c.B));
+                var halo = new SolidColorBrush(Theme.Alpha(c, 0x38));
                 halo.Freeze();
                 dc.DrawEllipse(halo, null, center, r + 5, r + 5);
             }
-            var ring = new Pen(Frozen(new SolidColorBrush(
-                Color.FromArgb(alpha, c.R, c.G, c.B))), 2.4);
+            var ring = new Pen(Frozen(new SolidColorBrush(Theme.Alpha(c, alpha))), 2.4);
             ring.Freeze();
-            var inner = new SolidColorBrush(Color.FromArgb(
-                _cue.EqEnabled ? (byte)0xdd : (byte)0x66, 0x16, 0x16, 0x19));
+            var inner = new SolidColorBrush(Theme.Alpha(
+                Theme.EqHandleCore, _cue.EqEnabled ? (byte)0xdd : (byte)0x66));
             inner.Freeze();
             dc.DrawEllipse(inner, ring, center, r, r);
             var num = Text($"{i + 1}",
-                Frozen(new SolidColorBrush(Color.FromArgb(alpha, 0xff, 0xff, 0xff))), 9.5);
+                Frozen(new SolidColorBrush(Theme.Alpha(Theme.White, alpha))), 9.5);
             dc.DrawText(num, new Point(center.X - num.Width / 2, center.Y - num.Height / 2));
         }
     }
@@ -754,8 +753,8 @@ public sealed class EqCurveCanvas : FrameworkElement
     private void DrawFilterHandle(DrawingContext dc, int id, double freq, bool on, string label)
     {
         double x = XFromFreq(freq), y = YFromDb(0);
-        var brush = new SolidColorBrush(Color.FromArgb(on ? (byte)220 : (byte)80,
-            0xbb, 0xbb, 0xbb));
+        var brush = new SolidColorBrush(
+            Theme.Alpha(Theme.TextTertiary, on ? (byte)220 : (byte)80));
         brush.Freeze();
         double s = id == _drag || id == _hover ? 7 : 5;
         dc.DrawRectangle(brush, null, new Rect(x - s, y - s, s * 2, s * 2));
@@ -900,19 +899,19 @@ public sealed class CompCurveCanvas : FrameworkElement
     private const double GrScaleDb = 24.0;   // fondo de escala del medidor
     private const double MeterW = 16;
 
-    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x16)));
-    private static readonly Pen GridPen = FrozenPen(Color.FromRgb(0x2c, 0x2c, 0x30), 1);
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.EqBg));
+    private static readonly Pen GridPen = FrozenPen(Theme.EqGrid, 1);
     private static readonly Pen UnityPen = MakeUnityPen();
-    private static readonly Pen CurvePen = FrozenPen(Color.FromRgb(0xe8, 0xa2, 0x00), 2);
-    private static readonly Pen CurveOffPen = FrozenPen(Color.FromRgb(0x6e, 0x58, 0x28), 1.5);
-    private static readonly Brush GridText = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
-    private static readonly Brush ThrBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xdd, 0xdd, 0xdd)));
-    private static readonly Brush GrBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0x7a, 0x00)));
-    private static readonly Brush GrBg = Frozen(new SolidColorBrush(Color.FromRgb(0x20, 0x20, 0x24)));
+    private static readonly Pen CurvePen = FrozenPen(Theme.Warn, 2);
+    private static readonly Pen CurveOffPen = FrozenPen(Theme.CompCurveOff, 1.5);
+    private static readonly Brush GridText = Frozen(new SolidColorBrush(Theme.TextDimmer));
+    private static readonly Brush ThrBrush = Frozen(new SolidColorBrush(Theme.TextPrimary));
+    private static readonly Brush GrBrush = Frozen(new SolidColorBrush(Theme.WarnDeep));
+    private static readonly Brush GrBg = Frozen(new SolidColorBrush(Theme.EqGrBg));
 
     private static Pen MakeUnityPen()
     {
-        var p = new Pen(new SolidColorBrush(Color.FromRgb(0x4a, 0x4a, 0x50)), 1)
+        var p = new Pen(new SolidColorBrush(Theme.EqZero), 1)
         { DashStyle = new DashStyle(new double[] { 3, 3 }, 0) };
         p.Freeze();
         return p;
@@ -1021,7 +1020,7 @@ public sealed class CompCurveCanvas : FrameworkElement
         }
         dc.DrawText(Text("GR", GridText, 8), new Point(pw + 6, h - 12));
         if (_cue.CompEnabled && _gr > 0.05f)
-            dc.DrawText(Text($"-{_gr:0.0}", Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xa2, 0x00))), 8),
+            dc.DrawText(Text($"-{_gr:0.0}", Frozen(new SolidColorBrush(Theme.Warn)), 8),
                 new Point(pw + 2, 2));
     }
 

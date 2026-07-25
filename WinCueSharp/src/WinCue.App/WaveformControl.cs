@@ -26,17 +26,17 @@ public sealed class WaveformControl : FrameworkElement
     private const double HandleHit = 8;
 
     // Pinceles (espejo de los colores Python), congelados
-    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x0e, 0x0e, 0x0e)));
-    private static readonly Pen WavePen = FrozenPen(Color.FromRgb(0x4a, 0x86, 0xb8), 1);
-    private static readonly Pen WaveDimPen = FrozenPen(Color.FromRgb(0x24, 0x30, 0x38), 1);
-    private static readonly Pen MarkPen = FrozenPen(Color.FromRgb(0xe8, 0xc0, 0x00), 2);
-    private static readonly Brush MarkBrush = Frozen(new SolidColorBrush(Color.FromRgb(0xe8, 0xc0, 0x00)));
-    private static readonly Brush RegionBrush = Frozen(new SolidColorBrush(Color.FromArgb(34, 232, 192, 0)));
-    private static readonly Brush DimBrush = Frozen(new SolidColorBrush(Color.FromArgb(150, 0, 0, 0)));
+    private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.WaveBg));
+    private static readonly Pen WavePen = FrozenPen(Theme.Wave, 1);
+    private static readonly Pen WaveDimPen = FrozenPen(Theme.WaveDim, 1);
+    private static readonly Pen MarkPen = FrozenPen(Theme.Standby, 2);
+    private static readonly Brush MarkBrush = Frozen(new SolidColorBrush(Theme.Standby));
+    private static readonly Brush RegionBrush = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Standby, 34)));
+    private static readonly Brush DimBrush = Frozen(new SolidColorBrush(Theme.Alpha(Theme.Black, 150)));
     private static readonly Brush VideoBarBrush = Frozen(new LinearGradientBrush(
-        Color.FromRgb(0x2a, 0x35, 0x40), Color.FromRgb(0x1a, 0x22, 0x2a), 90));
-    private static readonly Brush RulerBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x77, 0x77, 0x77)));
-    private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)));
+        Theme.VideoBarA, Theme.VideoBarB, 90));
+    private static readonly Brush RulerBrush = Frozen(new SolidColorBrush(Theme.TextDimmer));
+    private static readonly Brush MsgBrush = Frozen(new SolidColorBrush(Theme.TextFaint));
 
     /// <summary>Manejadores soltados: (startS, endS).</summary>
     public event Action<double, double>? MarkersChanged;

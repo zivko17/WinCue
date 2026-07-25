@@ -3,22 +3,17 @@
         xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
         xmlns:local="clr-namespace:WinCue.App"
         Title="WinCue" Width="1280" Height="800"
-        Background="#1e1e1e" WindowState="Maximized"
+        Background="{DynamicResource WindowBg}" WindowState="Maximized"
         AllowDrop="True">
 
     <Window.Resources>
-        <!-- Paleta oscura básica -->
-        <SolidColorBrush x:Key="Bg" Color="#1e1e1e"/>
-        <SolidColorBrush x:Key="Panel" Color="#252526"/>
-        <SolidColorBrush x:Key="Fg" Color="#dddddd"/>
-        <SolidColorBrush x:Key="FgDim" Color="#888888"/>
-        <SolidColorBrush x:Key="Accent" Color="#2ecc71"/>
-        <SolidColorBrush x:Key="PlayheadBg" Color="#264f78"/>
+        <!-- La paleta es la central (Theme.cs), publicada en
+             Application.Resources desde App.OnStartup → {DynamicResource}. -->
 
         <Style TargetType="Button">
-            <Setter Property="Background" Value="#3c3c3c"/>
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
-            <Setter Property="BorderBrush" Value="#555"/>
+            <Setter Property="Background" Value="{DynamicResource ButtonBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
             <Setter Property="Padding" Value="10,4"/>
             <Setter Property="Margin" Value="3,0"/>
             <!-- Plantilla propia: la de WPF pinta un azul-claro feo al pasar el
@@ -39,10 +34,10 @@
                             <!-- Grosor CONSTANTE (solo cambia el color) para
                                  que el hover no empuje el layout / dé saltos -->
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
-                                <Setter TargetName="bd" Property="BorderBrush" Value="#e8c000"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
                                 <Setter TargetName="bd" Property="Opacity" Value="0.75"/>
                             </Trigger>
                             <Trigger Property="IsEnabled" Value="False">
@@ -54,38 +49,38 @@
             </Setter>
         </Style>
         <Style TargetType="TextBlock">
-            <Setter Property="Foreground" Value="{StaticResource Fg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
     </Window.Resources>
 
     <DockPanel>
         <!-- ═══════════ TOP BAR: transport + master ═══════════ -->
-        <Border x:Name="TopBar" DockPanel.Dock="Top" Background="{StaticResource Panel}" Padding="8,6">
+        <Border x:Name="TopBar" DockPanel.Dock="Top" Background="{DynamicResource PanelBg}" Padding="8,6">
             <DockPanel>
                 <StackPanel Orientation="Horizontal" DockPanel.Dock="Left">
                     <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
-                            Background="#1e7e34" FontSize="20" FontWeight="Bold"
-                            Content="GO ▶" ToolTip="Espacio"/>
+                            Background="{DynamicResource GoButton}" FontSize="20" FontWeight="Bold"
+                            Content="{local:Loc IconAfter=Play, Es=GO, En=GO}" ToolTip="Espacio"/>
                     <Button x:Name="PauseButton" Click="OnPauseClick" Height="44"
-                            Content="{local:Loc Es=⏸ PAUSA, En=⏸ PAUSE}"/>
+                            Content="{local:Loc Icon=Pause, Es=PAUSA, En=PAUSE}"/>
                     <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44"
-                            Content="■ STOP ALL" ToolTip="Escape"/>
+                            Content="{local:Loc Icon=Stop, Es=STOP ALL, En=STOP ALL}" ToolTip="Escape"/>
                     <Button x:Name="FadeAllButton" Click="OnFadeAllClick" Height="44"
                             MouseRightButtonUp="OnFadeAllRightClick"
-                            Content="◢ FADE ALL"
+                            Content="{local:Loc Icon=Fade, Es=FADE ALL, En=FADE ALL}"
                             ToolTip="{local:Loc Es=Fundido elegante de todo · clic derecho: duración,
                                                 En=Elegant fade of everything · right-click: duration}"/>
                     <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
                             MouseRightButtonUp="OnPanicRightClick"
-                            Background="#7e1e1e" Content="⚠ PANIC"
+                            Background="{DynamicResource PanicButton}" Content="{local:Loc Icon=Warning, Es=PANIC, En=PANIC}"
                             ToolTip="{local:Loc Es=Fundido rápido y parada · doble pulsación: corte duro · clic derecho: opciones,
                                                 En=Quick fade and stop · double press: hard cut · right-click: options}"/>
                     <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
                         <TextBlock Text="{local:Loc Es=SIGUIENTE, En=NEXT}" FontSize="9"
-                                   Foreground="{StaticResource FgDim}"/>
+                                   Foreground="{DynamicResource TextDim}"/>
                         <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14"
                                    FontWeight="Bold" TextTrimming="CharacterEllipsis"
-                                   Foreground="#e8c000"/>
+                                   Foreground="{DynamicResource Standby}"/>
                     </StackPanel>
                 </StackPanel>
 
@@ -94,14 +89,14 @@
                             VerticalAlignment="Center">
                     <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
                                   Checked="OnShowMode" Unchecked="OnEditMode"
-                                  Background="#c9a227" Foreground="Black"
+                                  Background="{DynamicResource Gold}" Foreground="Black"
                                   FontWeight="Bold" Content="{local:Loc Es=Modo: EDIT, En=Mode: EDIT}">
                         <!-- Plantilla propia: la de WPF pinta un azul-claro al
                              estar 'checked' que tapaba el verde de SHOW -->
                         <ToggleButton.Template>
                             <ControlTemplate TargetType="ToggleButton">
                                 <Border Background="{TemplateBinding Background}"
-                                        BorderBrush="#555" BorderThickness="1"
+                                        BorderBrush="{DynamicResource Border}" BorderThickness="1"
                                         CornerRadius="2">
                                     <ContentPresenter HorizontalAlignment="Center"
                                                       VerticalAlignment="Center"
@@ -111,26 +106,26 @@
                         </ToggleButton.Template>
                     </ToggleButton>
                     <Button x:Name="VideoOutButton" Click="OnVideoOutputClick" Height="44"
-                            Background="#7e1e1e" Content="{local:Loc Es=🖵 Salida vídeo ▾, En=🖵 Video output ▾}"/>
+                            Background="{DynamicResource PanicButton}" Content="{local:Loc Icon=VideoOutput, IconAfter=Expanded, Es=Salida vídeo, En=Video output}"/>
                     <Button Click="OnSettingsClick" Height="44"
-                            Content="{local:Loc Es=⚙ Configuración, En=⚙ Settings}"/>
+                            Content="{local:Loc Icon=Settings, Es=Configuración, En=Settings}"/>
                 </StackPanel>
 
                 <!-- Centro: reloj del show (el countdown por cue vive en las
                      tarjetas de EN REPRODUCCIÓN y en el progreso de la fila) -->
-                <Border x:Name="ShowClockBox" Background="#151515" CornerRadius="4"
+                <Border x:Name="ShowClockBox" Background="{DynamicResource DeepBg}" CornerRadius="4"
                         Padding="18,2" Cursor="Hand"
                         HorizontalAlignment="Center" VerticalAlignment="Center"
                         MouseLeftButtonDown="OnShowClockClick"
                         ToolTip="{local:Loc Es=Clic: alternar restante/transcurrido · Doble clic: reiniciar,
                                             En=Click: toggle remaining/elapsed · Double-click: reset}">
                     <StackPanel>
-                        <TextBlock x:Name="ShowClockMode" Text="{local:Loc Es=SHOW · RESTANTE ▾, En=SHOW · REMAINING ▾}"
-                                   FontSize="10" Foreground="{StaticResource FgDim}"
+                        <TextBlock x:Name="ShowClockMode" Text="{local:Loc IconAfter=Expanded, Es=SHOW · RESTANTE, En=SHOW · REMAINING}"
+                                   FontSize="10" Foreground="{DynamicResource TextDim}"
                                    HorizontalAlignment="Center"/>
                         <TextBlock x:Name="ShowClockText" Text="0:00:00"
                                    FontSize="40" FontWeight="Bold"
-                                   FontFamily="Consolas" Foreground="#e8c000"
+                                   FontFamily="Consolas" Foreground="{DynamicResource Standby}"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
@@ -138,48 +133,48 @@
         </Border>
 
         <!-- ═══════════ TOOLBAR: lista ═══════════ -->
-        <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="#2a2a2b" Padding="8,4">
+        <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="{DynamicResource ToolbarBg}" Padding="8,4">
             <StackPanel Orientation="Horizontal">
-                <Button Click="OnOpenShow" Content="{local:Loc Es=📂 Abrir, En=📂 Open}"/>
-                <Button Click="OnRecentShows" Content="▾" Width="26" Margin="-2,0,3,0"
+                <Button Click="OnOpenShow" Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"/>
+                <Button Click="OnRecentShows" Content="{x:Static local:Icons.Expanded}" Width="26" Margin="-2,0,3,0"
                         ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}"/>
-                <Button Click="OnSaveShow" Content="{local:Loc Es=💾 Guardar, En=💾 Save}"/>
-                <Button Click="OnSaveMenu" Content="▾" Width="26" Margin="-2,0,3,0"
+                <Button Click="OnSaveShow" Content="{local:Loc Icon=Save, Es=Guardar, En=Save}"/>
+                <Button Click="OnSaveMenu" Content="{x:Static local:Icons.Expanded}" Width="26" Margin="-2,0,3,0"
                         ToolTip="{local:Loc Es=Más opciones de guardado, En=More save options}"/>
                 <Button x:Name="RelocateButton" Click="OnRelocateMedia"
-                        Content="{local:Loc Es=🔗 Relocalizar, En=🔗 Relocate}"
+                        Content="{local:Loc Icon=Relocate, Es=Relocalizar, En=Relocate}"
                         Visibility="Collapsed"
-                        Background="#7e5a1e"
+                        Background="{DynamicResource RelocateBg}"
                         ToolTip="{local:Loc Es=Hay cues con archivos NO encontrados: buscar los medios en otra carpeta,
                                             En=Some cues have missing files: locate the media in another folder}"/>
                 <Separator Width="14" Background="Transparent"/>
                 <Button x:Name="AddButton" Click="OnAddMenuClick"
-                        Content="{local:Loc Es=➕ Añadir ▾, En=➕ Add ▾}">
+                        Content="{local:Loc Icon=Add, IconAfter=Expanded, Es=Añadir, En=Add}">
                     <Button.ContextMenu>
                         <ContextMenu>
-                            <MenuItem Click="OnAddCue" Tag="AUDIO" Header="♪ Audio"/>
-                            <MenuItem Click="OnAddCue" Tag="VIDEO" Header="{local:Loc Es=▣ Vídeo, En=▣ Video}"/>
-                            <MenuItem Click="OnAddCue" Tag="WAIT" Header="{local:Loc Es=⏱ Espera, En=⏱ Wait}"/>
-                            <MenuItem Click="OnAddCue" Tag="FADE" Header="{local:Loc Es=◢ Fundido, En=◢ Fade}"/>
-                            <MenuItem Click="OnAddCue" Tag="START" Header="{local:Loc Es=▶ Iniciar, En=▶ Start}"/>
-                            <MenuItem Click="OnAddCue" Tag="STOP" Header="{local:Loc Es=■ Parar, En=■ Stop}"/>
-                            <MenuItem Click="OnAddCue" Tag="SCRIPT" Header="⚙ Script"/>
-                            <MenuItem Click="OnAddCue" Tag="MEMO" Header="{local:Loc Es=✎ Nota, En=✎ Memo}"/>
-                            <MenuItem Click="OnAddCue" Tag="GROUP" Header="{local:Loc Es=▸ Grupo, En=▸ Group}"/>
+                            <MenuItem Click="OnAddCue" Tag="AUDIO" Header="{local:Loc Icon=Audio, Es=Audio, En=Audio}"/>
+                            <MenuItem Click="OnAddCue" Tag="VIDEO" Header="{local:Loc Icon=Video, Es=Vídeo, En=Video}"/>
+                            <MenuItem Click="OnAddCue" Tag="WAIT" Header="{local:Loc Icon=Wait, Es=Espera, En=Wait}"/>
+                            <MenuItem Click="OnAddCue" Tag="FADE" Header="{local:Loc Icon=Fade, Es=Fundido, En=Fade}"/>
+                            <MenuItem Click="OnAddCue" Tag="START" Header="{local:Loc Icon=Start, Es=Iniciar, En=Start}"/>
+                            <MenuItem Click="OnAddCue" Tag="STOP" Header="{local:Loc Icon=Stop, Es=Parar, En=Stop}"/>
+                            <MenuItem Click="OnAddCue" Tag="SCRIPT" Header="{local:Loc Icon=Script, Es=Script, En=Script}"/>
+                            <MenuItem Click="OnAddCue" Tag="MEMO" Header="{local:Loc Icon=Memo, Es=Nota, En=Memo}"/>
+                            <MenuItem Click="OnAddCue" Tag="GROUP" Header="{local:Loc Icon=Group, Es=Grupo, En=Group}"/>
                         </ContextMenu>
                     </Button.ContextMenu>
                 </Button>
                 <Separator Width="14" Background="Transparent"/>
                 <Button Click="OnImportFiles"
-                        Content="{local:Loc Es=＋ Importar archivos…, En=＋ Import files…}"/>
+                        Content="{local:Loc Icon=Import, Es=Importar archivos…, En=Import files…}"/>
                 <Button x:Name="DeleteButton" Click="OnDeleteCue"
-                        Content="{local:Loc Es=🗑 Eliminar, En=🗑 Delete}"/>
+                        Content="{local:Loc Icon=Delete, Es=Eliminar, En=Delete}"/>
                 <Separator Width="14" Background="Transparent"/>
-                <TextBlock x:Name="SearchLabel" Text="🔍" VerticalAlignment="Center"
+                <TextBlock x:Name="SearchLabel" Text="{x:Static local:Icons.Search}" VerticalAlignment="Center"
                            Visibility="Collapsed" Margin="0,0,3,0"/>
                 <TextBox x:Name="SearchBox" Width="170" Visibility="Collapsed"
                          VerticalContentAlignment="Center"
-                         Background="#1a1a1a" Foreground="#ddd" BorderBrush="#555"
+                         Background="{DynamicResource SunkenBg}" Foreground="{DynamicResource TextPrimary}" BorderBrush="{DynamicResource Border}"
                          TextChanged="OnSearchChanged"
                          PreviewKeyDown="OnSearchKeyDown"
                          ToolTip="{local:Loc Es=Filtrar cues por nombre o número (Esc cierra),
@@ -188,15 +183,15 @@
         </Border>
 
         <!-- ═══════════ STATUS BAR ═══════════ -->
-        <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{StaticResource Panel}" Padding="8,4">
+        <Border x:Name="StatusBar" DockPanel.Dock="Bottom" Background="{DynamicResource PanelBg}" Padding="8,4">
             <DockPanel>
                 <TextBlock x:Name="TallyLabel" DockPanel.Dock="Right"
                            Text="{local:Loc Es=SALIDA: NEGRO, En=OUTPUT: BLACK}"
-                           Foreground="{StaticResource FgDim}"/>
-                <Button x:Name="LogButton" DockPanel.Dock="Left" Content="🕮"
+                           Foreground="{DynamicResource TextDim}"/>
+                <Button x:Name="LogButton" DockPanel.Dock="Left" Content="{x:Static local:Icons.Log}"
                         Click="OnShowStatusLog" Padding="4,0" Margin="0,0,8,0"
                         Background="Transparent" BorderThickness="0"
-                        Foreground="{StaticResource FgDim}"
+                        Foreground="{DynamicResource TextDim}"
                         ToolTip="{local:Loc Es=Historial de avisos y mensajes de estado,
                                             En=History of warnings and status messages}"/>
                 <TextBlock x:Name="StatusLabel" Text="{local:Loc Es=Listo., En=Ready.}"/>
@@ -213,44 +208,44 @@
                 <ColumnDefinition Width="*" MinWidth="400"/>
             </Grid.ColumnDefinitions>
 
-        <Border Grid.Column="0" Background="{StaticResource Panel}"
+        <Border Grid.Column="0" Background="{DynamicResource PanelBg}"
                 Padding="8">
             <DockPanel>
                 <!-- Mini-monitores PVW / PGM (se rellenan desde código) -->
                 <StackPanel x:Name="MonitorHost" DockPanel.Dock="Top"
                             Margin="0,0,0,10"/>
                 <!-- Notas del cue en standby -->
-                <Border x:Name="NotesPanel" DockPanel.Dock="Top" Background="#2d2a1e"
+                <Border x:Name="NotesPanel" DockPanel.Dock="Top" Background="{DynamicResource NotesBg}"
                         CornerRadius="4" Padding="8,6" Margin="0,0,0,10"
                         Visibility="Collapsed">
                     <StackPanel>
                         <TextBlock Text="{local:Loc Es=NOTAS DEL SIGUIENTE, En=NEXT CUE NOTES}"
-                                   FontSize="9" Foreground="#a89968"/>
+                                   FontSize="9" Foreground="{DynamicResource NotesLabel}"/>
                         <TextBlock x:Name="NotesText" TextWrapping="Wrap"
-                                   Foreground="#e8dcb8" FontSize="13"/>
+                                   Foreground="{DynamicResource NotesText}" FontSize="13"/>
                     </StackPanel>
                 </Border>
                 <TextBlock DockPanel.Dock="Top" Text="{local:Loc Es=EN REPRODUCCIÓN, En=PLAYING}"
                            FontWeight="Bold"
-                           Foreground="{StaticResource FgDim}" Margin="0,0,0,6"/>
+                           Foreground="{DynamicResource TextDim}" Margin="0,0,0,6"/>
                 <ItemsControl x:Name="ActiveList">
                     <ItemsControl.ItemTemplate>
                         <DataTemplate>
-                            <Border Background="#333" CornerRadius="4" Padding="8,6"
+                            <Border Background="{DynamicResource CardBg}" CornerRadius="4" Padding="8,6"
                                     Margin="0,0,0,6">
                                 <Border.ContextMenu>
                                     <ContextMenu>
-                                        <MenuItem Header="{local:Loc Es=⏸ Pausar / reanudar, En=⏸ Pause / resume}"
+                                        <MenuItem Header="{local:Loc Icon=Pause, Es=Pausar / reanudar, En=Pause / resume}"
                                                   Click="OnActivePauseMenu"/>
-                                        <MenuItem Header="{local:Loc Es=■ Detener, En=■ Stop}"
+                                        <MenuItem Header="{local:Loc Icon=Stop, Es=Detener, En=Stop}"
                                                   Click="OnActiveStopMenu"/>
                                     </ContextMenu>
                                 </Border.ContextMenu>
                                 <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="■"
+                                    <Button DockPanel.Dock="Right" Content="{x:Static local:Icons.Stop}"
                                             Width="26" Height="26" Margin="6,0,0,0"
-                                            Background="#5a2a2a" Foreground="#ddd"
-                                            BorderBrush="#703030"
+                                            Background="{DynamicResource StopSmallBg}" Foreground="{DynamicResource TextPrimary}"
+                                            BorderBrush="{DynamicResource StopSmallBorder}"
                                             ToolTip="{local:Loc Es=Detener este cue, En=Stop this cue}"
                                             Tag="{Binding Id}" Click="OnActiveStopClick"/>
                                     <StackPanel>
@@ -261,7 +256,7 @@
                                                    FontFamily="Consolas"/>
                                         <ProgressBar Height="4" Maximum="1"
                                                      Value="{Binding Fraction, Mode=OneWay}"
-                                                     Foreground="#2ecc71" Background="#222"
+                                                     Foreground="{DynamicResource Go}" Background="{DynamicResource TrackBg}"
                                                      Margin="0,4,0,0"/>
                                     </StackPanel>
                                 </DockPanel>
@@ -273,7 +268,7 @@
         </Border>
 
         <GridSplitter Grid.Column="1" Width="5" HorizontalAlignment="Center"
-                      VerticalAlignment="Stretch" Background="#333333"
+                      VerticalAlignment="Stretch" Background="{DynamicResource Divider}"
                       ResizeBehavior="PreviousAndNext"/>
 
         <!-- ═══════════ CENTRO: tabla + (inspector | timeline) ═══════════ -->
@@ -287,7 +282,7 @@
         <DataGrid x:Name="CueGrid" Grid.Row="0"
                   AutoGenerateColumns="False" IsReadOnly="True"
                   HeadersVisibility="Column" GridLinesVisibility="None"
-                  Background="{StaticResource Bg}" Foreground="{StaticResource Fg}"
+                  Background="{DynamicResource WindowBg}" Foreground="{DynamicResource TextPrimary}"
                   RowHeight="30" FontSize="13"
                   BorderThickness="0" SelectionMode="Extended" SelectionUnit="FullRow"
                   CanUserAddRows="False" CanUserDeleteRows="False"
@@ -300,8 +295,8 @@
                   Drop="OnGridDrop" DragOver="OnGridDragOver" AllowDrop="True">
             <DataGrid.ColumnHeaderStyle>
                 <Style TargetType="DataGridColumnHeader">
-                    <Setter Property="Background" Value="#2d2d30"/>
-                    <Setter Property="Foreground" Value="#bbb"/>
+                    <Setter Property="Background" Value="{DynamicResource HeaderBg}"/>
+                    <Setter Property="Foreground" Value="{DynamicResource TextTertiary}"/>
                     <Setter Property="Padding" Value="6,4"/>
                     <Setter Property="BorderThickness" Value="0"/>
                 </Style>
@@ -314,7 +309,7 @@
                     <Setter Property="Background" Value="Transparent"/>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
-                            <Setter Property="Background" Value="{StaticResource PlayheadBg}"/>
+                            <Setter Property="Background" Value="{DynamicResource PlayheadRow}"/>
                         </DataTrigger>
                     </Style.Triggers>
                 </Style>
@@ -327,8 +322,8 @@
                     <Setter Property="BorderThickness" Value="0"/>
                     <Style.Triggers>
                         <Trigger Property="IsSelected" Value="True">
-                            <Setter Property="Background" Value="#37527a"/>
-                            <Setter Property="BorderBrush" Value="#5a80c0"/>
+                            <Setter Property="Background" Value="{DynamicResource SelectionBg}"/>
+                            <Setter Property="BorderBrush" Value="{DynamicResource SelectionBorder}"/>
                             <Setter Property="BorderThickness" Value="0,1"/>
                         </Trigger>
                     </Style.Triggers>
@@ -357,7 +352,7 @@
                         <DataTemplate>
                             <Border Background="{Binding LabelBrush}" CornerRadius="3"
                                     Padding="4,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Number}" Foreground="#ddd"
+                                <TextBlock Text="{Binding Number}" Foreground="{DynamicResource TextPrimary}"
                                            VerticalAlignment="Center"/>
                             </Border>
                         </DataTemplate>
@@ -384,7 +379,7 @@
                                         Margin="{Binding GroupBandMargin}"
                                         Background="{Binding GroupBandBrush}"/>
                                 <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
-                                           Foreground="#ddd" VerticalAlignment="Center"/>
+                                           Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
                             </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
@@ -411,28 +406,28 @@
                 <DataGridTextColumn x:Name="LatColumn" Header="Lat"
                                     Binding="{Binding LatencyText}" Width="60"
                                     ElementStyle="{StaticResource NumCell}"/>
-                <DataGridTextColumn Header="⚑" Binding="{Binding FlagText}" Width="28"
+                <DataGridTextColumn Header="{x:Static local:Icons.Flag}" Binding="{Binding FlagText}" Width="28"
                                     ElementStyle="{StaticResource NumCell}"/>
-                <DataGridTextColumn Header="✕" Binding="{Binding ArmedText}" Width="28"
+                <DataGridTextColumn Header="{x:Static local:Icons.Cross}" Binding="{Binding ArmedText}" Width="28"
                                     ElementStyle="{StaticResource NumCell}"/>
             </DataGrid.Columns>
         </DataGrid>
 
             <GridSplitter Grid.Row="1" Height="5" HorizontalAlignment="Stretch"
-                          Background="#333333" ResizeBehavior="PreviousAndNext"/>
+                          Background="{DynamicResource Divider}" ResizeBehavior="PreviousAndNext"/>
 
             <!-- Zona inferior: timeline (SIEMPRE primero) e inspector comparten
                  sitio. En modo SHOW se fuerza la pestaña del timeline. -->
             <TabControl x:Name="BottomTabs" Grid.Row="2"
-                        Background="#252526" BorderThickness="0" Padding="0">
-                <TabItem Header="⏱ Timeline">
+                        Background="{DynamicResource PanelBg}" BorderThickness="0" Padding="0">
+                <TabItem Header="{local:Loc Icon=Timeline, Es=Timeline, En=Timeline}">
                     <local:TimelinePanel x:Name="Timeline"/>
                 </TabItem>
-                <TabItem Header="🛠 Inspector">
-                    <local:InspectorPanel x:Name="Inspector" Background="#252526"/>
+                <TabItem Header="{local:Loc Icon=Inspector, Es=Inspector, En=Inspector}">
+                    <local:InspectorPanel x:Name="Inspector" Background="{DynamicResource PanelBg}"/>
                 </TabItem>
-                <TabItem Header="🎚 Mixer">
-                    <local:AudioMixerPanel x:Name="Mixer" Background="#252526"/>
+                <TabItem Header="{local:Loc Icon=Mixer, Es=Mixer, En=Mixer}">
+                    <local:AudioMixerPanel x:Name="Mixer" Background="{DynamicResource PanelBg}"/>
                 </TabItem>
             </TabControl>
         </Grid>

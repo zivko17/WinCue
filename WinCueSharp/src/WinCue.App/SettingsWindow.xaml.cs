@@ -62,7 +62,7 @@ public partial class SettingsWindow : Window
         Tabs.Items.Add(MakeTab(Loc.T("Red / Control", "Network / Control"), BuildNetwork()));
         Tabs.Items.Add(MakeTab(Loc.T("Interfaz", "Interface"), BuildInterface()));
         Tabs.Items.Add(MakeTab(Loc.T("Rutas", "Paths"), BuildPaths()));
-        Tabs.Items.Add(MakeTab(Loc.T("ⓘ Acerca de", "ⓘ About"), BuildAbout()));
+        Tabs.Items.Add(MakeTab($"{Icons.Info} {Loc.T("Acerca de", "About")}", BuildAbout()));
     }
 
     /// <summary>Acerca de: versión + atribuciones de terceros (antes era un
@@ -94,12 +94,12 @@ public partial class SettingsWindow : Window
         var btnRow = Row(lic, "");
         var btn = new Button
         {
-            Content = Loc.T("📄 Abrir atribuciones", "📄 Open attributions"),
+            Content = $"{Icons.Document} {Loc.T("Abrir atribuciones", "Open attributions")}",
             Padding = new Thickness(12, 5, 12, 5),
         };
         var status = new TextBlock
         {
-            Foreground = System.Windows.Media.Brushes.Gray,
+            Foreground = Theme.TextNoteBrush,
             FontStyle = FontStyles.Italic,
             Margin = new Thickness(0, 4, 0, 0),
             TextWrapping = TextWrapping.Wrap,
@@ -140,7 +140,7 @@ public partial class SettingsWindow : Window
         _audioDevices = Combo("audio_device_name", dev, Loc.T("Dispositivo:", "Device:"));
         RefreshAudioDevices();
         var refreshRow = Row(dev, "");
-        var btnRefresh = new Button { Content = Loc.T("↻ Refrescar dispositivos", "↻ Refresh devices") };
+        var btnRefresh = new Button { Content = $"{Icons.Refresh} {Loc.T("Refrescar dispositivos", "Refresh devices")}" };
         btnRefresh.Click += (_, _) =>
         {
             AudioEngine.RefreshAsioDrivers();   // la lista ASIO está cacheada
@@ -252,7 +252,7 @@ public partial class SettingsWindow : Window
         var testRow = Row(osc, "");
         var btnPing = new Button { Content = "Enviar ping de prueba" };
         btnPing.Click += OnOscTest;
-        _oscTestResult = new TextBlock { Foreground = System.Windows.Media.Brushes.Gray,
+        _oscTestResult = new TextBlock { Foreground = Theme.TextNoteBrush,
                                           Margin = new Thickness(8, 0, 0, 0) };
         testRow.Children.Add(btnPing);
         testRow.Children.Add(_oscTestResult);
@@ -265,11 +265,11 @@ public partial class SettingsWindow : Window
         var stopNote = Spin("midi_stop_note", midi, Loc.T("Nota MIDI para STOP:", "MIDI note for STOP:"), 0, 127);
         _midiNotes = (goNote, stopNote);
         var learnRow = Row(midi, "");
-        var btnLearnGo = new Button { Content = "🎹 Learn GO (5 s)" };
-        var btnLearnStop = new Button { Content = "🎹 Learn STOP (5 s)" };
+        var btnLearnGo = new Button { Content = $"{Icons.Midi} Learn GO (5 s)" };
+        var btnLearnStop = new Button { Content = $"{Icons.Midi} Learn STOP (5 s)" };
         btnLearnGo.Click += (_, _) => MidiLearn(isGo: true);
         btnLearnStop.Click += (_, _) => MidiLearn(isGo: false);
-        _midiLearnStatus = new TextBlock { Foreground = System.Windows.Media.Brushes.Gray,
+        _midiLearnStatus = new TextBlock { Foreground = Theme.TextNoteBrush,
                                             Margin = new Thickness(8, 0, 0, 0) };
         learnRow.Children.Add(btnLearnGo);
         learnRow.Children.Add(btnLearnStop);
@@ -360,7 +360,7 @@ public partial class SettingsWindow : Window
         parent.Children.Add(new TextBlock
         {
             Text = text,
-            Foreground = System.Windows.Media.Brushes.Gray,
+            Foreground = Theme.TextNoteBrush,
             FontStyle = FontStyles.Italic,
             Margin = new Thickness(0, 2, 0, 2),
             TextWrapping = TextWrapping.Wrap,
@@ -423,7 +423,7 @@ public partial class SettingsWindow : Window
     {
         var row = Row(parent, label);
         var tb = new TextBox { Width = 260 };
-        var btn = new Button { Content = "…" };
+        var btn = new Button { Content = Icons.Browse };
         btn.Click += (_, _) =>
         {
             if (folder)
@@ -463,7 +463,7 @@ public partial class SettingsWindow : Window
         foreach (var dev in AudioEngine.ListDevices())
             _audioDevices.Items.Add(new ComboBoxItem
             {
-                Content = dev.IsDefault ? $"{dev.Name}  ★" : dev.Name,
+                Content = dev.IsDefault ? $"{dev.Name}  {Icons.Star}" : dev.Name,
                 Tag = dev.Name,
             });
         foreach (string asio in AudioEngine.ListAsioDrivers())
@@ -517,7 +517,7 @@ public partial class SettingsWindow : Window
                 {
                     var remote = new IPEndPoint(IPAddress.Any, 0);
                     udp.Receive(ref remote);
-                    return $"✓ Respuesta de {remote}";
+                    return $"{Icons.Check} Respuesta de {remote}";
                 }
                 catch (SocketException)
                 {
@@ -582,7 +582,7 @@ public partial class SettingsWindow : Window
                         var (goTb, stopTb) = _midiNotes!.Value;
                         (isGo ? goTb : stopTb).Text = note.NoteNumber.ToString();
                         _midiLearnStatus.Text =
-                            $"✓ Nota {note.NoteNumber} ({MidiNoteName(note.NoteNumber)})";
+                            $"{Icons.Check} Nota {note.NoteNumber} ({MidiNoteName(note.NoteNumber)})";
                         StopMidiLearn();
                     });
                 }

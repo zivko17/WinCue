@@ -32,10 +32,10 @@ public sealed class CanvasEditorControl : StackPanel
     /// overlay "Identificar" y el menú del botón de salida).</summary>
     internal static readonly Color[] OutColors =
     {
-        Color.FromRgb(0x2e, 0xcc, 0x71),   // S1 verde
-        Color.FromRgb(0x35, 0x98, 0xdb),   // S2 azul
-        Color.FromRgb(0xe8, 0xc0, 0x00),   // S3 ámbar
-        Color.FromRgb(0xc9, 0x5e, 0xd6),   // S4 magenta
+        Theme.Go,        // S1 verde
+        Theme.Info,      // S2 azul
+        Theme.Standby,   // S3 ámbar
+        Theme.Magenta,   // S4 magenta
     };
 
     private int _cw = 1920, _ch = 1080;
@@ -99,15 +99,15 @@ public sealed class CanvasEditorControl : StackPanel
         _surface = new Canvas
         {
             Width = ViewW, Height = ViewH,
-            Background = new SolidColorBrush(Color.FromRgb(0x14, 0x14, 0x14)),
+            Background = new SolidColorBrush(Theme.GeometryBg),
             ClipToBounds = true,
             HorizontalAlignment = HorizontalAlignment.Left,
         };
         _canvasRect = new Rectangle
         {
-            Stroke = new SolidColorBrush(Color.FromRgb(0x66, 0x66, 0x66)),
+            Stroke = new SolidColorBrush(Theme.GeometryGrid),
             StrokeThickness = 1,
-            Fill = new SolidColorBrush(Color.FromRgb(0x1e, 0x1e, 0x1e)),
+            Fill = new SolidColorBrush(Theme.WindowBg),
         };
         _surface.Children.Add(_canvasRect);
 
@@ -136,8 +136,7 @@ public sealed class CanvasEditorControl : StackPanel
             {
                 BorderBrush = new SolidColorBrush(color),
                 BorderThickness = new Thickness(2),
-                Background = new SolidColorBrush(Color.FromArgb(0x30,
-                    color.R, color.G, color.B)),
+                Background = new SolidColorBrush(Theme.Alpha(color, 0x30)),
                 Child = grid,
                 Cursor = Cursors.SizeAll,
             };
@@ -155,7 +154,9 @@ public sealed class CanvasEditorControl : StackPanel
         Children.Add(new Border
         {
             Child = _surface,
-            BorderBrush = new SolidColorBrush(Color.FromRgb(0x3c, 0x3c, 0x3c)),
+            // Gris #3c3c3c: sin token de BORDE con ese valor, se toma el de
+            // fondo de botón (mismo gris exacto) hasta que la paleta tenga uno
+            BorderBrush = new SolidColorBrush(Theme.ButtonBg),
             BorderThickness = new Thickness(1),
             HorizontalAlignment = HorizontalAlignment.Left,
         });
@@ -189,7 +190,7 @@ public sealed class CanvasEditorControl : StackPanel
                 {
                     Text = $"{tags[f]}:", VerticalAlignment = VerticalAlignment.Center,
                     Margin = new Thickness(f == 0 ? 0 : 8, 0, 2, 0),
-                    Foreground = Brushes.Gray,
+                    Foreground = Theme.TextNoteBrush,
                 });
                 var box = NumBox(48);
                 box.LostFocus += (_, _) => CommitNumBox(idx, fi);

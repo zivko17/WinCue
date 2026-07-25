@@ -97,7 +97,8 @@ public sealed class LiveMonitorControl : Border
         _msg = new TextBlock
         {
             Text = "—",
-            Foreground = new SolidColorBrush(Color.FromRgb(0x55, 0x55, 0x55)),
+            // Mismo gris que los bordes: es un marcador de posición, no texto
+            Foreground = Theme.Solid(Theme.Border),
             HorizontalAlignment = HorizontalAlignment.Center,
             VerticalAlignment = VerticalAlignment.Center,
         };

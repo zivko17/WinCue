@@ -31,31 +31,19 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
     /// <summary>Icono + tipo, coloreado (escaneable de reojo).</summary>
     public string TypeLabel => _cue.Type switch
     {
-        CueType.Audio => "♪ AUDIO",
-        CueType.Video => Loc.T("▣ VÍDEO", "▣ VIDEO"),
-        CueType.Wait => Loc.T("⏱ ESPERA", "⏱ WAIT"),
-        CueType.Fade => Loc.T("◢ FUNDIDO", "◢ FADE"),
-        CueType.Start => Loc.T("▶ INICIAR", "▶ START"),
-        CueType.Stop => Loc.T("■ PARAR", "■ STOP"),
-        CueType.Script => "⚙ SCRIPT",
-        CueType.Memo => Loc.T("✎ NOTA", "✎ MEMO"),
-        CueType.Group => "▸ GRUPO",
+        CueType.Audio => $"{Icons.Audio} AUDIO",
+        CueType.Video => $"{Icons.Video} {Loc.T("VÍDEO", "VIDEO")}",
+        CueType.Wait => $"{Icons.Wait} {Loc.T("ESPERA", "WAIT")}",
+        CueType.Fade => $"{Icons.Fade} {Loc.T("FUNDIDO", "FADE")}",
+        CueType.Start => $"{Icons.Start} {Loc.T("INICIAR", "START")}",
+        CueType.Stop => $"{Icons.Stop} {Loc.T("PARAR", "STOP")}",
+        CueType.Script => $"{Icons.Script} SCRIPT",
+        CueType.Memo => $"{Icons.Memo} {Loc.T("NOTA", "MEMO")}",
+        CueType.Group => $"{Icons.Group} GRUPO",
         _ => TypeText,
     };
 
-    public Brush TypeBrush => BrushFrom(_cue.Type switch
-    {
-        CueType.Audio => "#4a86b8",
-        CueType.Video => "#9b59b6",
-        CueType.Wait => "#888888",
-        CueType.Fade => "#e8a200",
-        CueType.Start => "#2ecc71",
-        CueType.Stop => "#c0392b",
-        CueType.Script => "#16a085",
-        CueType.Memo => "#777777",
-        CueType.Group => "#e8c000",
-        _ => "#dddddd",
-    });
+    public Brush TypeBrush => Theme.BrushForCueType(_cue.Type);
 
     // ── Cuenta atrás en la fila (caja en la columna Duración, estilo QLab) ─
     private double? _liveRemaining;        // s restantes mientras suena
@@ -80,7 +68,7 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
     }
 
     public string Name => _cue.Type == CueType.Group
-        ? $"{(_cue.Collapsed ? "▸" : "▾")} {_cue.Name}"
+        ? $"{(_cue.Collapsed ? Icons.Collapsed : Icons.Expanded)} {_cue.Name}"
         : _cue.Name;
 
     /// <summary>Sangría por profundidad de anidamiento en grupos (+8 px de
@@ -104,10 +92,9 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
             var g = BandGroup();
             if (g is null)
                 return Brushes.Transparent;
-            string hex = g.Color.Length > 0
+            return g.Color.Length > 0
                 && CueConstants.CueColors.TryGetValue(g.Color, out var h) && h.Length > 0
-                ? h : "#e8c000";
-            return BrushFrom(hex);
+                ? BrushFrom(h) : Theme.StandbyBrush;
         }
     }
 
@@ -137,10 +124,10 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
     }
 
     private static readonly Brush DurBoxNone = Brushes.Transparent;
-    private static readonly Brush DurBoxPlaying = BrushFrom("#2ecc71");
-    private static readonly Brush DurBoxPreWait = BrushFrom("#e8c000");
-    private static readonly Brush DurTextIdle = BrushFrom("#dddddd");
-    private static readonly Brush DurTextBoxed = BrushFrom("#101010");
+    private static readonly Brush DurBoxPlaying = Theme.GoBrush;
+    private static readonly Brush DurBoxPreWait = Theme.StandbyBrush;
+    private static readonly Brush DurTextIdle = Theme.TextPrimaryBrush;
+    private static readonly Brush DurTextBoxed = Theme.TextOnAccentBrush;
 
     /// <summary>Fondo de la caja de la columna Duración: verde sonando, ámbar en
     /// pre_wait, transparente (sin caja) en reposo.</summary>
@@ -160,16 +147,16 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
 
     public string ContinueText => _cue.ContinueMode switch
     {
-        ContinueMode.AutoContinue => "⤵ auto",
-        ContinueMode.AutoFollow => "⤵ follow",
+        ContinueMode.AutoContinue => $"{Icons.FollowInto} auto",
+        ContinueMode.AutoFollow => $"{Icons.FollowInto} follow",
         _ => "",
     };
 
     public string LatencyText => _cue.LatencyMs is double ms ? $"{ms:F0} ms" : "";
 
-    public string ArmedText => _cue.Armed ? "" : "✕";
+    public string ArmedText => _cue.Armed ? "" : Icons.Cross;
 
-    public string FlagText => _cue.Flagged ? "⚑" : "";
+    public string FlagText => _cue.Flagged ? Icons.Flag : "";
 
     /// <summary>Color del punto de estado (colores compartidos con Python).</summary>
     public Brush StateBrush => BrushFrom(CueConstants.StateColors[ToCueState(_cue.State)]);

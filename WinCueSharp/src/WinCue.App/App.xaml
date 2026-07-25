@@ -4,28 +4,27 @@
     <!-- Sin StartupUri: la ventana se construye en App.OnStartup (composición) -->
     <Application.Resources>
 
-        <!-- ══════════ Tema oscuro global ══════════ -->
-
-        <SolidColorBrush x:Key="CtlBg" Color="#2a2a2a"/>
-        <SolidColorBrush x:Key="CtlBorder" Color="#444444"/>
-        <SolidColorBrush x:Key="CtlFg" Color="#dddddd"/>
-        <SolidColorBrush x:Key="CtlHighlight" Color="#264f78"/>
+        <!-- ══════════ Tema oscuro global ══════════
+             Los COLORES no viven aquí: están en Theme.cs, que los publica en
+             este mismo diccionario desde App.OnStartup. Por eso se referencian
+             con {DynamicResource} (StaticResource se resolvería al parsear este
+             fichero, antes de que la paleta exista). -->
 
         <Style TargetType="TextBox">
-            <Setter Property="Background" Value="{StaticResource CtlBg}"/>
-            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
-            <Setter Property="BorderBrush" Value="{StaticResource CtlBorder}"/>
-            <Setter Property="CaretBrush" Value="#e8a200"/>
+            <Setter Property="Background" Value="{DynamicResource ControlBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BorderControl}"/>
+            <Setter Property="CaretBrush" Value="{DynamicResource Warn}"/>
             <Setter Property="Padding" Value="4,2"/>
         </Style>
 
         <Style TargetType="CheckBox">
-            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
 
         <!-- ComboBox oscuro (retemplado: el estilo de sistema es claro) -->
         <Style TargetType="ComboBoxItem">
-            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -37,7 +36,7 @@
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsHighlighted" Value="True">
                                 <Setter TargetName="bd" Property="Background"
-                                        Value="{StaticResource CtlHighlight}"/>
+                                        Value="{DynamicResource PlayheadRow}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
@@ -46,7 +45,7 @@
         </Style>
 
         <Style TargetType="ComboBox">
-            <Setter Property="Foreground" Value="{StaticResource CtlFg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
             <Setter Property="MinHeight" Value="26"/>
             <Setter Property="Template">
                 <Setter.Value>
@@ -57,13 +56,14 @@
                                     RelativeSource={RelativeSource TemplatedParent}}">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="{StaticResource CtlBg}"
-                                                BorderBrush="{StaticResource CtlBorder}"
+                                        <Border Background="{DynamicResource ControlBg}"
+                                                BorderBrush="{DynamicResource BorderControl}"
                                                 BorderThickness="1" CornerRadius="2">
                                             <Path HorizontalAlignment="Right"
                                                   VerticalAlignment="Center"
                                                   Margin="0,0,8,0"
-                                                  Data="M 0 0 L 4 4 L 8 0 Z" Fill="#999999"/>
+                                                  Data="M 0 0 L 4 4 L 8 0 Z"
+                                                  Fill="{DynamicResource TextMuted}"/>
                                         </Border>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
@@ -75,8 +75,9 @@
                             <Popup IsOpen="{TemplateBinding IsDropDownOpen}"
                                    Placement="Bottom" AllowsTransparency="True"
                                    Focusable="False" PopupAnimation="Slide">
-                                <Border Background="{StaticResource CtlBg}"
-                                        BorderBrush="#555555" BorderThickness="1"
+                                <Border Background="{DynamicResource ControlBg}"
+                                        BorderBrush="{DynamicResource Border}"
+                                        BorderThickness="1"
                                         MinWidth="{TemplateBinding ActualWidth}"
                                         MaxHeight="340">
                                     <ScrollViewer VerticalScrollBarVisibility="Auto">
@@ -93,22 +94,24 @@
 
         <!-- Pestañas oscuras (inspector y settings) -->
         <Style TargetType="TabItem">
-            <Setter Property="Foreground" Value="#888888"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="TabItem">
-                        <Border x:Name="bd" Background="#111111"
-                                BorderBrush="#333333" BorderThickness="1,1,1,0"
+                        <Border x:Name="bd" Background="{DynamicResource DeeperBg}"
+                                BorderBrush="{DynamicResource Divider}"
+                                BorderThickness="1,1,1,0"
                                 Padding="14,5" Margin="0,0,2,0">
                             <ContentPresenter ContentSource="Header"/>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
-                                <Setter TargetName="bd" Property="Background" Value="#1e1e1e"/>
-                                <Setter Property="Foreground" Value="#e8a200"/>
+                                <Setter TargetName="bd" Property="Background"
+                                        Value="{DynamicResource WindowBg}"/>
+                                <Setter Property="Foreground" Value="{DynamicResource Warn}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
-                                <Setter Property="Foreground" Value="#cccccc"/>
+                                <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
