@@ -196,6 +196,7 @@ public partial class MainWindow : Window, IShowView
         // Texto inicial localizado de los botones de cabecera (la XAML trae
         // valores estáticos; el resto de su estado ya se refresca por evento)
         ModeToggle.Content = Loc.T("Modo: EDIT", "Mode: EDIT");
+        LockModeToggleWidth();
         UpdateVideoOutButton();
 
         // Volumen master desde settings (el fader vive en ⚙ → Audio)
@@ -936,6 +937,34 @@ public partial class MainWindow : Window, IShowView
 
     private static string FormatClock(double seconds) =>
         TimeSpan.FromSeconds(seconds).ToString(@"h\:mm\:ss");
+
+    /// <summary>Reserva en el botón de modo el ancho del MÁS LARGO de sus dos
+    /// textos. Sin esto el botón se encoge al pasar de «SHOW» a «EDIT» (en
+    /// fuente proporcional la W es más ancha que la I), y al encogerse arrastra
+    /// consigo el reloj del show, que está a su lado. En directo el reloj no se
+    /// puede mover de sitio: se busca de reojo, siempre en el mismo punto.
+    ///
+    /// Se MIDE en vez de fijar un ancho a mano porque el texto es traducible y
+    /// la tipografía puede cambiar: un número escrito a pelo aquí volvería a
+    /// romperse en cuanto una de las dos cosas se moviera, y sin avisar.</summary>
+    private void LockModeToggleWidth()
+    {
+        var typeface = new Typeface(ModeToggle.FontFamily, ModeToggle.FontStyle,
+                                    ModeToggle.FontWeight, ModeToggle.FontStretch);
+        double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+
+        double Measure(string s) => new FormattedText(
+            s, System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, typeface, ModeToggle.FontSize,
+            Brushes.Black, pixelsPerDip).Width;
+
+        double widest = Math.Max(Measure(Loc.T("Modo: EDIT", "Mode: EDIT")),
+                                 Measure(Loc.T("Modo: SHOW", "Mode: SHOW")));
+
+        // + relleno del botón + el borde de 1 px de cada lado
+        ModeToggle.MinWidth = Math.Ceiling(widest)
+                            + ModeToggle.Padding.Left + ModeToggle.Padding.Right + 2;
+    }
 
     private void OnShowMode(object sender, RoutedEventArgs e)
     {
