@@ -63,7 +63,8 @@ public sealed class AudioMixerPanel : ContentControl
 
     public AudioMixerPanel()
     {
-        _master = Strip.Build("MASTER", AccentPgm, withVu: true, extraMeter: _grBar);
+        _master = Strip.Build("MASTER", AccentPgm, withVu: true, extraMeter: _grBar)
+                       .MakeTaller();
         _grBar.ToolTip = Loc.T(
             "Limitador del bus (techo −1 dBFS): reducción de ganancia.\nLa suma de cues no puede saturar el dispositivo.",
             "Bus limiter (−1 dBFS ceiling): gain reduction.\nThe sum of cues cannot clip the device.");
@@ -249,6 +250,20 @@ public sealed class AudioMixerPanel : ContentControl
         protected TextBlock TitleText = null!;
         protected bool Syncing;
 
+        /// <summary>Sube el fader a la altura de MASTER. Se llama solo en él:
+        /// es el único que actúa sobre todo lo que suena, y ese poco de más
+        /// basta para encontrarlo sin leer la etiqueta.</summary>
+        public Strip MakeTaller()
+        {
+            Fader.Height = UiMetrics.MasterFaderHeight;
+            // Los medidores suben CON él: si solo creciera el fader, el strip
+            // volvería a quedar descuadrado.
+            foreach (var child in MeterZone.Children)
+                if (child is FrameworkElement fe && !ReferenceEquals(fe, Fader))
+                    fe.Height = UiMetrics.MasterFaderHeight;
+            return this;
+        }
+
         public static Strip Build(string title, Brush accent, bool withVu,
                                   FrameworkElement? extraMeter = null)
         {
@@ -282,22 +297,34 @@ public sealed class AudioMixerPanel : ContentControl
             Fader = new Slider
             {
                 Orientation = Orientation.Vertical, Minimum = 0, Maximum = 100,
-                Value = 100, Width = 26, MinHeight = 110,
+                Value = 100,
+                // Alto FIJO y no MinHeight: con MinHeight cada strip se estiraba
+                // a lo que le tocase y no había dos faders del mismo tamaño. El
+                // MASTER lo sube luego con MakeTaller().
+                Width = UiMetrics.FaderWidth, Height = UiMetrics.FaderHeight,
                 IsMoveToPointEnabled = true,
             };
             MeterZone.Children.Add(Fader);
+            // Los VU llevan el MISMO alto que el fader, no el que les toque al
+            // estirarse: al fijar el alto del fader se destapó que crecían por
+            // su cuenta y el strip quedaba con la escala del fader y la del
+            // medidor descuadradas, que en una mesa se lee como una avería.
             if (withVu)
             {
-                VuL = new VuMeterControl(vertical: true) { Width = 7, Margin = new Thickness(6, 2, 0, 2) };
-                VuR = new VuMeterControl(vertical: true) { Width = 7, Margin = new Thickness(1, 2, 0, 2) };
+                VuL = new VuMeterControl(vertical: true)
+                { Width = 7, Height = UiMetrics.FaderHeight, Margin = new Thickness(6, 0, 0, 0) };
+                VuR = new VuMeterControl(vertical: true)
+                { Width = 7, Height = UiMetrics.FaderHeight, Margin = new Thickness(1, 0, 0, 0) };
                 MeterZone.Children.Add(VuL);
                 MeterZone.Children.Add(VuR);
             }
             if (extraMeter is not null)
             {
-                extraMeter.Margin = new Thickness(4, 2, 0, 2);
+                extraMeter.Height = UiMetrics.FaderHeight;
+                extraMeter.Margin = new Thickness(4, 0, 0, 0);
                 MeterZone.Children.Add(extraMeter);
             }
+            MeterZone.VerticalAlignment = VerticalAlignment.Top;
             Grid.SetRow(MeterZone, 1);
             grid.Children.Add(MeterZone);
 

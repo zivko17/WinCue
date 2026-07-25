@@ -149,6 +149,12 @@ public sealed class InspectorPanel : ContentControl
             if (!ReferenceEquals(e.OriginalSource, _tabs))
                 return;
             RefreshPreviewVisibility();
+            // Al ABRIR geometría se vuelve a pedir el fotograma: para entonces
+            // mpv lleva rato cargado, así que este es el intento que casi
+            // siempre acierta aunque los de la carga del cue fallaran.
+            if (ReferenceEquals(_tabs.SelectedItem, _geometryTab)
+                && _cue is { Type: CueType.Video } gc && gc.FilePath.Length > 0)
+                RefreshGeometryFrame();
         };
 
         IsEnabled = false;   // sin cue seleccionado
@@ -228,13 +234,26 @@ public sealed class InspectorPanel : ContentControl
         int token = ++_frameToken;
         try
         {
-            await Task.Delay(220);
-            // Otro cue entró mientras esperábamos: su fotograma manda.
-            if (token != _frameToken)
-                return;
-            var still = await _editPreview.TryGrabStillAsync();
-            if (token == _frameToken)
-                _geoCanvas.SetFrame(still);
+            // Se reintenta con esperas crecientes porque el momento en que mpv
+            // tiene el fotograma listo NO es predecible: recién arrancada la
+            // app tarda bastante más que con el reproductor ya caliente, y con
+            // un solo intento el lienzo se quedaba en el relleno ámbar justo en
+            // el caso más común — abrir la app y mirar la geometría.
+            foreach (int wait in new[] { 220, 500, 1200 })
+            {
+                await Task.Delay(wait);
+                // Otro cue entró mientras esperábamos: su fotograma manda.
+                if (token != _frameToken)
+                    return;
+                var still = await _editPreview.TryGrabStillAsync();
+                if (token != _frameToken)
+                    return;
+                if (still is not null)
+                {
+                    _geoCanvas.SetFrame(still);
+                    return;
+                }
+            }
         }
         catch (Exception) { }
     }
@@ -569,11 +588,25 @@ public sealed class InspectorPanel : ContentControl
     {
         var root = new DockPanel();
 
-        var controls = new StackPanel { Margin = new Thickness(10, 6, 14, 10), Width = 340 };
+        // DOS COLUMNAS. En una sola, los controles de geometría suman más alto
+        // del que tiene el panel y aparecía una barra de desplazamiento: en una
+        // superficie de directo, un control que hay que buscar deslizando es un
+        // control que no está. Repartidos en dos, entran de una vez.
+        //
+        // El ScrollViewer se conserva como red de seguridad para ventanas muy
+        // bajas, pero con la altura normal no llega a mostrar barra.
+        var controls = new StackPanel { Margin = new Thickness(10, 6, 12, 10), Width = 330 };
+        var controlsRight = new StackPanel { Margin = new Thickness(0, 6, 14, 10), Width = 250 };
+
+        var twoCols = new StackPanel { Orientation = Orientation.Horizontal };
+        twoCols.Children.Add(controls);
+        twoCols.Children.Add(controlsRight);
+
         var scrollLeft = new ScrollViewer
         {
             VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            Content = controls,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = twoCols,
         };
         DockPanel.SetDock(scrollLeft, Dock.Left);
         root.Children.Add(scrollLeft);
@@ -674,7 +707,8 @@ public sealed class InspectorPanel : ContentControl
         // (El campo legacy "layer" top/bottom del Python se retiró de la UI:
         // la capa REAL es timeline_layer/📌 — dos conceptos de capa a la
         // vista solo provocaban errores. El JSON lo conserva por compat.)
-        Header(controls, Loc.T("COMPOSITOR", "COMPOSITOR"));
+        // ── Columna DERECHA: compositor y salida ────────────────────────
+        Header(controlsRight, Loc.T("COMPOSITOR", "COMPOSITOR"));
         var compRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         compRow.Children.Add(new TextBlock
@@ -690,12 +724,12 @@ public sealed class InspectorPanel : ContentControl
                 System.Globalization.CultureInfo.InvariantCulture, out double ov)
                 ? ov : (object?)null);
         compRow.Children.Add(opacityBox);
-        controls.Children.Add(compRow);
+        controlsRight.Children.Add(compRow);
         _loaders["opacity"] = c => opacityBox.Text = c.Opacity.ToString("0.#",
             System.Globalization.CultureInfo.InvariantCulture);
 
         // ── Salida de vídeo del cue (multi-monitor estilo Watchout) ─────
-        Header(controls, Loc.T("SALIDA", "OUTPUT"));
+        Header(controlsRight, Loc.T("SALIDA", "OUTPUT"));
         var outRow = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
         outRow.Children.Add(new TextBlock
@@ -720,7 +754,7 @@ public sealed class InspectorPanel : ContentControl
                 Commit("video_output", scr);
         };
         outRow.Children.Add(screenCombo);
-        controls.Children.Add(outRow);
+        controlsRight.Children.Add(outRow);
         var outNote = new TextBlock
         {
             Text = Loc.T("El monitor de cada salida se asigna en Settings → Vídeo.", "Each output's monitor is set in Settings → Video."),
@@ -728,7 +762,7 @@ public sealed class InspectorPanel : ContentControl
             FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
             TextWrapping = TextWrapping.Wrap,
         };
-        controls.Children.Add(outNote);
+        controlsRight.Children.Add(outNote);
         var canvasNote = new TextBlock
         {
             Text = Loc.T(
@@ -739,7 +773,7 @@ public sealed class InspectorPanel : ContentControl
             TextWrapping = TextWrapping.Wrap,
             Visibility = Visibility.Collapsed,
         };
-        controls.Children.Add(canvasNote);
+        controlsRight.Children.Add(canvasNote);
         _loaders["video_output"] = c =>
         {
             screenCombo.SelectedIndex = Math.Clamp(c.VideoOutput, 0, 3);
@@ -903,11 +937,25 @@ public sealed class InspectorPanel : ContentControl
         var slider = new Slider
         {
             Orientation = Orientation.Vertical,
-            Minimum = 0, Maximum = 100, Height = 170,
+            Minimum = 0, Maximum = 100,
+            Width = UiMetrics.FaderWidth, Height = UiMetrics.FaderHeight,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 4, 0, 0),
         };
         faderCol.Children.Add(slider);
+
+        // La lectura va DEBAJO del fader, como en el mixer y en el GAIN del EQ.
+        // Antes vivía en la columna de la derecha: el mismo dato en tres sitios
+        // distintos según la pestaña obliga a buscarlo cada vez.
+        var label = new TextBlock
+        {
+            FontFamily = new FontFamily("Consolas"),
+            FontSize = 13,
+            Foreground = Theme.GoBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        faderCol.Children.Add(label);
         mixer.Children.Add(faderCol);
 
         var vuCol = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
@@ -929,13 +977,6 @@ public sealed class InspectorPanel : ContentControl
         var infoCol = new StackPanel { Margin = new Thickness(12, 4, 0, 0) };
         mixer.Children.Add(infoCol);
 
-        var label = new TextBlock
-        {
-            FontFamily = new FontFamily("Consolas"),
-            FontSize = 15,
-            Foreground = Theme.GoBrush,
-        };
-        infoCol.Children.Add(label);
         slider.ToolTip = Loc.T("Volumen del cue: en vivo si está sonando.",
                                "Cue volume: live if it is playing.");
         _levelVu.ToolTip = Loc.T(

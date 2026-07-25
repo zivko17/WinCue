@@ -186,8 +186,188 @@
             <Setter Property="Padding" Value="4,2"/>
         </Style>
 
+        <!-- ══════════ Seleccionables ══════════
+             CheckBox y RadioButton iban con la plantilla de serie de WPF, que
+             es la del sistema: casilla clara con marca azul. Aquí siguen la
+             misma gramática que el resto — casilla HUNDIDA (contiene un valor,
+             no se pulsa) y la marca en ámbar, que es el color que ya significa
+             «esto está puesto» en toda la consola. -->
+
         <Style TargetType="CheckBox">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="FontFamily" Value="{x:Static local:Icons.Font}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="CheckBox">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Border x:Name="box" Width="15" Height="15" CornerRadius="3"
+                                    Background="{DynamicResource ControlBg}"
+                                    BorderBrush="{DynamicResource BevelEdge}"
+                                    BorderThickness="1" VerticalAlignment="Center"
+                                    SnapsToDevicePixels="True">
+                                <Grid>
+                                    <Border CornerRadius="2"
+                                            Background="{DynamicResource BevelFacePressed}"/>
+                                    <TextBlock x:Name="mark"
+                                               Text="{x:Static local:Icons.Check}"
+                                               FontSize="10" Visibility="Collapsed"
+                                               HorizontalAlignment="Center"
+                                               VerticalAlignment="Center"
+                                               Foreground="{DynamicResource Standby}"/>
+                                </Grid>
+                            </Border>
+                            <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="mark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <!-- Indeterminado: existe en WPF y sin esto se vería
+                                 igual que «sin marcar», que es una mentira. -->
+                            <Trigger Property="IsChecked" Value="{x:Null}">
+                                <Setter TargetName="mark" Property="Text" Value="–"/>
+                                <Setter TargetName="mark" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="box" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <Style TargetType="RadioButton">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="RadioButton">
+                        <StackPanel Orientation="Horizontal" Background="Transparent">
+                            <Grid Width="15" Height="15" VerticalAlignment="Center">
+                                <Ellipse x:Name="ring"
+                                         Fill="{DynamicResource ControlBg}"
+                                         Stroke="{DynamicResource BevelEdge}"
+                                         StrokeThickness="1"/>
+                                <Ellipse Fill="{DynamicResource BevelFacePressed}" Margin="1"/>
+                                <Ellipse x:Name="dot" Margin="4" Visibility="Collapsed"
+                                         Fill="{DynamicResource Standby}"/>
+                            </Grid>
+                            <ContentPresenter Margin="6,0,0,0" VerticalAlignment="Center"
+                                              RecognizesAccessKey="True"/>
+                        </StackPanel>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="dot" Property="Visibility" Value="Visible"/>
+                            </Trigger>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="ring" Property="Stroke" Value="{DynamicResource Standby}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter Property="Opacity" Value="0.5"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
+        <!-- ══════════ Faders ══════════
+             La ranura va HUNDIDA y el pomo en RELIEVE: es exactamente lo que es
+             un fader de mesa, y encaja con la regla de la casa (hundido =
+             contiene, relieve = lo tocas).
+
+             Hay DOS plantillas porque en la app hay faders verticales de verdad
+             (VOL del mixer, ganancia del EQ, niveles del inspector) y una sola
+             plantilla horizontal los dejaría con la ranura cruzada. -->
+
+        <ControlTemplate x:Key="FaderThumb" TargetType="Thumb">
+            <Border Background="{DynamicResource ButtonBg}"
+                    BorderBrush="{DynamicResource BevelEdge}"
+                    BorderThickness="1" CornerRadius="3"
+                    SnapsToDevicePixels="True">
+                <Border CornerRadius="2" Background="{DynamicResource BevelFace}"/>
+            </Border>
+        </ControlTemplate>
+
+        <!-- Los RepeatButton del Track (saltar de página al clicar la ranura)
+             tienen que seguir EXISTIENDO para que ese clic funcione, pero sin
+             dibujar nada: con su plantilla de serie pintarían dos botones sobre
+             la ranura. -->
+        <ControlTemplate x:Key="FaderTrackPiece" TargetType="RepeatButton">
+            <Border Background="Transparent"/>
+        </ControlTemplate>
+
+        <Style TargetType="Slider">
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="Slider">
+                        <Grid>
+                            <Border Height="6" VerticalAlignment="Center" CornerRadius="3"
+                                    Background="{DynamicResource SunkenBg}"
+                                    BorderBrush="{DynamicResource BevelEdge}"
+                                    BorderThickness="1" SnapsToDevicePixels="True">
+                                <Border CornerRadius="2"
+                                        Background="{DynamicResource BevelFacePressed}"/>
+                            </Border>
+                            <Track x:Name="PART_Track">
+                                <Track.DecreaseRepeatButton>
+                                    <RepeatButton Command="Slider.DecreaseLarge" Focusable="False"
+                                                  Template="{StaticResource FaderTrackPiece}"/>
+                                </Track.DecreaseRepeatButton>
+                                <Track.IncreaseRepeatButton>
+                                    <RepeatButton Command="Slider.IncreaseLarge" Focusable="False"
+                                                  Template="{StaticResource FaderTrackPiece}"/>
+                                </Track.IncreaseRepeatButton>
+                                <Track.Thumb>
+                                    <Thumb Width="13" Height="20"
+                                           Template="{StaticResource FaderThumb}"/>
+                                </Track.Thumb>
+                            </Track>
+                        </Grid>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+            <Style.Triggers>
+                <Trigger Property="Orientation" Value="Vertical">
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="Slider">
+                                <Grid>
+                                    <Border Width="6" HorizontalAlignment="Center" CornerRadius="3"
+                                            Background="{DynamicResource SunkenBg}"
+                                            BorderBrush="{DynamicResource BevelEdge}"
+                                            BorderThickness="1" SnapsToDevicePixels="True">
+                                        <Border CornerRadius="2"
+                                                Background="{DynamicResource BevelFacePressed}"/>
+                                    </Border>
+                                    <Track x:Name="PART_Track">
+                                        <Track.DecreaseRepeatButton>
+                                            <RepeatButton Command="Slider.DecreaseLarge" Focusable="False"
+                                                          Template="{StaticResource FaderTrackPiece}"/>
+                                        </Track.DecreaseRepeatButton>
+                                        <Track.IncreaseRepeatButton>
+                                            <RepeatButton Command="Slider.IncreaseLarge" Focusable="False"
+                                                          Template="{StaticResource FaderTrackPiece}"/>
+                                        </Track.IncreaseRepeatButton>
+                                        <Track.Thumb>
+                                            <Thumb Width="20" Height="13"
+                                                   Template="{StaticResource FaderThumb}"/>
+                                        </Track.Thumb>
+                                    </Track>
+                                </Grid>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
+                </Trigger>
+                <Trigger Property="IsEnabled" Value="False">
+                    <Setter Property="Opacity" Value="0.5"/>
+                </Trigger>
+            </Style.Triggers>
         </Style>
 
         <!-- ══════════ Interruptor enclavable ══════════

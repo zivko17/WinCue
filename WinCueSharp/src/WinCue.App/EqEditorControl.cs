@@ -113,6 +113,11 @@ public sealed class EqEditorControl : ContentControl
             Maximum = 12,
             TickFrequency = 3,
             IsSnapToTickEnabled = false,
+            // Medidas compartidas: antes se estiraba a lo que quedase y salía de
+            // otro tamaño que el VOL de al lado, en la misma pestaña.
+            Width = UiMetrics.FaderWidth,
+            Height = UiMetrics.FaderHeight,
+            VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         _gain.ValueChanged += (_, _) =>
