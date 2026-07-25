@@ -80,12 +80,30 @@
                                                       RelativeSource={RelativeSource TemplatedParent}}">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="{DynamicResource ControlBg}" BorderBrush="{DynamicResource Border}"
-                                                BorderThickness="1" CornerRadius="2">
-                                            <Path HorizontalAlignment="Right" VerticalAlignment="Center"
-                                                  Margin="0,0,8,0" Fill="{DynamicResource TextTertiary}"
-                                                  Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                        <Border x:Name="bd" Background="{DynamicResource ControlBg}"
+                                                BorderBrush="{DynamicResource BevelEdge}"
+                                                BorderThickness="1" CornerRadius="4"
+                                                SnapsToDevicePixels="True">
+                                            <Grid>
+                                                <Border x:Name="face" CornerRadius="3"
+                                                        Background="{DynamicResource BevelFace}"/>
+                                                <Border x:Name="veil" CornerRadius="3"
+                                                        Background="Transparent"/>
+                                                <Path HorizontalAlignment="Right" VerticalAlignment="Center"
+                                                      Margin="0,0,8,0" Fill="{DynamicResource TextTertiary}"
+                                                      Data="M 0 0 L 4 4 L 8 0 Z"/>
+                                            </Grid>
                                         </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                                            </Trigger>
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="face" Property="Background" Value="{DynamicResource BevelFacePressed}"/>
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
@@ -148,9 +166,13 @@
             <Setter Property="Margin" Value="0,4,0,10"/>
             <Setter Property="Padding" Value="10,6"/>
         </Style>
-        <Style TargetType="TabItem">
-            <Setter Property="Padding" Value="14,6"/>
-        </Style>
+        <!-- SIN estilo local de TabItem a propósito. Antes había uno que solo
+             fijaba el Padding, y eso bastaba para tirar por tierra el de
+             App.xaml entero: un estilo implícito de Window.Resources SUSTITUYE
+             al de Application.Resources, no lo completa, así que estas pestañas
+             se quedaban con la plantilla clara de WPF mientras las de la ventana
+             principal iban oscuras. Sin él heredan la de la app. -->
+
     </Window.Resources>
 
     <DockPanel Margin="10">

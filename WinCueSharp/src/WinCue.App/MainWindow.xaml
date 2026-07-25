@@ -113,16 +113,35 @@
                                   Background="{DynamicResource Gold}" Foreground="Black"
                                   FontWeight="Bold" Content="{local:Loc Es=Modo: EDIT, En=Mode: EDIT}">
                         <!-- Plantilla propia: la de WPF pinta un azul-claro al
-                             estar 'checked' que tapaba el verde de SHOW -->
+                             estar 'checked' que tapaba el verde de SHOW.
+                             NO usa el estilo implícito de ToggleButton porque
+                             aquí el enclavado NO debe hundirse: el color de
+                             fondo ya cambia (oro EDIT / verde SHOW) y es esa
+                             mancha la que se lee en directo, no el relieve.
+                             Hundirlo además restaría contraste al modo activo. -->
                         <ToggleButton.Template>
                             <ControlTemplate TargetType="ToggleButton">
-                                <Border Background="{TemplateBinding Background}"
-                                        BorderBrush="{DynamicResource Border}" BorderThickness="1"
-                                        CornerRadius="2">
-                                    <ContentPresenter HorizontalAlignment="Center"
-                                                      VerticalAlignment="Center"
-                                                      Margin="{TemplateBinding Padding}"/>
+                                <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                        BorderBrush="{DynamicResource BevelEdge}" BorderThickness="1"
+                                        CornerRadius="4" SnapsToDevicePixels="True">
+                                    <Grid>
+                                        <Border x:Name="face" CornerRadius="3"
+                                                Background="{DynamicResource BevelFace}"/>
+                                        <Border x:Name="veil" CornerRadius="3"
+                                                Background="Transparent"/>
+                                        <ContentPresenter HorizontalAlignment="Center"
+                                                          VerticalAlignment="Center"
+                                                          Margin="{TemplateBinding Padding}"/>
+                                    </Grid>
                                 </Border>
+                                <ControlTemplate.Triggers>
+                                    <Trigger Property="IsMouseOver" Value="True">
+                                        <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
+                                    </Trigger>
+                                    <Trigger Property="IsPressed" Value="True">
+                                        <Setter TargetName="face" Property="Background" Value="{DynamicResource BevelFacePressed}"/>
+                                    </Trigger>
+                                </ControlTemplate.Triggers>
                             </ControlTemplate>
                         </ToggleButton.Template>
                     </ToggleButton>

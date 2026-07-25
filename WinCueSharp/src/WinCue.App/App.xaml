@@ -43,6 +43,65 @@
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
 
+        <!-- ══════════ Interruptor enclavable ══════════
+             Mismo relieve de tecla que Button, más un estado que Button no
+             tiene: ENCLAVADO. Un toggle activo se queda hundido, como el botón
+             de una mesa que se queda dentro — que es exactamente lo que
+             significa (los 0°/90°/180°/270° del inspector son un grupo de
+             enclavamiento). Antes la selección era el azul por defecto de WPF,
+             que en un tema oscuro casi no se veía.
+             No afecta a los toggles que traen Template propia (la caja del
+             ComboBox, el interruptor de modo): una plantilla puesta a mano gana
+             siempre al setter de un estilo. -->
+        <Style TargetType="{x:Type ToggleButton}">
+            <Setter Property="Background" Value="{DynamicResource ButtonBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelEdge}"/>
+            <Setter Property="Padding" Value="10,4"/>
+            <Setter Property="Template">
+                <Setter.Value>
+                    <ControlTemplate TargetType="{x:Type ToggleButton}">
+                        <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                BorderBrush="{TemplateBinding BorderBrush}"
+                                BorderThickness="1" CornerRadius="4"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="face" CornerRadius="3"
+                                        Background="{DynamicResource BevelFace}"/>
+                                <Border x:Name="veil" CornerRadius="3"
+                                        Background="Transparent"/>
+                                <ContentPresenter x:Name="cp"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Grid>
+                        </Border>
+                        <ControlTemplate.Triggers>
+                            <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                            </Trigger>
+                            <!-- Enclavado: se queda hundido y con el filo ámbar,
+                                 para que se lea de un vistazo cuál del grupo
+                                 está puesto. -->
+                            <Trigger Property="IsChecked" Value="True">
+                                <Setter TargetName="face" Property="Background" Value="{DynamicResource BevelFacePressed}"/>
+                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                                <Setter TargetName="cp" Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                                </Setter>
+                                <Setter Property="Foreground" Value="{DynamicResource Standby}"/>
+                            </Trigger>
+                            <Trigger Property="IsEnabled" Value="False">
+                                <Setter TargetName="bd" Property="Opacity" Value="0.5"/>
+                                <Setter TargetName="face" Property="Opacity" Value="0.3"/>
+                            </Trigger>
+                        </ControlTemplate.Triggers>
+                    </ControlTemplate>
+                </Setter.Value>
+            </Setter>
+        </Style>
+
         <!-- ComboBox oscuro (retemplado: el estilo de sistema es claro) -->
         <Style TargetType="ComboBoxItem">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
@@ -79,15 +138,35 @@
                                     RelativeSource={RelativeSource TemplatedParent}}">
                                 <ToggleButton.Template>
                                     <ControlTemplate TargetType="ToggleButton">
-                                        <Border Background="{DynamicResource ControlBg}"
-                                                BorderBrush="{DynamicResource BorderControl}"
-                                                BorderThickness="1" CornerRadius="2">
-                                            <Path HorizontalAlignment="Right"
-                                                  VerticalAlignment="Center"
-                                                  Margin="0,0,8,0"
-                                                  Data="M 0 0 L 4 4 L 8 0 Z"
-                                                  Fill="{DynamicResource TextMuted}"/>
+                                        <Border x:Name="bd" Background="{DynamicResource ControlBg}"
+                                                BorderBrush="{DynamicResource BevelEdge}"
+                                                BorderThickness="1" CornerRadius="4"
+                                                SnapsToDevicePixels="True">
+                                            <Grid>
+                                                <Border x:Name="face" CornerRadius="3"
+                                                        Background="{DynamicResource BevelFace}"/>
+                                                <Border x:Name="veil" CornerRadius="3"
+                                                        Background="Transparent"/>
+                                                <Path HorizontalAlignment="Right"
+                                                      VerticalAlignment="Center"
+                                                      Margin="0,0,8,0"
+                                                      Data="M 0 0 L 4 4 L 8 0 Z"
+                                                      Fill="{DynamicResource TextMuted}"/>
+                                            </Grid>
                                         </Border>
+                                        <ControlTemplate.Triggers>
+                                            <Trigger Property="IsMouseOver" Value="True">
+                                                <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                                            </Trigger>
+                                            <!-- Desplegado = hundido: mientras la
+                                                 lista está abierta la caja se queda
+                                                 dentro, como una tecla sostenida. -->
+                                            <Trigger Property="IsChecked" Value="True">
+                                                <Setter TargetName="face" Property="Background" Value="{DynamicResource BevelFacePressed}"/>
+                                                <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
+                                            </Trigger>
+                                        </ControlTemplate.Triggers>
                                     </ControlTemplate>
                                 </ToggleButton.Template>
                             </ToggleButton>
@@ -118,22 +197,40 @@
         <!-- Pestañas oscuras (inspector y settings) -->
         <Style TargetType="TabItem">
             <Setter Property="Foreground" Value="{DynamicResource TextDim}"/>
+            <Setter Property="Padding" Value="14,5"/>
             <Setter Property="Template">
                 <Setter.Value>
+                    <!-- La pestaña INACTIVA sobresale (relieve de tecla) y la
+                         ACTIVA se queda plana y del color del panel: deja de ser
+                         un botón y pasa a ser el borde de la superficie que
+                         estás mirando. Por eso la activa se queda SIN velo, no
+                         con el velo invertido — hundirla la separaría del panel,
+                         que es lo contrario de lo que tiene que contar. -->
                     <ControlTemplate TargetType="TabItem">
                         <Border x:Name="bd" Background="{DynamicResource DeeperBg}"
-                                BorderBrush="{DynamicResource Divider}"
+                                BorderBrush="{DynamicResource BevelEdge}"
                                 BorderThickness="1,1,1,0"
-                                Padding="14,5" Margin="0,0,2,0">
-                            <ContentPresenter ContentSource="Header"/>
+                                CornerRadius="4,4,0,0" Margin="0,0,2,0"
+                                SnapsToDevicePixels="True">
+                            <Grid>
+                                <Border x:Name="face" CornerRadius="3,3,0,0"
+                                        Background="{DynamicResource BevelFace}"/>
+                                <Border x:Name="veil" CornerRadius="3,3,0,0"
+                                        Background="Transparent"/>
+                                <ContentPresenter ContentSource="Header"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsSelected" Value="True">
                                 <Setter TargetName="bd" Property="Background"
                                         Value="{DynamicResource WindowBg}"/>
+                                <Setter TargetName="face" Property="Background"
+                                        Value="Transparent"/>
                                 <Setter Property="Foreground" Value="{DynamicResource Warn}"/>
                             </Trigger>
                             <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
                                 <Setter Property="Foreground" Value="{DynamicResource TextSecondary}"/>
                             </Trigger>
                         </ControlTemplate.Triggers>
