@@ -486,8 +486,40 @@ public partial class MainWindow : Window, IShowView
         }
     }
 
-    public void UpdateTransport(bool paused) =>
+    public void UpdateTransport(bool paused)
+    {
         PauseButton.Content = paused ? $"{Icons.Play} REANUDAR" : $"{Icons.Pause} PAUSA";
+        RefreshTransportLights();
+    }
+
+    /// <summary>Enciende en COLOR VIVO el botón cuya función está en efecto
+    /// ahora mismo, para leer de un vistazo qué está actuando.
+    ///
+    /// Solo se encienden los tres que tienen ESTADO. STOP ALL y FADE ALL son
+    /// acciones instantáneas: no hay nada que siga puesto después de pulsarlas,
+    /// y encenderlas un instante sería un parpadeo — justo el tipo de
+    /// realimentación animada que estorba en directo.
+    ///
+    /// Los colores vivos NO son nuevos: son los mismos tokens que ya usa el
+    /// resto de la consola para «sonando» (Go), «atención» (Standby) y «en
+    /// aire» (Pgm), así que el vocabulario de color sigue siendo uno.</summary>
+    private void RefreshTransportLights()
+    {
+        bool running = _controller is not null && _controller.RunningCueIds.Count > 0;
+        bool paused = _controller is not null && _controller.IsPaused;
+
+        // GO: verde claro mientras hay algo sonando; verde apagado en reposo.
+        GoButton.Background = Theme.Solid(running ? Theme.Go : Theme.GoButton);
+
+        // PAUSA: ámbar mientras la reproducción está detenida. Texto en negro
+        // porque sobre el ámbar el claro de la barra no se lee.
+        PauseButton.Background = paused ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
+        PauseButton.Foreground = paused ? Brushes.Black : Theme.TextPrimaryBrush;
+
+        // PANIC: rojo vivo mientras el blackout SIGUE puesto. Es el que más
+        // importa: la sala está a negro y desde la mesa no se ve.
+        PanicButton.Background = Theme.Solid(_blackout ? Theme.Pgm : Theme.PanicButton);
+    }
 
     public void UpdateCountdown(double? secondsRemaining)
     {
@@ -900,6 +932,10 @@ public partial class MainWindow : Window, IShowView
     {
         if (_controller is null) return;
 
+        // Aquí, y no solo al pausar: «hay algo sonando» cambia sin avisar
+        // (un cue que termina solo), y el GO tiene que apagarse con él.
+        RefreshTransportLights();
+
         // El show "empieza" cuando arranca el primer cue
         if (_showStartTicks is null && _controller.RunningCueIds.Count > 0)
             _showStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
@@ -1224,6 +1260,7 @@ public partial class MainWindow : Window, IShowView
             if (w is { IsVisible: true })
                 w.SetBlackout(_blackout, fade);
         UpdateVideoOutButton();
+        RefreshTransportLights();   // PANIC se enciende con el blackout
         FlashStatus(_blackout
             ? Loc.T("BLACKOUT — salidas fundidas a negro (B para levantar).", "BLACKOUT — outputs faded to black (B to release).")
             : Loc.T("Blackout levantado.", "Blackout released."));
