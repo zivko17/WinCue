@@ -119,8 +119,10 @@ public sealed class InspectorPanel : ContentControl
 
         _tabs.Items.Add(Tab(Loc.T("Básicos", "Basics"), BuildBasics()));
         _tabs.Items.Add(Tab(Loc.T("Disparadores", "Triggers"), BuildTriggers()));
-        _tabs.Items.Add(Tab(Loc.T("Tiempo y bucles", "Time & Loops"), BuildTimeLoops()));
-        _tabs.Items.Add(Tab(Loc.T("Geometría", "Geometry"), BuildGeometry()));
+        _timeLoopsTab = Tab(Loc.T("Tiempo y bucles", "Time & Loops"), BuildTimeLoops());
+        _tabs.Items.Add(_timeLoopsTab);
+        _geometryTab = Tab(Loc.T("Geometría", "Geometry"), BuildGeometry());
+        _tabs.Items.Add(_geometryTab);
         // TODO el audio del cue en UNA pestaña: niveles + EQ/comp (antes eran
         // dos, "Levels" y "EQ" — regla: Inspector = el cue, Mixer = el show)
         _eqEditor.Commit = (key, value) => Commit(key, value);
@@ -130,6 +132,20 @@ public sealed class InspectorPanel : ContentControl
             _cue is null ? 0f : GainReductionProvider?.Invoke(_cue.Id) ?? 0f;
         _audioTab = Tab($"{Icons.Volume} Audio", BuildAudioTab());
         _tabs.Items.Add(_audioTab);
+
+        // El visor solo acompaña a las pestañas donde SIRVE para algo (ver
+        // RefreshPreviewVisibility). Está fuera del TabControl —es hermano
+        // suyo, no hijo de ninguna pestaña— así que no se oculta solo: hay que
+        // reevaluarlo cada vez que cambia la pestaña.
+        _tabs.SelectionChanged += (_, e) =>
+        {
+            // SelectionChanged BURBUJEA: cualquier ComboBox de dentro de una
+            // pestaña dispara el mismo evento y llega hasta aquí. Sin este
+            // filtro, elegir una opción en un desplegable recalcularía el visor.
+            if (!ReferenceEquals(e.OriginalSource, _tabs))
+                return;
+            RefreshPreviewVisibility();
+        };
 
         IsEnabled = false;   // sin cue seleccionado
     }
@@ -143,6 +159,9 @@ public sealed class InspectorPanel : ContentControl
         if (cue is null)
         {
             _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
+            // Sin esto el visor se quedaba con el fotograma del cue anterior,
+            // ya deseleccionado, encima de un inspector deshabilitado.
+            RefreshPreviewVisibility();
             return;
         }
 
@@ -175,15 +194,36 @@ public sealed class InspectorPanel : ContentControl
     {
         if (cue.Type == CueType.Video && cue.FilePath.Length > 0)
         {
-            _previewHost.Visibility = Visibility.Visible;
             _editPreview.ShowPaused(cue.FilePath, cue.TrimStart);
             ApplyPreviewGeometry(cue);
         }
         else
         {
-            _previewHost.Visibility = Visibility.Collapsed;
             _editPreview.Clear();
         }
+        RefreshPreviewVisibility();
+    }
+
+    /// <summary>Decide si se ve el visor de edición. Dos condiciones: que el cue
+    /// tenga vídeo y que la pestaña abierta sea una de las dos donde el visor
+    /// SIRVE — Geometría (encuadrar contra el canvas) y Tiempo y bucles (ver el
+    /// fotograma en el que cortas al arrastrar el trim).
+    ///
+    /// En Básicos, Disparadores y Audio no pinta nada y solo robaba 280 px de
+    /// ancho a los controles.
+    ///
+    /// Se oculta, no se descarga: el vídeo sigue cargado y pausado, igual que
+    /// antes. Descargarlo y recargarlo en cada cambio de pestaña costaría un
+    /// arranque de mpv por clic.</summary>
+    private void RefreshPreviewVisibility()
+    {
+        bool usefulHere = ReferenceEquals(_tabs.SelectedItem, _geometryTab)
+                       || ReferenceEquals(_tabs.SelectedItem, _timeLoopsTab);
+        bool hasVideo = _cue is { Type: CueType.Video } c && c.FilePath.Length > 0;
+
+        _previewHost.Visibility = usefulHere && hasVideo
+            ? Visibility.Visible
+            : Visibility.Collapsed;
     }
 
     /// <summary>Refleja la geometría del cue en el visor (misma matemática que
@@ -773,6 +813,10 @@ public sealed class InspectorPanel : ContentControl
     }
 
     private TabItem _audioTab = null!;
+
+    // Las dos pestañas que acompañan al visor de edición (RefreshPreviewVisibility)
+    private TabItem _timeLoopsTab = null!;
+    private TabItem _geometryTab = null!;
 
     /// <summary>Selecciona la pestaña 🔊 Audio (clic en un strip del Mixer).</summary>
     public void ShowAudioTab() => _tabs.SelectedItem = _audioTab;
