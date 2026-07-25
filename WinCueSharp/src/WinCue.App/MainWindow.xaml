@@ -4,7 +4,8 @@
         xmlns:local="clr-namespace:WinCue.App"
         Title="WinCue" Width="1280" Height="800"
         Background="{DynamicResource WindowBg}" WindowState="Maximized"
-        AllowDrop="True">
+        AllowDrop="True"
+        FontFamily="{x:Static local:Icons.Font}">
 
     <Window.Resources>
         <!-- La paleta es la central (Theme.cs), publicada en

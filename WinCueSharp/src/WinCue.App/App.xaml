@@ -1,8 +1,29 @@
 <Application x:Class="WinCue.App.App"
              xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
-             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+             xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+             xmlns:local="clr-namespace:WinCue.App">
     <!-- Sin StartupUri: la ventana se construye en App.OnStartup (composición) -->
     <Application.Resources>
+
+        <!-- ══════════ Fuente de iconos en los POPUPS ══════════
+             La fuente se fija en la raíz de cada ventana y se hereda por el
+             árbol… pero un menú, un tooltip o el desplegable de un ComboBox
+             NO cuelgan de ese árbol: viven en un Popup, con su propia ventana.
+             Ahí la herencia no llega y los glifos salían como cuadritos.
+             Estos estilos implícitos sí los alcanzan, porque Application.
+             Resources es el último eslabón de búsqueda para TODO el proceso. -->
+
+        <Style TargetType="ContextMenu">
+            <Setter Property="FontFamily" Value="{x:Static local:Icons.Font}"/>
+        </Style>
+
+        <Style TargetType="MenuItem">
+            <Setter Property="FontFamily" Value="{x:Static local:Icons.Font}"/>
+        </Style>
+
+        <Style TargetType="ToolTip">
+            <Setter Property="FontFamily" Value="{x:Static local:Icons.Font}"/>
+        </Style>
 
         <!-- ══════════ Tema oscuro global ══════════
              Los COLORES no viven aquí: están en Theme.cs, que los publica en
@@ -25,6 +46,8 @@
         <!-- ComboBox oscuro (retemplado: el estilo de sistema es claro) -->
         <Style TargetType="ComboBoxItem">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
+            <!-- También en Popup: ver la nota de arriba -->
+            <Setter Property="FontFamily" Value="{x:Static local:Icons.Font}"/>
             <Setter Property="Padding" Value="8,4"/>
             <Setter Property="Template">
                 <Setter.Value>

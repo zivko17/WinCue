@@ -1,0 +1,51 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  WinCue.CompositeFont — fuente compuesta de la interfaz
+  ============================================================================
+  POR QUÉ EXISTE ESTE FICHERO (y no basta con poner FontFamily="Phosphor"):
+
+  El TTF de Phosphor NO contiene solo iconos en el Área de Uso Privado. Mapea
+  también ' ', '-' y las 26 letras 'a'..'z', porque la fuente se usa en web por
+  LIGADURAS: escribes "folder-open" y la ligadura lo funde en el icono.
+
+  Consecuencia: si se aplicara Phosphor como FontFamily de un control, TODA la
+  minúscula de la interfaz se dibujaría con los glifos de entrada de ligadura.
+  Y una lista de reserva ("Phosphor, Segoe UI") tampoco vale: WPF elige la
+  PRIMERA familia que tenga el carácter, y Phosphor SÍ tiene la 'a'.
+
+  La fuente compuesta resuelve esto por RANGO, que es lo que de verdad hace
+  falta: el PUA va a Phosphor y todo lo demás a Segoe UI. Así una cadena
+  mezclada — el glifo del icono seguido del texto traducido, que es como se
+  arma en Icons/LocExtension — se dibuja bien sin partirla en dos runs, y los
+  185 sitios de llamada siguen sin enterarse de nada.
+-->
+<!--
+  Baseline/LineSpacing NO son adorno: sin ellos WPF le pone a la fuente
+  compuesta su valor por defecto (0,92 em) en vez del de Segoe UI (1,079), y
+  TODA la interfaz sube ~15 % del cuerpo respecto a como estaba. Estos dos
+  números son las métricas de Segoe UI (ascent 2210/2048, lineSpacing
+  (2210+514)/2048), y dejan el texto exactamente donde estaba.
+-->
+<FontFamily xmlns="http://schemas.microsoft.com/winfx/2006/xaml/composite-font"
+            xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml"
+            Baseline="1.0791" LineSpacing="1.3301">
+
+  <!-- OJO: el nombre va en un System.String del namespace CLR, NO en <x:String>.
+       Un .CompositeFont no admite x:String, y si el fichero no parsea WPF no
+       avisa: devuelve Arial en silencio. -->
+  <FontFamily.FamilyNames>
+    <System:String x:Key="en-US"
+                   xmlns:System="clr-namespace:System;assembly=mscorlib">WinCue UI</System:String>
+  </FontFamily.FamilyNames>
+
+  <FontFamily.FamilyMaps>
+    <!-- Área de Uso Privado → iconos. Phosphor ocupa E000..EFFF; el rango se
+         deja hasta F8FF por si entra una segunda variante (Fill) más adelante. -->
+    <FontFamilyMap Unicode="E000-F8FF" Target="./#Phosphor" Scale="1.0"/>
+
+    <!-- Todo lo demás → la tipografía de siempre. Sin esta línea el resto del
+         texto se quedaría sin familia asignada. -->
+    <FontFamilyMap Unicode="0000-DFFF, F900-10FFFF" Target="Segoe UI" Scale="1.0"/>
+  </FontFamily.FamilyMaps>
+
+</FontFamily>

@@ -20,4 +20,12 @@
     <Using Remove="System.Windows.Forms" />
     <Using Remove="System.Drawing" />
   </ItemGroup>
+
+  <!-- Fuente de iconos. Van como <Resource> (dentro del ensamblado), no como
+       <Content>: así se referencian con URI pack:// y el ejecutable publicado
+       no depende de que la carpeta assets\ viaje al lado. -->
+  <ItemGroup>
+    <Resource Include="assets\Phosphor.ttf" />
+    <Resource Include="assets\WinCue.CompositeFont" />
+  </ItemGroup>
 </Project>

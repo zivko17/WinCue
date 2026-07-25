@@ -88,6 +88,9 @@ public partial class App : Application
         // Paleta central ANTES de construir la ventana: el XAML la consume con
         // {DynamicResource ...} y no existe hasta que se publica aquí.
         Theme.Install(Resources);
+        // Fuente de iconos, por el mismo motivo y en el mismo momento: los
+        // glifos viven en el Área de Uso Privado y sin esto saldrían en blanco.
+        Icons.InstallFont();
 
         Action<Action> dispatch = action => Dispatcher.BeginInvoke(action);
         var settings = SettingsManager.Instance;

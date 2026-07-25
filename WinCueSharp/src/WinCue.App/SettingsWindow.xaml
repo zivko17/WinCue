@@ -4,7 +4,8 @@
         xmlns:local="clr-namespace:WinCue.App"
         Title="{local:Loc Es=WinCue — Configuración, En=WinCue — Settings}" Width="760" Height="640"
         Background="{DynamicResource SunkenBg}" WindowStartupLocation="CenterOwner"
-        ShowInTaskbar="False">
+        ShowInTaskbar="False"
+        FontFamily="{x:Static local:Icons.Font}">
 
     <Window.Resources>
         <!-- Los colores vienen de la paleta central (Theme.cs), publicada en

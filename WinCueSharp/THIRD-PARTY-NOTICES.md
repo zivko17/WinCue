@@ -17,6 +17,15 @@ textos completos de las licencias referenciadas se distribuyen en la carpeta
 - **Proyecto:** https://github.com/naudio/NAudio
 - **Texto:** licencia MIT (abajo) · https://licenses.nuget.org/MIT
 
+### Phosphor Icons — `src/WinCue.App/assets/Phosphor.ttf`
+- **Versión distribuida:** variante Regular del webfont (`src/regular/Phosphor.ttf`)
+- **Licencia:** MIT
+- **Copyright:** © 2020-2021 Phosphor Icons
+- **Proyecto:** https://github.com/phosphor-icons/web
+- **Texto:** licencia MIT (abajo) · https://github.com/phosphor-icons/web/blob/master/LICENSE
+- **Enlace:** el `.ttf` se incrusta como `<Resource>` en WinCue.App.dll y se usa
+  a través de `assets/WinCue.CompositeFont`. No se ha modificado la fuente.
+
 ### Runtime de .NET 8 (publicación autocontenida)
 - **Licencia:** MIT
 - **Copyright:** © .NET Foundation and Contributors / © Microsoft Corporation

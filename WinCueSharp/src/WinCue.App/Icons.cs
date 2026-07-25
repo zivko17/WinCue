@@ -5,15 +5,20 @@
 // muchos incrustados dentro de cadenas traducidas — Loc.T("🎧 AUDICIÓN", …) —
 // lo que hacía imposible cambiarlos sin tocar también la traducción.
 //
-// Aquí cada icono tiene NOMBRE. Hoy su valor sigue siendo el emoji de siempre
-// (nada cambia en pantalla); cuando entre la fuente de iconos OFL bastará con
-// sustituir los valores de ESTE fichero por los puntos de código de la fuente,
-// y añadir Icons.Font. Ni un solo sitio de llamada se entera.
+// Aquí cada icono tiene NOMBRE, y su valor es el punto de código de Phosphor
+// (MIT, assets/Phosphor.ttf). Cambiar de fuente = cambiar ESTE fichero; ni un
+// solo sitio de llamada se entera.
 //
 // POR QUÉ UNA FUENTE Y NO UN CONTROL (tipo PackIcon): el 27 % de la interfaz
 // se pinta con DrawingContext (timeline, EQ). Ahí no cabe un Control, pero
 // FormattedText sí sabe dibujar un glifo. Una fuente sirve a los dos mundos;
 // un control, solo al XAML.
+//
+// OJO — LA FUENTE NO SE APLICA SUELTA. Phosphor mapea también 'a'..'z', ' ' y
+// '-' (los usa como entrada de sus ligaduras), así que ponerla como FontFamily
+// de un control convertiría toda la minúscula de la interfaz en iconos. Por eso
+// Font apunta a la fuente COMPUESTA WinCue.CompositeFont, que enruta por rango:
+// el PUA a Phosphor y el resto a Segoe UI. Ver ese fichero para el detalle.
 //
 // USO
 //   · C#   → Icons.Open, $"{Icons.Audio} AUDIO"
@@ -21,102 +26,135 @@
 //            o, sin texto, Content="{x:Static local:Icons.Search}"
 // =============================================================================
 
+using System.Windows;
+using System.Windows.Media;
+
 namespace WinCue.App;
 
 /// <summary>Catálogo de iconos: nombre → glifo. Única fuente de verdad.</summary>
 public static class Icons
 {
+    /// <summary>Tipografía con la que se dibujan estos glifos. Es la fuente
+    /// COMPUESTA, no Phosphor a pelo: mezcla icono + texto en la misma cadena
+    /// sin romper el texto. Se aplica como fuente por defecto de la app en
+    /// App.OnStartup, y a mano en los FormattedText que pintan iconos.</summary>
+    public static readonly FontFamily Font =
+        new(new Uri("pack://application:,,,/"), "./assets/#WinCue UI");
+
+    /// <summary>Comprueba que la fuente de iconos se puede cargar. Se llama una
+    /// vez en App.OnStartup, ANTES de construir la ventana, para que un fallo
+    /// salga como excepción con nombre y no como una interfaz llena de
+    /// cuadritos.
+    ///
+    /// La fuente se APLICA en el XAML de cada ventana (FontFamily en la raíz),
+    /// no aquí. Se intentó cambiar el valor por defecto de la propiedad, que
+    /// habría cubierto la app entera de una vez, pero WPF no deja:
+    /// Control.FontFamily ya trae metadata propia y OverrideMetadata revienta
+    /// con «ya está registrado para el tipo Control». Como FontFamily se hereda,
+    /// fijarla en la raíz de la ventana llega igual a todo lo que cuelga —
+    /// incluido lo que se crea en C#.</summary>
+    public static void InstallFont()
+    {
+        // Un URI de fuente equivocado NO da error en WPF: devuelve una familia
+        // sin resolver y la app se dibuja entera con la tipografía del sistema
+        // — es decir, 185 cuadritos y ni una sola pista de por qué. FamilyNames
+        // solo trae el nombre declarado si el .CompositeFont se llegó a leer,
+        // así que sirve de acuse de recibo.
+        if (!Font.FamilyNames.Values.Contains("WinCue UI", StringComparer.Ordinal))
+            throw new InvalidOperationException(
+                "No se pudo cargar la fuente de iconos (assets/WinCue.CompositeFont). " +
+                "Comprueba que sigue declarada como <Resource> en WinCue.App.csproj.");
+
+    }
+
     // ── Tipos de cue (espejo de la columna «Tipo» y del timeline) ──────
-    public const string Audio = "♪";
-    public const string Video = "▣";
-    public const string Wait = "⏱";
-    public const string Fade = "◢";
-    public const string Start = "▶";
-    public const string Stop = "■";
-    public const string Script = "⚙";
-    public const string Memo = "✎";
-    public const string Group = "▸";
+    public const string Audio = "";      // music-notes
+    public const string Video = "";      // monitor-play
+    public const string Wait = "";       // timer
+    public const string Fade = "";       // wave-sawtooth (la rampa del fundido)
+    public const string Start = "";      // play-circle
+    public const string Stop = "";       // stop
+    public const string Script = "";     // code
+    public const string Memo = "";       // note
+    public const string Group = "";      // folder
 
     // ── Transporte ─────────────────────────────────────────────────────
-    public const string Play = Start;          // mismo glifo, otro papel
-    public const string Pause = "⏸";
-    public const string Warning = "⚠";
-    public const string Hourglass = "⏳";
+    public const string Play = "";       // play (Start es el mismo en círculo)
+    public const string Pause = "";      // pause
+    public const string Warning = "";    // warning
+    public const string Hourglass = "";  // hourglass
 
     // ── Barra de herramientas ──────────────────────────────────────────
-    public const string Open = "📂";
-    public const string Save = "💾";
-    public const string Delete = "🗑";
-    public const string Search = "🔍";
-    public const string Add = "➕";
-    public const string Import = "＋";
-    public const string Relocate = "🔗";
+    public const string Open = "";       // folder-open
+    public const string Save = "";       // floppy-disk
+    public const string Delete = "";     // trash
+    public const string Search = "";     // magnifying-glass
+    public const string Add = "";        // plus
+    public const string Import = "";     // download-simple
+    public const string Relocate = "";   // link
 
     // ── Paneles y pestañas ─────────────────────────────────────────────
-    public const string Inspector = "🛠";
-    public const string Mixer = "🎚";
-    public const string Log = "🕮";
-    public const string VideoOutput = "🖵";
-    public const string Settings = Script;     // mismo glifo, otro papel
-    public const string Timeline = Wait;       // mismo glifo, otro papel
+    public const string Inspector = "";  // wrench
+    public const string Mixer = "";      // faders
+    public const string Log = "";        // book-open
+    public const string VideoOutput = "";// monitor
+    public const string Settings = "";   // gear
+    public const string Timeline = "";   // rows (las pistas del timeline)
 
     // ── Audio ──────────────────────────────────────────────────────────
-    public const string Headphones = "🎧";
-    public const string Volume = "🔊";
-    public const string Clef = "𝄞";
-    public const string Midi = "🎹";
+    public const string Headphones = ""; // headphones
+    public const string Volume = "";     // speaker-high
+    public const string Clef = "";       // music-note
+    public const string Midi = "";       // piano-keys
 
     // ── Vídeo ──────────────────────────────────────────────────────────
-    public const string Film = "🎞";
-    public const string Clapper = "🎬";
-    public const string BlackFrame = "⬛";
+    public const string Film = "";       // film-strip
+    public const string Clapper = "";    // film-slate
+    public const string BlackFrame = ""; // square
 
     // ── Marcas y estados ───────────────────────────────────────────────
-    public const string Check = "✓";
-    public const string Cross = "✕";
-    public const string Flag = "⚑";
-    public const string FlagOff = "⚐";
-    public const string Star = "★";
-    public const string Info = "ⓘ";
-    public const string Pin = "📌";
-    public const string Crossfade = "🔀";
+    public const string Check = "";      // check
+    public const string Cross = "";      // x
+    public const string Flag = "";       // flag
+    public const string FlagOff = "";    // flag-pennant
+    public const string Star = "";       // star
+    public const string Info = "";       // info
+    public const string Pin = "";        // push-pin
+    public const string Crossfade = "";  // shuffle
 
     // ── Navegación y acciones ──────────────────────────────────────────
-    public const string Expanded = "▾";
-    public const string Collapsed = Group;     // mismo glifo, otro papel
-    /// <summary>Marcador de disparo manual en el timeline («▸GO»). Comparte
-    /// glifo con Group pero NO es lo mismo: al entrar la fuente cada uno irá a
-    /// su icono.</summary>
-    public const string Go = Group;
-    public const string ZoomIn = "＋";          // mismo glifo que Import, otro papel
-    public const string ZoomOut = "−";
+    public const string Expanded = "";   // caret-down
+    public const string Collapsed = "";  // caret-right
+    /// <summary>Marcador de disparo manual en el timeline («GO»). Antes
+    /// compartía glifo con Group; ahora tiene el suyo.</summary>
+    public const string Go = "";         // cursor-click
+    public const string ZoomIn = "";     // magnifying-glass-plus
+    public const string ZoomOut = "";    // magnifying-glass-minus
     /// <summary>Bucle infinito en la etiqueta de repeticiones.</summary>
-    public const string Loop = "∞";
-    public const string Reset = "↺";
-    public const string Refresh = "↻";
-    public const string Target = "⌖";
-    public const string FollowInto = "⤵";
-    public const string Jump = "↗";
-    public const string Bar = "▌";
+    public const string Loop = "";       // infinity
+    public const string Reset = "";      // arrow-counter-clockwise
+    public const string Refresh = "";    // arrows-clockwise
+    public const string Target = "";     // crosshair
+    public const string FollowInto = ""; // arrow-elbow-down-right
+    public const string Jump = "";       // arrow-up-right
+    public const string Bar = "";        // line-vertical
 
     // ── Ficheros ───────────────────────────────────────────────────────
-    public const string Package = "📦";
-    public const string Document = "📄";
+    public const string Package = "";    // package
+    public const string Document = "";   // file
 
     /// <summary>«Sin color» en la fila de muestras del inspector.</summary>
-    public const string NoColor = "∅";
+    public const string NoColor = "";    // prohibit
 
     /// <summary>Renumerar (menú contextual de la lista).</summary>
-    public const string Number = "№";
+    public const string Number = "";     // hash
 
-    /// <summary>Editar / renombrar. Comparte glifo con Memo pero el papel es
-    /// otro: aquí es «cambiar el nombre», no «cue de tipo nota».</summary>
-    public const string Edit = Memo;
+    /// <summary>Editar / renombrar. Antes compartía glifo con Memo; ahora es
+    /// un lápiz, que es lo que significa aquí.</summary>
+    public const string Edit = "";       // pencil-simple
 
-    /// <summary>Botón «examinar». Hoy son puntos suspensivos tipográficos;
-    /// cuando entre la fuente, aquí es donde se cambia por un glifo de carpeta
-    /// sin tocar los sitios que lo usan.</summary>
-    public const string Browse = "…";
+    /// <summary>Botón «examinar».</summary>
+    public const string Browse = "";     // dots-three
 
     /// <summary>Nombre → glifo, para {local:Loc Icon=…} desde XAML. Se arma por
     /// reflexión sobre las constantes de arriba: añadir un icono es una línea.</summary>

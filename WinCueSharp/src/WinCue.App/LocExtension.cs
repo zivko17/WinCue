@@ -2,7 +2,7 @@
 // LocExtension.cs — Extensión de marcado {local:Loc} para traducir XAML
 // =============================================================================
 // Uso:  Content="{local:Loc Es=Abrir, En=Open}"  (o posicional 'Abrir','Open')
-// Con icono: Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"  →  "📂 Abrir"
+// Con icono: Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"  →  glifo + " Abrir"
 // Evalúa Loc.T al cargar la ventana (el idioma ya se fijó en App.OnStartup),
 // así el XAML estático queda bilingüe sin nombrar cada control.
 //
