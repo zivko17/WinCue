@@ -18,28 +18,40 @@
         <Style TargetType="Button">
             <Setter Property="Background" Value="{DynamicResource ButtonBg}"/>
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
-            <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource BevelEdge}"/>
             <Setter Property="Padding" Value="10,4"/>
             <Setter Property="Margin" Value="4,0"/>
-            <!-- Hover con borde ámbar (sin el azul-claro feo de WPF) -->
+            <!-- Mismo relieve de tecla que la ventana principal (ver la nota
+                 larga en MainWindow.xaml) + hover con borde ámbar. -->
             <Setter Property="Template">
                 <Setter.Value>
                     <ControlTemplate TargetType="Button">
                         <Border x:Name="bd" Background="{TemplateBinding Background}"
                                 BorderBrush="{TemplateBinding BorderBrush}"
-                                BorderThickness="1" CornerRadius="2"
+                                BorderThickness="1" CornerRadius="4"
                                 SnapsToDevicePixels="True">
-                            <ContentPresenter HorizontalAlignment="Center"
-                                              VerticalAlignment="Center"
-                                              Margin="{TemplateBinding Padding}"/>
+                            <Grid>
+                                <Border x:Name="face" CornerRadius="3"
+                                        Background="{DynamicResource BevelFace}"/>
+                                <Border x:Name="veil" CornerRadius="3"
+                                        Background="Transparent"/>
+                                <ContentPresenter x:Name="cp"
+                                                  HorizontalAlignment="Center"
+                                                  VerticalAlignment="Center"
+                                                  Margin="{TemplateBinding Padding}"/>
+                            </Grid>
                         </Border>
                         <ControlTemplate.Triggers>
                             <Trigger Property="IsMouseOver" Value="True">
+                                <Setter TargetName="veil" Property="Background" Value="{DynamicResource BevelHover}"/>
                                 <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
                             </Trigger>
                             <Trigger Property="IsPressed" Value="True">
+                                <Setter TargetName="face" Property="Background" Value="{DynamicResource BevelFacePressed}"/>
                                 <Setter TargetName="bd" Property="BorderBrush" Value="{DynamicResource Standby}"/>
-                                <Setter TargetName="bd" Property="Opacity" Value="0.75"/>
+                                <Setter TargetName="cp" Property="RenderTransform">
+                                    <Setter.Value><TranslateTransform Y="1"/></Setter.Value>
+                                </Setter>
                             </Trigger>
                         </ControlTemplate.Triggers>
                     </ControlTemplate>
