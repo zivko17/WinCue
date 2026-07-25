@@ -402,10 +402,12 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         OutputDescriptionChanged?.Invoke(text);
     }
 
-    /// <summary>Volumen master global (0..1), aplicado a todos los streams en vivo.</summary>
+    /// <summary>Volumen master global (0..AudioLevels.MaxGain, +10 dB de techo),
+    /// aplicado a todos los streams en vivo. Por encima de la unidad entra en
+    /// juego el limitador de bus, que es quien impide que la suma sature.</summary>
     public void SetMasterVolume(double volume)
     {
-        _master = (float)Math.Clamp(volume, 0.0, 1.0);
+        _master = (float)Math.Clamp(volume, 0.0, AudioLevels.MaxGain);
         foreach (var a in _active.Values)
             a.Provider.SetMaster(_master);
     }

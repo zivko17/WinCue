@@ -176,7 +176,10 @@ public class Cue
         PostWait = Math.Max(0.0, PostWait);
         FadeIn   = Math.Max(0.0, FadeIn);
         FadeOut  = Math.Max(0.0, FadeOut);
-        Volume   = Math.Clamp(Volume, 0.0, 1.0);
+        // El fader llega a +10 dB (AudioLevels.MaxGain): 1,0 sigue siendo 0 dB,
+        // así que los shows guardados no cambian de significado — solo deja de
+        // recortarse lo que esté por encima de la unidad.
+        Volume   = Math.Clamp(Volume, 0.0, AudioLevels.MaxGain);
         TimelineLayer = Math.Clamp(TimelineLayer, -1, 7);
         VideoOutput = Math.Clamp(VideoOutput, 0, 3);
         GainDb  = Math.Clamp(GainDb, -24.0, 12.0);

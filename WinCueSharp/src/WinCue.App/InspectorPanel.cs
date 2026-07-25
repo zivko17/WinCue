@@ -73,12 +73,19 @@ public sealed class InspectorPanel : ContentControl
     // Visor de edición (fotograma de referencia para trim y geometría)
     private readonly LiveMonitorControl _editPreview =
         new(Loc.T("EDICIÓN", "EDITING"), Theme.Warn);
-    private readonly StackPanel _previewHost = new()
+    private readonly Grid _previewHost = new()
     {
-        Width = 280,
         Margin = new Thickness(8, 4, 8, 8),
         Visibility = Visibility.Collapsed,
     };
+
+    /// <summary>Chrome del monitor —barra del distintivo y bordes— que va por
+    /// fuera del vídeo y no entra en el 16:9 (ver LiveMonitorControl).
+    ///
+    /// Se estima POR LO ALTO a propósito: el monitor calcula su alto real a
+    /// partir del ancho que se le da aquí, y quedarse corto por dos píxeles no
+    /// se nota mientras que pasarse los recorta.</summary>
+    private const double PreviewChromeH = 26.0;
 
     public InspectorPanel()
     {
@@ -86,18 +93,23 @@ public sealed class InspectorPanel : ContentControl
         // así que lo que quede fuera del marco es lo que se pierde en la salida.
         _editPreview.BorderBrush = Theme.Solid(Theme.Blue);
         _editPreview.BorderThickness = new Thickness(2);
-        _editPreview.Height = 176;   // vídeo ≈ 16:9 dentro del panel de 280 px
-
+        // El alto NO se fija aquí: LiveMonitorControl lo deriva de su ancho en
+        // 16:9, así que quien manda es el ancho del host (ver ResizePreview).
         _previewHost.Children.Add(_editPreview);
-        _previewHost.Children.Add(new TextBlock
-        {
-            Text = Loc.T("El marco azul es el CANVAS de salida: lo que quede fuera se recorta. Arrastra el trim para ver el fotograma de corte.",
-                   "The blue frame is the output CANVAS: whatever falls outside is cropped. Drag the trim to see the cut frame."),
-            FontSize = 10,
-            Foreground = Theme.TextNoteBrush,
-            TextWrapping = TextWrapping.Wrap,
-            Margin = new Thickness(0, 4, 0, 0),
-        });
+
+        // La explicación del marco azul se va al TOOLTIP del visor, como el
+        // detalle del dispositivo en el mixer: se lee una vez en la vida y
+        // debajo del monitor solo servía para robarle alto.
+        _editPreview.ToolTip = Loc.T(
+            "El marco azul es el CANVAS de salida: lo que quede fuera se recorta.\nArrastra el trim para ver el fotograma de corte.",
+            "The blue frame is the output CANVAS: whatever falls outside is cropped.\nDrag the trim to see the cut frame.");
+
+        // El visor SACA SU TAMAÑO DEL PANEL en vez de llevar medidas fijas:
+        // ocupa todo el alto del inspector y de ahí sale su ancho. Con los
+        // 280×176 de antes se quedaba en un sello arriba a la derecha con media
+        // columna vacía debajo, mientras la barra de trim —que no sabe qué
+        // hacer con el alto— se quedaba con todo el de la izquierda.
+        SizeChanged += (_, _) => ResizePreview();
 
         var body = new DockPanel();
         DockPanel.SetDock(_previewHost, Dock.Right);
@@ -272,17 +284,35 @@ public sealed class InspectorPanel : ContentControl
     /// Se oculta, no se descarga: el vídeo sigue cargado y pausado, igual que
     /// antes. Descargarlo y recargarlo en cada cambio de pestaña costaría un
     /// arranque de mpv por clic.</summary>
+    /// <summary>Ancho del visor a partir del alto DISPONIBLE, en 16:9. Se le da
+    /// el ancho porque el monitor deriva su propio alto de él; darle el alto
+    /// sería pelearse con su SizeChanged.</summary>
+    private void ResizePreview()
+    {
+        // Alto del cuerpo = el del inspector menos la cabecera y los márgenes
+        // verticales del host (4 arriba + 8 abajo).
+        double bodyH = ActualHeight - _header.ActualHeight - 12.0;
+        if (bodyH <= 60.0)
+            return;
+        // Topes: por debajo de 220 no se distingue el encuadre y por encima de
+        // 620 el visor le come la pestaña a los campos, que es lo que se edita.
+        _previewHost.Width = Math.Clamp((bodyH - PreviewChromeH) * 16.0 / 9.0, 220.0, 620.0);
+    }
+
     private void RefreshPreviewVisibility()
     {
         // En GEOMETRÍA ya no acompaña: el fotograma vive DENTRO del lienzo, que
         // es donde se encuadra. Tenerlo además al lado sería la misma imagen dos
-        // veces robando 280 px al lienzo, que es justo lo que interesa grande.
+        // veces robando ancho al lienzo, que es justo lo que interesa grande.
         bool usefulHere = ReferenceEquals(_tabs.SelectedItem, _timeLoopsTab);
         bool hasVideo = _cue is { Type: CueType.Video } c && c.FilePath.Length > 0;
 
-        _previewHost.Visibility = usefulHere && hasVideo
-            ? Visibility.Visible
-            : Visibility.Collapsed;
+        bool show = usefulHere && hasVideo;
+        _previewHost.Visibility = show ? Visibility.Visible : Visibility.Collapsed;
+        // Volver de Colapsado no cambia el tamaño del inspector, así que su
+        // SizeChanged no salta y el visor se quedaría con el ancho sin calcular.
+        if (show)
+            ResizePreview();
     }
 
     /// <summary>Refleja la geometría del cue en el visor (misma matemática que
@@ -525,8 +555,11 @@ public sealed class InspectorPanel : ContentControl
 
     private UIElement BuildTimeLoops()
     {
-        // Sin scroll: campos arriba y la barra de trim ESTIRADA al alto restante
-        var root = new DockPanel { Margin = new Thickness(10, 4, 10, 10) };
+        // Sin scroll: campos arriba y la barra de trim justo debajo, con su alto
+        // propio. LastChildFill queda en false a propósito — con el relleno
+        // puesto, la barra se quedaba con todo el alto sobrante de la pestaña.
+        var root = new DockPanel
+        { Margin = new Thickness(10, 4, 10, 10), LastChildFill = false };
 
         var top = new StackPanel();
         DockPanel.SetDock(top, Dock.Top);
@@ -556,7 +589,10 @@ public sealed class InspectorPanel : ContentControl
 
         Header(top, Loc.T("BARRA DE TRIM — arrastra los manejadores", "TRIM BAR — drag the handles"));
         _wave.Margin = new Thickness(0, 4, 0, 0);
-        _wave.MinHeight = 64;   // sin altura fija: llena el resto de la pestaña
+        // Alto FIJO: el MinHeight del propio control se anula, o ganaría él.
+        _wave.MinHeight = 0;
+        _wave.Height = UiMetrics.TrimBarHeight;
+        DockPanel.SetDock(_wave, Dock.Top);
         _wave.MarkersChanged += (start, end) =>
         {
             if (_cue is null) return;
@@ -934,10 +970,15 @@ public sealed class InspectorPanel : ContentControl
             Foreground = Theme.TextDimBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
+        // Recorre POSICIÓN, no ganancia, con la MISMA ley que los faders del
+        // mixer (AudioLevels): dos faders del mismo volumen tienen que estar a
+        // la misma altura, y el techo (+10 dB) tiene que ser el mismo en los
+        // dos sitios o el mixer permitiría lo que el inspector recorta.
+        const double posSteps = 1000.0;
         var slider = new Slider
         {
             Orientation = Orientation.Vertical,
-            Minimum = 0, Maximum = 100,
+            Minimum = 0, Maximum = posSteps,
             Width = UiMetrics.FaderWidth, Height = UiMetrics.FaderHeight,
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 4, 0, 0),
@@ -998,13 +1039,13 @@ public sealed class InspectorPanel : ContentControl
 
         slider.ValueChanged += (_, e) =>
         {
-            double v = e.NewValue / 100.0;
+            double v = AudioLevels.PositionToGain(e.NewValue / posSteps);
             label.Text = VolumeLabel(v);
             Commit("volume", v);   // en vivo: el controlador lo aplica al motor
         };
         _loaders["volume"] = c =>
         {
-            slider.Value = c.Volume * 100.0;
+            slider.Value = AudioLevels.GainToPosition(c.Volume) * posSteps;
             label.Text = VolumeLabel(c.Volume);
         };
         // El VU por cue existe donde hay rack nativo: cues de AUDIO y cues de

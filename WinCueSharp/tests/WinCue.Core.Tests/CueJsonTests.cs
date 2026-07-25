@@ -323,6 +323,41 @@ public class CueJsonTests
         Assert.Equal(0.0, c.PostWait);
         Assert.Equal(0.0, c.FadeIn);
         Assert.Equal(0.0, c.FadeOut);
+        // El fader llega a +10 dB: el techo ya no es la unidad
+        Assert.Equal(AudioLevels.MaxGain, c.Volume, 4);
+    }
+
+    [Fact]
+    public void Normalize_KeepsUnityVolumeUntouched()
+    {
+        // COMPATIBILIDAD: subir el techo a +10 dB no puede cambiar lo que ya
+        // significaba un show guardado. 1,0 era 0 dB y lo sigue siendo.
+        var c = new Cue { Id = 1, Type = CueType.Audio, Name = "x", Duration = 1.0 };
+        c.Normalize();
         Assert.Equal(1.0, c.Volume);
+        Assert.Equal(0.0, AudioLevels.ToDb(c.Volume), 6);
+    }
+
+    [Fact]
+    public void FaderLaw_IsInvertibleAndPlacesUnityWhereTheScaleSaysSo()
+    {
+        // La escala se rotula con estas mismas posiciones: si la ley y su
+        // inversa no cuadran, los números del fader mienten.
+        foreach (double db in AudioLevels.ScaleTicks)
+        {
+            double pos = AudioLevels.DbToPosition(db);
+            Assert.InRange(pos, 0.0, 1.0);
+            Assert.Equal(db, AudioLevels.ToDb(AudioLevels.PositionToGain(pos)), 3);
+        }
+        // Monótona: más recorrido, más ganancia
+        double prev = -1.0;
+        for (int i = 0; i <= 100; i++)
+        {
+            double g = AudioLevels.PositionToGain(i / 100.0);
+            Assert.True(g >= prev, $"la ley baja en pos {i / 100.0}");
+            prev = g;
+        }
+        Assert.Equal(0.0, AudioLevels.PositionToGain(0.0));          // abajo = silencio
+        Assert.Equal(AudioLevels.MaxGain, AudioLevels.PositionToGain(1.0), 4);
     }
 }

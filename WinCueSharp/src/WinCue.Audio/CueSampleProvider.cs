@@ -25,6 +25,7 @@
 // =============================================================================
 
 using NAudio.Wave;
+using WinCue.Core;
 
 namespace WinCue.Audio;
 
@@ -125,7 +126,7 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
 
         WaveFormat = WaveFormat.CreateIeeeFloatWaveFormat(_sampleRate, _channels);
 
-        _volume = Math.Clamp(volume, 0.0, 1.0);
+        _volume = Math.Clamp(volume, 0.0, AudioLevels.MaxGain);
         double fadeOutSec = Math.Max(0.0, fadeOut);
         _fadeOutFrames = fadeOutSec > 0.0 ? (int)(fadeOutSec * _sampleRate) : 0;
 
@@ -198,7 +199,7 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
     /// <summary>Fija instantáneamente el volumen (si no hay fade en curso).</summary>
     public void SetVolume(double volume)
     {
-        double v = Math.Clamp(volume, 0.0, 1.0);
+        double v = Math.Clamp(volume, 0.0, AudioLevels.MaxGain);
         _volume = v;
         if (!_fadeActive)
             _gain = v;
@@ -214,7 +215,8 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
     public bool IsPaused => _paused;
 
     /// <summary>Volumen master global (multiplicador aplicado en el hilo RT).</summary>
-    public void SetMaster(float master) => _master = Math.Clamp(master, 0.0f, 1.0f);
+    public void SetMaster(float master) =>
+        _master = Math.Clamp(master, 0.0f, (float)AudioLevels.MaxGain);
 
     /// <summary>Reconfigura la EQ del clip en vivo (main thread).</summary>
     public void SetEq(WinCue.Core.AudioEqParams? eq) => _eq.Configure(eq);

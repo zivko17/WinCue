@@ -248,7 +248,10 @@ public partial class MainWindow : Window, IShowView
 
     private void OnFadeAllClick(object sender, RoutedEventArgs e)
     {
-        _fadeAllRunning = true;
+        // El mismo tiempo que va a usar el controlador: el parpadeo dura lo que
+        // dura el fundido, ni un tic más.
+        _fadeAllSeconds = Math.Max(0.1, _settings.Get("fade_all_seconds", 5.0));
+        _fadeAllT0Ticks = System.Diagnostics.Stopwatch.GetTimestamp();
         _controller.OnFadeAll();
         RefreshTransportLights();
     }
@@ -538,14 +541,27 @@ public partial class MainWindow : Window, IShowView
     /// aire» (Pgm), así que el vocabulario de color sigue siendo uno.</summary>
     private bool _stopAllLatched;    // STOP ALL pulsado y aún sin reanudar
     private bool _panicLatched;      // PANIC pulsado y aún sin reanudar
-    private bool _fadeAllRunning;    // hay un FADE ALL en curso
     private bool _blinkOn;           // fase del parpadeo
     private DispatcherTimer? _blinkTimer;
+
+    // FADE ALL en curso, por RELOJ. El primer intento lo daba por terminado
+    // «cuando ya no quedara nada sonando», y eso nunca llegaba a verse: el
+    // controlador retira los cues de la lista de activos EN EL ACTO y deja que
+    // el fundido lo terminen los motores, así que el parpadeo se apagaba en la
+    // misma pulsación que lo encendía. Lo que dura el fundido lo dice el ajuste.
+    private long _fadeAllT0Ticks;    // 0 = no hay fundido en curso
+    private double _fadeAllSeconds;
+
+    private bool FadeAllRunning =>
+        _fadeAllT0Ticks != 0 &&
+        System.Diagnostics.Stopwatch.GetElapsedTime(_fadeAllT0Ticks).TotalSeconds
+            < _fadeAllSeconds;
 
     private void RefreshTransportLights()
     {
         bool running = _controller is not null && _controller.RunningCueIds.Count > 0;
         bool paused = _controller is not null && _controller.IsPaused;
+        bool fading = FadeAllRunning;
 
         // Que algo vuelva a sonar significa que el show ha seguido: es la señal
         // para apagar los enclavados. Sin esto, STOP ALL y PANIC se quedarían
@@ -554,11 +570,6 @@ public partial class MainWindow : Window, IShowView
         {
             _stopAllLatched = false;
             _panicLatched = false;
-        }
-        else
-        {
-            // El FADE ALL termina cuando ya no queda nada sonando.
-            _fadeAllRunning = false;
         }
 
         // GO: verde claro mientras hay algo sonando; verde apagado en reposo.
@@ -575,7 +586,7 @@ public partial class MainWindow : Window, IShowView
             ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
 
         // FADE ALL: PARPADEA mientras el fundido se va yendo.
-        bool fadeLit = _fadeAllRunning && _blinkOn;
+        bool fadeLit = fading && _blinkOn;
         FadeAllButton.Background = fadeLit ? Theme.Solid(Theme.Warn) : Theme.ButtonBgBrush;
 
         // PANIC: se queda ENCENDIDO. También con el blackout puesto, que es el
@@ -585,7 +596,9 @@ public partial class MainWindow : Window, IShowView
 
         // El temporizador del parpadeo solo corre cuando hay algo que parpadee:
         // en reposo no tiene sentido repintar la barra dos veces por segundo.
-        bool needsBlink = paused || _fadeAllRunning;
+        // Al vencer el plazo del fundido, es el propio tic del parpadeo quien
+        // se encuentra con FadeAllRunning en false, repinta y se para solo.
+        bool needsBlink = paused || fading;
         if (needsBlink && _blinkTimer is null)
         {
             _blinkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
@@ -892,7 +905,7 @@ public partial class MainWindow : Window, IShowView
     private void OnStopAllClick(object sender, RoutedEventArgs e)
     {
         _stopAllLatched = true;
-        _fadeAllRunning = false;   // un STOP corta el fundido en curso
+        _fadeAllT0Ticks = 0;   // un STOP corta el fundido en curso
         _controller.OnStopPressed();
         RefreshTransportLights();
     }

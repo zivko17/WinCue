@@ -42,6 +42,7 @@ public sealed class LiveMonitorControl : Border
     private readonly System.Windows.Forms.Panel _panel;
     private readonly TextBlock _msg;
     private readonly TextBlock _status;
+    private readonly DockPanel _bar;   // barra del distintivo (chrome superior)
 
     // ESPEJO del compositor: rectángulo pintado con un VisualBrush de la
     // ventana de salida (sin decodificar nada; se refresca solo con ella)
@@ -66,16 +67,8 @@ public sealed class LiveMonitorControl : Border
         BorderBrush = new SolidColorBrush(badgeColor);
         BorderThickness = new Thickness(1);
         Height = 152;
-        // Alto elástico 16:9 respecto al ancho: al ensanchar el panel
-        // izquierdo (separador arrastrable) los monitores crecen con él
-        SizeChanged += (_, e) =>
-        {
-            if (e.WidthChanged && e.NewSize.Width > 0)
-                Height = Math.Max(120, e.NewSize.Width * 9.0 / 16.0 + 18.0);
-        };
-
         // Barra superior con el distintivo (fuera del HWND → sin airspace)
-        var bar = new DockPanel { Background = new SolidColorBrush(badgeColor) };
+        _bar = new DockPanel { Background = new SolidColorBrush(badgeColor) };
         var badgeText = new TextBlock
         {
             Text = badge, FontSize = 10, FontWeight = FontWeights.Bold,
@@ -88,8 +81,8 @@ public sealed class LiveMonitorControl : Border
             TextTrimming = TextTrimming.CharacterEllipsis,
         };
         DockPanel.SetDock(badgeText, Dock.Left);
-        bar.Children.Add(badgeText);
-        bar.Children.Add(_status);
+        _bar.Children.Add(badgeText);
+        _bar.Children.Add(_status);
 
         _panel = new System.Windows.Forms.Panel
         { BackColor = System.Drawing.Color.Black };
@@ -125,10 +118,31 @@ public sealed class LiveMonitorControl : Border
         body.Children.Add(_host);
 
         var root = new DockPanel();
-        DockPanel.SetDock(bar, Dock.Top);
-        root.Children.Add(bar);
+        DockPanel.SetDock(_bar, Dock.Top);
+        root.Children.Add(_bar);
         root.Children.Add(body);
         Child = root;
+
+        // Alto elástico 16:9 respecto al ancho: al ensanchar el panel izquierdo
+        // (separador arrastrable) los monitores crecen con él.
+        //
+        // El 16:9 es del HUECO DEL VÍDEO, no del control: hay que descontar el
+        // borde y la barra del distintivo. Antes se sumaba un 18 fijo por la
+        // barra y el borde no se contaba en absoluto, así que el hueco no era
+        // 16:9 y la imagen se salía un poco del marco — invisible a 280 px de
+        // ancho, evidente cuando el visor del inspector pasó a ocupar el alto
+        // del panel. La barra se MIDE en vez de darla por supuesta; se suscribe
+        // aquí abajo, con _bar ya construido.
+        SizeChanged += (_, e) =>
+        {
+            if (!e.WidthChanged || e.NewSize.Width <= 0)
+                return;
+            double barH = _bar.ActualHeight > 0 ? _bar.ActualHeight : 18.0;
+            double chromeH = BorderThickness.Top + BorderThickness.Bottom + barH;
+            double innerW = Math.Max(
+                0.0, e.NewSize.Width - BorderThickness.Left - BorderThickness.Right);
+            Height = Math.Max(120, innerW * 9.0 / 16.0 + chromeH);
+        };
     }
 
     // ------------------------------------------------------------------

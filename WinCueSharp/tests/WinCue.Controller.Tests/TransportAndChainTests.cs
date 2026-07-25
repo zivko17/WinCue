@@ -158,6 +158,63 @@ public class TransportAndChainTests : ControllerTestBase
     }
 
     [Fact]
+    public void StopAll_RewindsPlayheadToTheCueThatWasPlaying()
+    {
+        var a = AddCue(CueType.Audio, duration: 10.0);
+        AddCue(CueType.Audio);
+
+        Controller.OnGoPressed();
+        Assert.Equal(1, Controller.Playhead);   // el GO dispara y AVANZA
+
+        Controller.OnStopPressed();
+
+        // Vuelve al cue que sonaba: el GO siguiente lo reanuda, no lo salta
+        Assert.Equal(0, Controller.Playhead);
+        Controller.OnGoPressed();
+        Assert.Equal(2, Audio.Plays.Count);
+        Assert.Equal(a.Id, Audio.Plays[^1].CueId);
+    }
+
+    [Fact]
+    public void StopAll_KeepsPlayheadWhereTheOperatorPutIt()
+    {
+        AddCue(CueType.Audio, duration: 10.0);
+        AddCue(CueType.Audio);
+        AddCue(CueType.Audio);
+
+        Controller.OnGoPressed();
+        Controller.OnSetPlayhead(2);   // el operador se coloca en otro punto
+
+        Controller.OnStopPressed();
+
+        Assert.Equal(2, Controller.Playhead);
+    }
+
+    [Fact]
+    public void StopAll_WithNothingPlayingDoesNotMoveThePlayhead()
+    {
+        AddCue(CueType.Audio);
+        AddCue(CueType.Audio);
+        Controller.OnSetPlayhead(1);
+
+        Controller.OnStopPressed();
+
+        Assert.Equal(1, Controller.Playhead);
+    }
+
+    [Fact]
+    public void FadeAll_AlsoRewindsToTheShowPoint()
+    {
+        AddCue(CueType.Audio, duration: 10.0);
+        AddCue(CueType.Audio);
+
+        Controller.OnGoPressed();
+        Controller.OnFadeAll();
+
+        Assert.Equal(0, Controller.Playhead);
+    }
+
+    [Fact]
     public void Panic_FadesEverythingOut()
     {
         var a = AddCue(CueType.Audio);

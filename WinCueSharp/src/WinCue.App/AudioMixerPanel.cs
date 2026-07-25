@@ -23,6 +23,7 @@
 //   como el inspector (cada cambio: el modelo ya es en-memoria).
 // =============================================================================
 
+using System.Globalization;
 using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Media;
@@ -63,8 +64,7 @@ public sealed class AudioMixerPanel : ContentControl
 
     public AudioMixerPanel()
     {
-        _master = Strip.Build("MASTER", AccentPgm, withVu: true, extraMeter: _grBar)
-                       .MakeTaller();
+        _master = Strip.Build("MASTER", AccentPgm, withVu: true, extraMeter: _grBar);
         _grBar.ToolTip = Loc.T(
             "Limitador del bus (techo −1 dBFS): reducción de ganancia.\nLa suma de cues no puede saturar el dispositivo.",
             "Bus limiter (−1 dBFS ceiling): gain reduction.\nThe sum of cues cannot clip the device.");
@@ -77,6 +77,8 @@ public sealed class AudioMixerPanel : ContentControl
             FontFamily = new FontFamily("Consolas"), FontSize = 11,
             Foreground = Theme.WarnBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
+            // Va dentro de la zona de extras, que ya tiene el alto reservado en
+            // todos los strips: aparezca o no la línea de GR, nada se mueve.
             Text = "",
         };
         _master.Extras.Children.Add(_grText);
@@ -193,6 +195,7 @@ public sealed class AudioMixerPanel : ContentControl
                 continue;
             }
             _cueHost.Children.Add(MakeStrip(row, resolveCue).Root);
+            ApplySolo();   // nace enmudecido si hay un solo puesto
         }
         foreach (int id in _cueStrips.Keys.ToList())
         {
@@ -211,8 +214,23 @@ public sealed class AudioMixerPanel : ContentControl
         var s = new CueStrip(row, resolveCue(row.Id),
             (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
             id => CueStripActivated?.Invoke(id));
+        // El solo solo existe entre cues: aquí sí hay algo contra lo que solear.
+        s.EnableSolo();
+        s.SoloToggled = _ => ApplySolo();
         _cueStrips[row.Id] = s;
         return s;
+    }
+
+    /// <summary>Reparte el silencio del SOLO. Con uno o más cues en solo, los
+    /// demás enmudecen; al soltar el último, vuelven — pero solo los que enmudeció
+    /// el solo: si el operador silenció uno a mano, sigue mudo. Un cue que entra
+    /// a sonar con un solo puesto nace enmudecido, o el solo duraría hasta el
+    /// siguiente GO y no hasta que se suelte.</summary>
+    private void ApplySolo()
+    {
+        bool anySolo = _cueStrips.Values.Any(s => s.Soloed);
+        foreach (var s in _cueStrips.Values)
+            s.SetMutedBySolo(anySolo && !s.Soloed);
     }
 
     private static void WireDebouncedFader(Strip strip, Action<int, bool> emit)
@@ -233,41 +251,113 @@ public sealed class AudioMixerPanel : ContentControl
             final.Stop();
             final.Start();
         };
+        // El silencio se aplica EN VIVO y no se guarda: el ajuste persistido
+        // sigue siendo el volumen real, para que quitar el mute lo devuelva y
+        // para que la app no arranque muda mañana.
+        strip.MuteChanged = v =>
+        {
+            emit(v, false);
+            final.Stop();
+            pending = -1;
+        };
     }
 
-    private static string DbLabel(double v01) =>
-        v01 <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v01):+0.0;-0.0} dB";
-
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
+
+    /// <summary>Escala en dB al costado del fader. Las marcas se colocan con la
+    /// MISMA ley que mueve el fader (AudioLevels), así que el rótulo «0» cae
+    /// exactamente donde el fader da 0 dB — si se cambia la ley, la escala se
+    /// entera sola.
+    ///
+    /// El recorrido útil de un Slider vertical de WPF no es todo su alto: el
+    /// pomo se centra en el valor, así que arriba y abajo sobra medio pomo que
+    /// hay que descontar o la escala queda corrida contra el fader.</summary>
+    private sealed class FaderScale : FrameworkElement
+    {
+        /// <summary>Alto del pomo del fader vertical (App.xaml, FaderThumb).</summary>
+        private const double ThumbH = 13.0;
+
+        private static readonly Brush TickBrush = Frozen(new SolidColorBrush(Theme.TextDimmer));
+        private static readonly Pen TickPen = FrozenPen(new Pen(TickBrush, 1.0));
+        private static readonly Pen UnityPen =
+            FrozenPen(new Pen(Frozen(new SolidColorBrush(Theme.TextSecondary)), 1.0));
+
+        private static Pen FrozenPen(Pen p) { p.Freeze(); return p; }
+
+        protected override void OnRender(DrawingContext dc)
+        {
+            double w = ActualWidth, h = ActualHeight;
+            if (w <= 0 || h <= 0)
+                return;
+            double top = ThumbH / 2.0, travel = h - ThumbH;
+            if (travel <= 0)
+                return;
+
+            foreach (double db in AudioLevels.ScaleTicks)
+            {
+                double y = top + (1.0 - AudioLevels.DbToPosition(db)) * travel;
+                // La unidad se marca más clara: es la referencia que se busca.
+                bool unity = Math.Abs(db) < 0.001;
+                dc.DrawLine(unity ? UnityPen : TickPen,
+                            new Point(w - 5, y), new Point(w, y));
+                var label = Label(db > 0 ? $"+{db:0}" : $"{db:0}",
+                                  unity ? UnityPen.Brush : TickBrush);
+                dc.DrawText(label, new Point(w - 7 - label.Width, y - label.Height / 2.0));
+            }
+
+            // El fondo del recorrido es SILENCIO, no −60 dB: se rotula aparte
+            // porque no es un punto de la ley, es el final del fader.
+            var inf = Label("dB", TickBrush);
+            dc.DrawText(inf, new Point(w - 7 - inf.Width, h - inf.Height));
+        }
+
+        private static FormattedText Label(string text, Brush brush) => new(
+            text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
+            new Typeface("Consolas"), 9, brush, 1.0);
+    }
 
     /// <summary>Strip genérico: título, fader vertical + VU estéreo, etiqueta
     /// dB y zona de extras. Base de master/audición y de los strips por cue.</summary>
     private class Strip
     {
+        /// <summary>Pasos del recorrido del fader. No son «por ciento de
+        /// volumen»: son posición, y la ganancia sale de AudioLevels.</summary>
+        public const double PosSteps = 1000.0;
+
         public Border Root = null!;
         public Slider Fader = null!;
         public TextBlock Db = null!;
         public StackPanel Extras = null!;
+        public Button MuteButton = null!;
+        public Button SoloButton = null!;
+
+        /// <summary>Cambio del fader en GANANCIA POR CIENTO (100 = 0 dB), que
+        /// es lo que guardan el modelo y los ajustes desde siempre.</summary>
         public Action<int>? FaderChanged;
+
+        /// <summary>Cambio que NO debe PERSISTIR: el silencio es una maniobra de
+        /// directo, no un ajuste. Sin esta ruta aparte, silenciar el MASTER
+        /// guardaba master_volume=0 y al reabrir la app la mesa arrancaba muda.
+        /// Si nadie la cablea (strips de cue) se cae a FaderChanged.</summary>
+        public Action<int>? MuteChanged;
+
+        /// <summary>Al entrar o salir del solo (solo strips de cue).</summary>
+        public Action<Strip>? SoloToggled;
 
         protected VuMeterControl? VuL, VuR;
         protected StackPanel MeterZone = null!;
         protected TextBlock TitleText = null!;
         protected bool Syncing;
 
-        /// <summary>Sube el fader a la altura de MASTER. Se llama solo en él:
-        /// es el único que actúa sobre todo lo que suena, y ese poco de más
-        /// basta para encontrarlo sin leer la etiqueta.</summary>
-        public Strip MakeTaller()
-        {
-            Fader.Height = UiMetrics.MasterFaderHeight;
-            // Los medidores suben CON él: si solo creciera el fader, el strip
-            // volvería a quedar descuadrado.
-            foreach (var child in MeterZone.Children)
-                if (child is FrameworkElement fe && !ReferenceEquals(fe, Fader))
-                    fe.Height = UiMetrics.MasterFaderHeight;
-            return this;
-        }
+        /// <summary>Silenciado a mano (botón M) o por el solo de otro strip.</summary>
+        public bool Muted { get; private set; }
+        public bool Soloed { get; private set; }
+
+        /// <summary>Ganancia por ciento anterior al silencio, para devolverla
+        /// intacta al quitarlo: el mute NO es «bajar el fader a cero», es
+        /// apartarlo un momento y poder volver exactamente a donde estaba.</summary>
+        private int _preMuteGain = 100;
+        private bool _mutedBySolo;
 
         public static Strip Build(string title, Brush accent, bool withVu,
                                   FrameworkElement? extraMeter = null)
@@ -280,7 +370,9 @@ public sealed class AudioMixerPanel : ContentControl
         protected void Init(string title, Brush accent, bool withVu,
                             FrameworkElement? extraMeter = null)
         {
+            // 0 rótulo · 1 lectura dB · 2 escala+fader+VU · 3 botones · 4 extras
             var grid = new Grid();
+            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
             grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
             grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
@@ -291,21 +383,68 @@ public sealed class AudioMixerPanel : ContentControl
                 Text = title, FontWeight = FontWeights.Bold, FontSize = 12,
                 Foreground = accent, HorizontalAlignment = HorizontalAlignment.Center,
                 Margin = new Thickness(0, 0, 0, 6), TextTrimming = TextTrimming.CharacterEllipsis,
+                // El rótulo mide lo MISMO lleve icono o no: alto explícito, más
+                // BlockLineHeight para que la caja de línea sea exactamente
+                // LineHeight y deje de depender del alto del glifo. Sin esto
+                // «🎧 AUDICIÓN» ocupaba más que «MASTER» y bajaba con él todo
+                // lo que tiene debajo.
+                Height = UiMetrics.StripTitleLineHeight,
+                LineHeight = UiMetrics.StripTitleLineHeight,
+                LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             };
             grid.Children.Add(TitleText);
+
+            // LECTURA EN dB ARRIBA, justo bajo el rótulo: es el dato que se
+            // consulta de un vistazo antes de tocar el fader, y abajo competía
+            // con los botones.
+            Db = new TextBlock
+            {
+                FontFamily = new FontFamily("Consolas"), FontSize = 12,
+                Foreground = DbGreen,
+                // Ancho FIJO y texto centrado dentro: antes la cifra cambiaba de
+                // ancho al mover el fader y arrastraba la columna entera.
+                Width = UiMetrics.DbReadoutWidth,
+                TextAlignment = TextAlignment.Center,
+                Text = AudioLevels.DbLabel(1.0),
+            };
+            var dbFrame = new Border
+            {
+                Background = Theme.Solid(Theme.SunkenBg),
+                BorderBrush = Theme.Solid(Theme.Divider),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(4, 2, 4, 2),
+                Margin = new Thickness(0, 0, 0, 6),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = Db,
+            };
+            Grid.SetRow(dbFrame, 1);
+            grid.Children.Add(dbFrame);
 
             MeterZone = new StackPanel
             {
                 Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Center,
             };
+            // ESCALA en dB a la izquierda del fader, con las marcas justo donde
+            // la ley del fader coloca cada valor (AudioLevels).
+            MeterZone.Children.Add(new FaderScale
+            { Width = UiMetrics.FaderScaleWidth, Height = UiMetrics.FaderHeight });
             Fader = new Slider
             {
-                Orientation = Orientation.Vertical, Minimum = 0, Maximum = 100,
-                Value = 100,
+                // El fader recorre POSICIÓN (0..1000), no ganancia: la ganancia
+                // sale de AudioLevels.PositionToGain. Con recorrido lineal en
+                // ganancia, −20 dB caía al 10 % del fader y −45 dB al 0,5 %, con
+                // todo el rango útil en el último milímetro. Los 1000 pasos dan
+                // resolución de sobra para que el arrastre se sienta continuo.
+                Orientation = Orientation.Vertical, Minimum = 0, Maximum = PosSteps,
+                Value = PosSteps,
                 // Alto FIJO y no MinHeight: con MinHeight cada strip se estiraba
-                // a lo que le tocase y no había dos faders del mismo tamaño. El
-                // MASTER lo sube luego con MakeTaller().
+                // a lo que le tocase y no había dos faders del mismo tamaño.
+                // TODOS miden lo mismo, MASTER incluido: en una fila de strips
+                // idénticos, uno más alto se lee como un descuadre, no como una
+                // jerarquía. El MASTER ya se distingue por el rótulo en rojo y
+                // por llevar la barra del limitador que no tiene ningún otro.
                 Width = UiMetrics.FaderWidth, Height = UiMetrics.FaderHeight,
                 IsMoveToPointEnabled = true,
             };
@@ -330,40 +469,40 @@ public sealed class AudioMixerPanel : ContentControl
                 MeterZone.Children.Add(extraMeter);
             }
             MeterZone.VerticalAlignment = VerticalAlignment.Top;
-            Grid.SetRow(MeterZone, 1);
+            Grid.SetRow(MeterZone, 2);
             grid.Children.Add(MeterZone);
 
-            Db = new TextBlock
+            // BOTONERA: M siempre; S solo donde significa algo (los strips de
+            // cue lo activan con EnableSolo). En MASTER y AUDICIÓN no hay nada
+            // contra lo que solear, así que su hueco queda vacío en vez de
+            // ofrecer un botón que no haría nada.
+            MuteButton = SmallButton("M", Loc.T("Silenciar este strip", "Mute this strip"));
+            SoloButton = SmallButton("S", Loc.T("Escuchar solo este cue", "Solo this cue"));
+            SoloButton.Visibility = Visibility.Hidden;
+            var buttons = new StackPanel
             {
-                FontFamily = new FontFamily("Consolas"), FontSize = 12,
-                Foreground = DbGreen,
-                // Ancho FIJO y texto centrado dentro: antes la cifra cambiaba de
-                // ancho al mover el fader y arrastraba la columna entera.
-                Width = UiMetrics.DbReadoutWidth,
-                TextAlignment = TextAlignment.Center,
-                Text = DbLabel(1.0),
-            };
-            var dbFrame = new Border
-            {
-                Background = Theme.Solid(Theme.SunkenBg),
-                BorderBrush = Theme.Solid(Theme.Divider),
-                BorderThickness = new Thickness(1),
-                CornerRadius = new CornerRadius(4),
-                Padding = new Thickness(4, 2, 4, 2),
-                Margin = new Thickness(0, 6, 0, 0),
+                Orientation = Orientation.Horizontal,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                Child = Db,
+                Margin = new Thickness(0, 6, 0, 0),
             };
-            Grid.SetRow(dbFrame, 2);
-            grid.Children.Add(dbFrame);
+            buttons.Children.Add(MuteButton);
+            buttons.Children.Add(SoloButton);
+            Grid.SetRow(buttons, 3);
+            grid.Children.Add(buttons);
 
-            Extras = new StackPanel { Margin = new Thickness(0, 2, 0, 0) };
-            Grid.SetRow(Extras, 3);
+            MuteButton.Click += (_, _) => SetMuted(!Muted);
+
+            // Alto RESERVADO e IGUAL en todos, escriban algo ahí o no: un
+            // TextBlock vacío de WPF sigue midiendo una línea, así que el hueco
+            // ya existía solo en el MASTER y le descuadraba el strip.
+            Extras = new StackPanel
+            { Margin = new Thickness(0, 2, 0, 0), Height = UiMetrics.StripExtrasHeight };
+            Grid.SetRow(Extras, 4);
             grid.Children.Add(Extras);
 
             Root = new Border
             {
-                Width = 132, Margin = new Thickness(5, 8, 5, 8),
+                Width = UiMetrics.StripWidth, Margin = new Thickness(5, 8, 5, 8),
                 Padding = new Thickness(8, 6, 8, 6),
                 Background = Frozen(new SolidColorBrush(Theme.ToolbarBg)),
                 BorderBrush = Frozen(new SolidColorBrush(Theme.ButtonBgAlt)),
@@ -373,10 +512,100 @@ public sealed class AudioMixerPanel : ContentControl
 
             Fader.ValueChanged += (_, e) =>
             {
-                Db.Text = DbLabel(e.NewValue / 100.0);
-                if (!Syncing)
-                    FaderChanged?.Invoke((int)Math.Round(e.NewValue));
+                double gain = AudioLevels.PositionToGain(e.NewValue / PosSteps);
+                Db.Text = AudioLevels.DbLabel(gain);
+                if (Syncing)
+                    return;
+                // Mover el fader a mano deshace el silencio: si no, el operador
+                // subiría un fader mudo sin entender por qué no suena.
+                if (Muted)
+                    ClearMuteFlag();
+                FaderChanged?.Invoke(GainPercent(gain));
             };
+
+            PaintButtons();
+        }
+
+        private static int GainPercent(double gain) => (int)Math.Round(gain * 100.0);
+
+        /// <summary>Botón cuadrado de la botonera (M / S).</summary>
+        private static Button SmallButton(string text, string tip) => new()
+        {
+            Content = text, Width = 26, Height = 20, ToolTip = tip,
+            FontSize = 11, FontWeight = FontWeights.Bold,
+            Margin = new Thickness(3, 0, 3, 0),
+            Background = Theme.ButtonBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+        };
+
+        /// <summary>Da de alta el botón S. Solo lo llaman los strips de cue:
+        /// en MASTER y AUDICIÓN no hay nada contra lo que solear.</summary>
+        public void EnableSolo()
+        {
+            SoloButton.Visibility = Visibility.Visible;
+            SoloButton.Click += (_, _) =>
+            {
+                Soloed = !Soloed;
+                PaintButtons();
+                SoloToggled?.Invoke(this);
+            };
+        }
+
+        /// <summary>Silencio a mano (botón M).</summary>
+        public void SetMuted(bool muted)
+        {
+            if (muted == Muted)
+                return;
+            _mutedBySolo = false;
+            ApplyMute(muted);
+        }
+
+        /// <summary>Silencio IMPUESTO por el solo de otro strip. Se distingue
+        /// del manual para no pisarlo: un strip silenciado a mano sigue mudo
+        /// cuando se acaba el solo.</summary>
+        public void SetMutedBySolo(bool muted)
+        {
+            if (muted == Muted)
+                return;
+            if (!muted && !_mutedBySolo)
+                return;   // lo silenció el operador: no lo devuelve el solo
+            _mutedBySolo = muted;
+            ApplyMute(muted);
+        }
+
+        private void ApplyMute(bool muted)
+        {
+            if (muted)
+                _preMuteGain = GainPercent(
+                    AudioLevels.PositionToGain(Fader.Value / PosSteps));
+            Muted = muted;
+            PaintButtons();
+            // El fader BAJA a cero a la vista y el valor viaja por la ruta de
+            // siempre: lo que se ve es lo que suena, sin un silencio invisible
+            // por debajo que no cuadre con la posición del fader.
+            SetFaderSilent(muted ? 0 : _preMuteGain);
+            (MuteChanged ?? FaderChanged)?.Invoke(muted ? 0 : _preMuteGain);
+        }
+
+        /// <summary>El operador movió el fader a mano estando en silencio: el
+        /// silencio se levanta sin tocar el valor que acaba de poner.</summary>
+        private void ClearMuteFlag()
+        {
+            Muted = false;
+            _mutedBySolo = false;
+            PaintButtons();
+        }
+
+        protected void PaintButtons()
+        {
+            MuteButton.Background = Muted
+                ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
+            MuteButton.Foreground = Muted
+                ? System.Windows.Media.Brushes.Black : Theme.TextPrimaryBrush;
+            SoloButton.Background = Soloed
+                ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
+            SoloButton.Foreground = Soloed
+                ? System.Windows.Media.Brushes.Black : Theme.TextPrimaryBrush;
         }
 
         public void SetLevels(float l, float r)
@@ -385,12 +614,22 @@ public sealed class AudioMixerPanel : ContentControl
             VuR?.SetLevel(r);
         }
 
+        /// <summary>Coloca el fader a una GANANCIA POR CIENTO (100 = 0 dB) sin
+        /// emitir cambio. La posición sale de la ley del fader, no del valor:
+        /// son unidades distintas desde que el recorrido se reparte en dB.</summary>
         public void SetFaderSilent(int value)
         {
+            double gain = Math.Clamp(value, 0, MaxGainPercent) / 100.0;
             Syncing = true;
-            Fader.Value = Math.Clamp(value, 0, 100);
+            Fader.Value = AudioLevels.GainToPosition(gain) * PosSteps;
+            // ValueChanged no salta si la posición no cambia (p. ej. dos
+            // ganancias por debajo de −60 dB): la lectura se repinta a mano.
+            Db.Text = AudioLevels.DbLabel(gain);
             Syncing = false;
         }
+
+        /// <summary>Techo en las mismas unidades que viajan por FaderChanged.</summary>
+        public static int MaxGainPercent => (int)Math.Round(AudioLevels.MaxGain * 100.0);
 
         public void VuTooltip(string tip)
         {
@@ -441,9 +680,10 @@ public sealed class AudioMixerPanel : ContentControl
                     "VU n/a (mpv → device); its level shows on MASTER");
             }
 
+            // SetFaderSilent ya deja la lectura en dB puesta.
             SetFaderSilent((int)Math.Round((cue?.Volume ?? 1.0) * 100.0));
-            Db.Text = DbLabel(cue?.Volume ?? 1.0);
             FaderChanged = v => commit(CueId, v / 100.0);
+            PaintButtons();
         }
 
         /// <summary>El volumen del modelo cambió por otra vía (inspector) →
@@ -452,9 +692,16 @@ public sealed class AudioMixerPanel : ContentControl
         {
             if (cue is null || Fader.IsMouseCaptureWithin || Fader.IsKeyboardFocusWithin)
                 return;
-            int model = (int)Math.Round(cue.Volume * 100.0);
-            if (Math.Abs(Fader.Value - model) >= 1.0)
-                SetFaderSilent(model);
+            // Silenciado: el modelo dice 0 porque lo puso el propio silencio.
+            // Recolocar el fader aquí borraría el valor guardado para volver.
+            if (Muted)
+                return;
+            // La comparación va en POSICIÓN, no en ganancia: son unidades
+            // distintas desde que el recorrido se reparte en dB, y comparar una
+            // con otra recolocaba el fader en cada vuelta de sincronía.
+            double target = AudioLevels.GainToPosition(cue.Volume) * PosSteps;
+            if (Math.Abs(Fader.Value - target) >= 1.0)
+                SetFaderSilent((int)Math.Round(cue.Volume * 100.0));
         }
     }
 

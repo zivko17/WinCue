@@ -94,6 +94,14 @@ public class MainController
     // Anti doble-GO: instante del último GO aceptado
     private long _lastGoTicks;
 
+    // PUNTO DEL SHOW: el cue que salió al aire con el último GO, y dónde quedó
+    // el playhead justo después. GoCue dispara y LUEGO avanza, así que mientras
+    // suena un cue el playhead ya está en el siguiente: para volver al cue que
+    // sonaba (STOP ALL, PANIC, FADE ALL) hay que recordar cuál era.
+    // Se guarda el ID, no el índice: insertar o borrar cues renumera.
+    private int _showPointCueId = -1;
+    private int _playheadAfterGo = -1;
+
     public int Playhead => _playhead;
     public bool IsPaused => _paused;
     public IReadOnlyCollection<int> RunningCueIds => _running.Keys;
@@ -229,11 +237,12 @@ public class MainController
         GoCue(_playhead);
     }
 
-    /// <summary>Stop All: detiene todos los cues. No mueve el playhead.</summary>
+    /// <summary>Stop All: detiene todos los cues y devuelve el playhead al cue
+    /// que estaba al aire, para que el GO siguiente reanude ahí mismo.</summary>
     public void OnStopPressed()
     {
         Log("STOP ALL");
-        StopEverything(fade: 0.0);
+        StopEverything(fade: 0.0, rewindToShowPoint: true);
         _view.FlashStatus(Loc.T("■ STOP ALL — todos los cues detenidos", "■ STOP ALL — all cues stopped"));
     }
 
@@ -256,7 +265,7 @@ public class MainController
         if (doublePress)
         {
             Log("PANIC (doble — corte duro)");
-            StopEverything(fade: 0.0);
+            StopEverything(fade: 0.0, rewindToShowPoint: true);
             if (showImage)
                 _view.ShowBackupSlate(0.15);
             _view.FlashStatus(Loc.T("⚠⚠ PANIC ×2 — CORTE DURO", "⚠⚠ PANIC ×2 — HARD CUT"));
@@ -264,7 +273,7 @@ public class MainController
         }
 
         Log("PANIC");
-        StopEverything(fade: fade);
+        StopEverything(fade: fade, rewindToShowPoint: true);
         if (showImage)
             _view.ShowBackupSlate(fade);
         _view.FlashStatus(showImage
@@ -278,7 +287,7 @@ public class MainController
     {
         double t = Math.Max(0.1, _settings.Get("fade_all_seconds", 5.0));
         Log($"FADE ALL ({t:0.#}s)");
-        StopEverything(fade: t);
+        StopEverything(fade: t, rewindToShowPoint: true);
         _view.FlashStatus(Loc.T($"◢ FADE ALL — fundido de {t:0.#}s", $"◢ FADE ALL — {t:0.#}s fade"));
     }
 
@@ -792,6 +801,15 @@ public class MainController
         // después, a tiempo de precargar el siguiente.
         Trigger(idx, advanceChain: true);
         SetPlayhead(idx + 1);
+        MarkShowPoint(cue);
+    }
+
+    /// <summary>Anota qué cue acaba de salir al aire por GO (y dónde quedó el
+    /// playhead tras avanzar). Es el punto al que vuelve un STOP ALL.</summary>
+    private void MarkShowPoint(Cue cue)
+    {
+        _showPointCueId = cue.Id;
+        _playheadAfterGo = _playhead;
     }
 
     private void GoGroup(int idx, Cue cue)
@@ -812,6 +830,7 @@ public class MainController
         // TIMELINE / GO_NEXT / RANDOM: el playhead salta tras el grupo
         SetPlayhead(extent);
         Trigger(idx, advanceChain: true);
+        MarkShowPoint(cue);
     }
 
     private void FireGroupChildren(int idx)
@@ -1526,8 +1545,19 @@ public class MainController
         }
     }
 
-    private void StopEverything(double fade)
+    /// <summary>Para todo. <paramref name="rewindToShowPoint"/> lo convierte en
+    /// una parada de DIRECTO: el playhead vuelve al cue que estaba al aire, así
+    /// que el GO siguiente reanuda por donde ibas. Lo usan STOP ALL, PANIC y
+    /// FADE ALL; NO las paradas internas (cargar show, reproducir desde el
+    /// timeline, cue STOP sin objetivo), que colocan el playhead por su cuenta
+    /// o siguen el hilo del propio show.</summary>
+    private void StopEverything(double fade, bool rewindToShowPoint = false)
     {
+        // El retroceso se decide ANTES (EndCue vacía _running) y se aplica al
+        // final: SetPlayhead precarga el standby del cue, y hacerlo antes del
+        // barrido de motores lo tiraría a la basura.
+        bool rewind = rewindToShowPoint && _running.Count > 0;
+
         // Cancelar continuaciones pendientes (AUTO_CONTINUE)
         foreach (var t in _chainTimers)
             t.Dispose();
@@ -1561,6 +1591,16 @@ public class MainController
         _view.UpdateActiveCues(Array.Empty<ActiveCueInfo>());
         _view.UpdateVuMeter(0.0f, 0.0f);
         RefreshVideoTally();
+
+        // VOLVER AL CUE QUE SONABA. Solo si nadie ha tocado el playhead desde
+        // aquel GO (_playheadAfterGo): si el operador ya se ha movido a otro
+        // punto de la lista, esa es SU posición y un STOP ALL no la secuestra.
+        if (rewind && _playhead == _playheadAfterGo)
+        {
+            int idx = _model.IndexOfId(_showPointCueId);
+            if (idx >= 0)
+                SetPlayhead(idx);
+        }
     }
 
     // ==================================================================
