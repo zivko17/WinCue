@@ -545,6 +545,9 @@ public sealed class InspectorPanel : ContentControl
             Commit("translate_x", tx);
             Commit("translate_y", ty);
         };
+        // Commit dispara la re-lectura de los controles, así que el deslizador
+        // de «Escala (×)» sigue al tirador solo; no hay que tocarlo aquí.
+        _geoCanvas.Scaled += sx => Commit("scale_x", sx);
         root.Children.Add(_geoCanvas);
 
         Header(controls, Loc.T("MODO", "MODE"));

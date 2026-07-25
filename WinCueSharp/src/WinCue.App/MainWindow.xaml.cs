@@ -1081,7 +1081,10 @@ public partial class MainWindow : Window, IShowView
             var show = new MenuItem
             {
                 Header = w is { IsVisible: true } ? Loc.T("Ocultar", "Hide") : Loc.T("Mostrar", "Show"),
-                Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                // Sin Foreground: lo pone el estilo de MenuItem. Fijarlo aquí
+                // (era Brushes.Black, de cuando el menú era el claro de WPF)
+                // dejaba el texto negro sobre el panel oscuro.
+                FontWeight = FontWeights.Normal,
                 StaysOpenOnClick = true,
             };
             show.Click += (_, _) =>
@@ -1104,7 +1107,7 @@ public partial class MainWindow : Window, IShowView
             var ident = new MenuItem
             {
                 Header = Loc.T("Identificar", "Identify"),
-                Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                FontWeight = FontWeights.Normal,   // el color lo pone el estilo
                 StaysOpenOnClick = true,
             };
             ident.Click += (_, _) =>
@@ -1128,7 +1131,7 @@ public partial class MainWindow : Window, IShowView
                     Header = label,
                     IsCheckable = true,
                     IsChecked = (w?.Pattern ?? TestPattern.None) == pattern,
-                    Foreground = Brushes.Black, FontWeight = FontWeights.Normal,
+                    FontWeight = FontWeights.Normal,   // el color lo pone el estilo
                     StaysOpenOnClick = true,
                 };
                 var p = pattern;
