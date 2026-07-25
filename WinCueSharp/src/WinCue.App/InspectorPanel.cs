@@ -950,12 +950,25 @@ public sealed class InspectorPanel : ContentControl
         var label = new TextBlock
         {
             FontFamily = new FontFamily("Consolas"),
-            FontSize = 13,
+            FontSize = 12,
             Foreground = Theme.GoBrush,
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Margin = new Thickness(0, 4, 0, 0),
+            // Ancho FIJO: era esto lo que movía medio panel al subir el volumen
+            // — el texto crecía («+0,0 dB (100%)» → «+12,0 dB (400%)») y
+            // empujaba a todo lo que tenía al lado.
+            Width = UiMetrics.DbReadoutWideWidth,
+            TextAlignment = TextAlignment.Center,
         };
-        faderCol.Children.Add(label);
+        faderCol.Children.Add(new Border
+        {
+            Background = Theme.Solid(Theme.SunkenBg),
+            BorderBrush = Theme.Solid(Theme.Divider),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 6, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Child = label,
+        });
         mixer.Children.Add(faderCol);
 
         var vuCol = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };

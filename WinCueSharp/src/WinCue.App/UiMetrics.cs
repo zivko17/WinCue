@@ -30,4 +30,19 @@ public static class UiMetrics
     /// sobre todo lo que suena, y ese medio centímetro de más basta para
     /// encontrarlo sin leer la etiqueta.</summary>
     public const double MasterFaderHeight = 200;
+
+    /// <summary>Ancho FIJO de la lectura en dB.
+    ///
+    /// Es fijo porque el texto cambia de ancho al usarlo («+0,0 dB» → «+12,0 dB»)
+    /// y, centrado dentro de una pila, ese píxel de más movía la columna entera:
+    /// al subir un fader se meneaba medio panel. Reservando el ancho del caso más
+    /// largo (signo + dos dígitos + decimal + « dB»), la cifra cambia y nada más
+    /// se mueve.</summary>
+    public const double DbReadoutWidth = 74;
+
+    /// <summary>Igual que <see cref="DbReadoutWidth"/> pero para la lectura del
+    /// inspector, que además del dB lleva el porcentaje («+12,0 dB (400%)»).
+    /// Con el ancho corto se cortaría el texto, y un dato recortado es peor que
+    /// uno que se mueve.</summary>
+    public const double DbReadoutWideWidth = 124;
 }

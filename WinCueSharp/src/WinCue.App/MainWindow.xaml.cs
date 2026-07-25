@@ -197,6 +197,7 @@ public partial class MainWindow : Window, IShowView
         // valores estáticos; el resto de su estado ya se refresca por evento)
         ModeToggle.Content = Loc.T("Modo: EDIT", "Mode: EDIT");
         LockModeToggleWidth();
+        LockPauseButtonWidth();
         UpdateVideoOutButton();
 
         // Volumen master desde settings (el fader vive en ⚙ → Audio)
@@ -493,8 +494,35 @@ public partial class MainWindow : Window, IShowView
 
     public void UpdateTransport(bool paused)
     {
-        PauseButton.Content = paused ? $"{Icons.Play} REANUDAR" : $"{Icons.Pause} PAUSA";
+        // Estaba escrito a mano en español —"REANUDAR"/"PAUSA"— y se colaba en
+        // la interfaz en inglés. Va por Loc como todo lo demás.
+        PauseButton.Content = paused
+            ? $"{Icons.Play} {Loc.T("REANUDAR", "RESUME")}"
+            : $"{Icons.Pause} {Loc.T("PAUSA", "PAUSE")}";
         RefreshTransportLights();
+    }
+
+    /// <summary>Reserva en PAUSA el ancho del más largo de sus dos textos, por
+    /// el mismo motivo que en el botón de modo: al cambiar a REANUDAR el botón
+    /// crecía y empujaba a los de al lado. Una barra de transporte cuyos botones
+    /// se mueven obliga a mirar dónde está cada uno antes de pulsar.</summary>
+    private void LockPauseButtonWidth()
+    {
+        var typeface = new Typeface(PauseButton.FontFamily, PauseButton.FontStyle,
+                                    PauseButton.FontWeight, PauseButton.FontStretch);
+        double pixelsPerDip = VisualTreeHelper.GetDpi(this).PixelsPerDip;
+
+        double Measure(string s) => new FormattedText(
+            s, System.Globalization.CultureInfo.CurrentCulture,
+            FlowDirection.LeftToRight, typeface, PauseButton.FontSize,
+            Brushes.Black, pixelsPerDip).Width;
+
+        double widest = Math.Max(
+            Measure($"{Icons.Pause} {Loc.T("PAUSA", "PAUSE")}"),
+            Measure($"{Icons.Play} {Loc.T("REANUDAR", "RESUME")}"));
+
+        PauseButton.MinWidth = Math.Ceiling(widest)
+                             + PauseButton.Padding.Left + PauseButton.Padding.Right + 2;
     }
 
     /// <summary>Enciende en COLOR VIVO el botón cuya función está en efecto

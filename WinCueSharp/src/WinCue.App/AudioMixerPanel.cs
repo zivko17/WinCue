@@ -85,16 +85,14 @@ public sealed class AudioMixerPanel : ContentControl
             FontSize = 10.5, Foreground = FgDim, TextWrapping = TextWrapping.Wrap,
             TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 4, 0, 0),
         };
-        _master.Extras.Children.Add(_deviceInfo);
+        // El detalle del dispositivo pasa a TOOLTIP en vez de ocupar tres líneas
+        // bajo el fader: es un dato de configuración, no de operación, y ahí
+        // abajo solo servía para descuadrar los strips entre sí.
+        _master.Root.ToolTip = "";
 
         _audition = Strip.Build($"{Icons.Headphones} {Loc.T("AUDICIÓN", "AUDITION")}", AccentPvw, withVu: true);
         _audition.VuTooltip(Loc.T("VU de la preescucha (PVW).", "Audition (PVW) VU."));
-        _audition.Extras.Children.Add(new TextBlock
-        {
-            FontSize = 10.5, Foreground = FgDim, TextWrapping = TextWrapping.Wrap,
-            TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 4, 0, 0),
-            Text = Loc.T("Trim × volumen del cue", "Trim × cue volume"),
-        });
+        _audition.Root.ToolTip = Loc.T("Trim × volumen del cue", "Trim × cue volume");
 
         _emptyHint = new TextBlock
         {
@@ -151,7 +149,14 @@ public sealed class AudioMixerPanel : ContentControl
 
     public void SetAuditionFader(int value) => _audition.SetFaderSilent(value);
 
-    public void SetDeviceInfo(string text) => _deviceInfo.Text = text;
+    /// <summary>Detalle del dispositivo. Va al TOOLTIP del strip MASTER, no
+    /// debajo del fader: es información de configuración, se consulta de uvas a
+    /// peras, y ocupando tres líneas descuadraba los strips entre sí.</summary>
+    public void SetDeviceInfo(string text)
+    {
+        _deviceInfo.Text = text;
+        _master.Root.ToolTip = text;
+    }
 
     public void UpdateCueLevel(int cueId, float l, float r)
     {
@@ -331,11 +336,26 @@ public sealed class AudioMixerPanel : ContentControl
             Db = new TextBlock
             {
                 FontFamily = new FontFamily("Consolas"), FontSize = 12,
-                Foreground = DbGreen, HorizontalAlignment = HorizontalAlignment.Center,
-                Margin = new Thickness(0, 4, 0, 0), Text = DbLabel(1.0),
+                Foreground = DbGreen,
+                // Ancho FIJO y texto centrado dentro: antes la cifra cambiaba de
+                // ancho al mover el fader y arrastraba la columna entera.
+                Width = UiMetrics.DbReadoutWidth,
+                TextAlignment = TextAlignment.Center,
+                Text = DbLabel(1.0),
             };
-            Grid.SetRow(Db, 2);
-            grid.Children.Add(Db);
+            var dbFrame = new Border
+            {
+                Background = Theme.Solid(Theme.SunkenBg),
+                BorderBrush = Theme.Solid(Theme.Divider),
+                BorderThickness = new Thickness(1),
+                CornerRadius = new CornerRadius(4),
+                Padding = new Thickness(4, 2, 4, 2),
+                Margin = new Thickness(0, 6, 0, 0),
+                HorizontalAlignment = HorizontalAlignment.Center,
+                Child = Db,
+            };
+            Grid.SetRow(dbFrame, 2);
+            grid.Children.Add(dbFrame);
 
             Extras = new StackPanel { Margin = new Thickness(0, 2, 0, 0) };
             Grid.SetRow(Extras, 3);
@@ -411,15 +431,14 @@ public sealed class AudioMixerPanel : ContentControl
             TitleText.Cursor = System.Windows.Input.Cursors.Hand;
             TitleText.MouseLeftButtonUp += (_, _) => activate(CueId);
 
+            // La explicación de por qué este cue no tiene VU va al tooltip, no
+            // bajo el fader: dos líneas de texto ahí dejaban este strip más alto
+            // que sus vecinos y la fila de mixer quedaba en escalera.
             if (!withVu)
             {
-                Extras.Children.Add(new TextBlock
-                {
-                    FontSize = 10.5, Foreground = FgDim, TextWrapping = TextWrapping.Wrap,
-                    TextAlignment = TextAlignment.Center, Margin = new Thickness(0, 4, 0, 0),
-                    Text = Loc.T("VU n/d (mpv → dispositivo);\nsu nivel se ve en MASTER",
-                                 "VU n/a (mpv → device);\nits level shows on MASTER"),
-                });
+                Root.ToolTip += "\n" + Loc.T(
+                    "VU n/d (mpv → dispositivo); su nivel se ve en MASTER",
+                    "VU n/a (mpv → device); its level shows on MASTER");
             }
 
             SetFaderSilent((int)Math.Round((cue?.Volume ?? 1.0) * 100.0));
