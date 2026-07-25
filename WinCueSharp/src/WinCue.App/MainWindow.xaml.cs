@@ -245,7 +245,12 @@ public partial class MainWindow : Window, IShowView
         }
     }
 
-    private void OnFadeAllClick(object sender, RoutedEventArgs e) => _controller.OnFadeAll();
+    private void OnFadeAllClick(object sender, RoutedEventArgs e)
+    {
+        _fadeAllRunning = true;
+        _controller.OnFadeAll();
+        RefreshTransportLights();
+    }
 
     /// <summary>GO con confirmación opcional al disparar el ÚLTIMO cue.</summary>
     private void DoGo()
@@ -503,22 +508,72 @@ public partial class MainWindow : Window, IShowView
     /// Los colores vivos NO son nuevos: son los mismos tokens que ya usa el
     /// resto de la consola para «sonando» (Go), «atención» (Standby) y «en
     /// aire» (Pgm), así que el vocabulario de color sigue siendo uno.</summary>
+    private bool _stopAllLatched;    // STOP ALL pulsado y aún sin reanudar
+    private bool _panicLatched;      // PANIC pulsado y aún sin reanudar
+    private bool _fadeAllRunning;    // hay un FADE ALL en curso
+    private bool _blinkOn;           // fase del parpadeo
+    private DispatcherTimer? _blinkTimer;
+
     private void RefreshTransportLights()
     {
         bool running = _controller is not null && _controller.RunningCueIds.Count > 0;
         bool paused = _controller is not null && _controller.IsPaused;
 
+        // Que algo vuelva a sonar significa que el show ha seguido: es la señal
+        // para apagar los enclavados. Sin esto, STOP ALL y PANIC se quedarían
+        // encendidos para siempre y dejarían de querer decir nada.
+        if (running)
+        {
+            _stopAllLatched = false;
+            _panicLatched = false;
+        }
+        else
+        {
+            // El FADE ALL termina cuando ya no queda nada sonando.
+            _fadeAllRunning = false;
+        }
+
         // GO: verde claro mientras hay algo sonando; verde apagado en reposo.
         GoButton.Background = Theme.Solid(running ? Theme.Go : Theme.GoButton);
 
-        // PAUSA: ámbar mientras la reproducción está detenida. Texto en negro
-        // porque sobre el ámbar el claro de la barra no se lee.
-        PauseButton.Background = paused ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
-        PauseButton.Foreground = paused ? Brushes.Black : Theme.TextPrimaryBrush;
+        // PAUSA: PARPADEA en ámbar mientras la reproducción está detenida. Texto
+        // en negro en la fase encendida, porque sobre el ámbar el claro no se lee.
+        bool pauseLit = paused && _blinkOn;
+        PauseButton.Background = pauseLit ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
+        PauseButton.Foreground = pauseLit ? Brushes.Black : Theme.TextPrimaryBrush;
 
-        // PANIC: rojo vivo mientras el blackout SIGUE puesto. Es el que más
-        // importa: la sala está a negro y desde la mesa no se ve.
-        PanicButton.Background = Theme.Solid(_blackout ? Theme.Pgm : Theme.PanicButton);
+        // STOP ALL: se queda MARCADO en rojo tras ejecutarse.
+        StopAllButton.Background = _stopAllLatched
+            ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
+
+        // FADE ALL: PARPADEA mientras el fundido se va yendo.
+        bool fadeLit = _fadeAllRunning && _blinkOn;
+        FadeAllButton.Background = fadeLit ? Theme.Solid(Theme.Warn) : Theme.ButtonBgBrush;
+
+        // PANIC: se queda ENCENDIDO. También con el blackout puesto, que es el
+        // caso que más importa: la sala está a negro y desde la mesa no se ve.
+        PanicButton.Background = Theme.Solid(_panicLatched || _blackout
+            ? Theme.Pgm : Theme.PanicButton);
+
+        // El temporizador del parpadeo solo corre cuando hay algo que parpadee:
+        // en reposo no tiene sentido repintar la barra dos veces por segundo.
+        bool needsBlink = paused || _fadeAllRunning;
+        if (needsBlink && _blinkTimer is null)
+        {
+            _blinkTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(450) };
+            _blinkTimer.Tick += (_, _) =>
+            {
+                _blinkOn = !_blinkOn;
+                RefreshTransportLights();
+            };
+            _blinkTimer.Start();
+        }
+        else if (!needsBlink && _blinkTimer is not null)
+        {
+            _blinkTimer.Stop();
+            _blinkTimer = null;
+            _blinkOn = false;
+        }
     }
 
     public void UpdateCountdown(double? secondsRemaining)
@@ -806,8 +861,20 @@ public partial class MainWindow : Window, IShowView
         if (sender is Button { Tag: int cueId })
             _controller.StopCueById(cueId);
     }
-    private void OnStopAllClick(object sender, RoutedEventArgs e) => _controller.OnStopPressed();
-    private void OnPanicClick(object sender, RoutedEventArgs e) => _controller.OnPanic();
+    private void OnStopAllClick(object sender, RoutedEventArgs e)
+    {
+        _stopAllLatched = true;
+        _fadeAllRunning = false;   // un STOP corta el fundido en curso
+        _controller.OnStopPressed();
+        RefreshTransportLights();
+    }
+
+    private void OnPanicClick(object sender, RoutedEventArgs e)
+    {
+        _panicLatched = true;
+        _controller.OnPanic();
+        RefreshTransportLights();
+    }
     private void OnPauseClick(object sender, RoutedEventArgs e) => _controller.OnPauseToggle();
 
     // ── Imagen de respaldo del PANIC (IShowView) ───────────────────────

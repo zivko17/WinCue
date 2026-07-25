@@ -1085,15 +1085,36 @@ public sealed class InspectorPanel : ContentControl
         }, panel);
     }
 
-    private static void Header(StackPanel panel, string text) =>
-        panel.Children.Add(new TextBlock
+    /// <summary>Cabecera de sección: rótulo espaciado + filete que llega hasta
+    /// el final del bloque.
+    ///
+    /// Antes era un rótulo suelto y el inspector se leía como una lista plana de
+    /// campos: sin nada que marcase dónde acaba IDENTIDAD y empieza TIEMPO, hay
+    /// que leerlo entero para encontrar un dato. El filete hace el trabajo de
+    /// una caja agrupadora sin tener que meter cada sección en un contenedor —
+    /// que habría obligado a reescribir los seis constructores de pestaña.</summary>
+    private static void Header(StackPanel panel, string text)
+    {
+        var block = new StackPanel { Margin = new Thickness(0, 12, 0, 4) };
+        block.Children.Add(new TextBlock
         {
             Text = text,
             FontSize = 10,
             FontWeight = FontWeights.Bold,
-            Foreground = Theme.TextDimBrush,
-            Margin = new Thickness(0, 10, 0, 2),
+            // Espaciado entre letras: a 10 px y en negrita, un rótulo de sección
+            // sin aire se lee como un borrón. Es lo que lo distingue de un
+            // campo más.
+            Foreground = Theme.Solid(Theme.TextMuted),
+            Margin = new Thickness(0, 0, 0, 3),
         });
+        block.Children.Add(new Border
+        {
+            Height = 1,
+            Background = Theme.Solid(Theme.Divider),
+            HorizontalAlignment = HorizontalAlignment.Stretch,
+        });
+        panel.Children.Add(block);
+    }
 
     private static void Note(StackPanel panel, string text) =>
         panel.Children.Add(new TextBlock
