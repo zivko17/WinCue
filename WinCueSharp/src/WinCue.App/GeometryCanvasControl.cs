@@ -28,6 +28,8 @@ public sealed class GeometryCanvasControl : FrameworkElement
     // sobre el negro del canvas y sobre el ámbar del propio vídeo.
     private static readonly Brush HandleFill = Frozen(new SolidColorBrush(Theme.TextBright));
     private static readonly Pen HandlePen = FrozenPen(Theme.Warn, 1.5);
+    // Guía del imán: ámbar de atención, el mismo que ya avisa en el resto
+    private static readonly Pen SnapPen = FrozenPen(Theme.Standby, 1);
 
     /// <summary>Arrastre del vídeo: (translateX, translateY) en px de canvas.</summary>
     public event Action<double, double>? Translated;
@@ -62,11 +64,32 @@ public sealed class GeometryCanvasControl : FrameworkElement
     private double _scaleStart;
     private double _grabDist;
 
+    // Ejes en los que el imán está pegando ahora mismo (solo para dibujarlo)
+    private bool _snapX, _snapY;
+
     public GeometryCanvasControl()
     {
         MinHeight = 120;
         ClipToBounds = true;
     }
+
+    /// <summary>Fotograma real que se pinta dentro del rectángulo del vídeo.
+    /// null → se pinta el relleno ámbar de siempre.
+    ///
+    /// Es una IMAGEN FIJA y no el visor en vivo por una razón de WPF: el visor
+    /// es mpv dentro de un HWND nativo, y WPF no puede dibujar encima de un
+    /// HWND (airspace). Con el vídeo en vivo aquí, el marco del canvas, la
+    /// rejilla y los tiradores quedarían DEBAJO y no se verían. Un mapa de bits
+    /// se comporta como cualquier otro dibujo, así que todo eso vuelve a ir
+    /// encima — y para encuadrar, un fotograma quieto es justo lo que hace
+    /// falta.</summary>
+    public void SetFrame(ImageSource? frame)
+    {
+        _frame = frame;
+        InvalidateVisual();
+    }
+
+    private ImageSource? _frame;
 
     public void SetValues(bool custom, double fullScalePct, bool preserveAspect,
                           double scaleX, double tx, double ty, long rot)
@@ -196,16 +219,46 @@ public sealed class GeometryCanvasControl : FrameworkElement
         if (_rot != 0)
             dc.PushTransform(new RotateTransform(_rot,
                 video.Left + video.Width / 2, video.Top + video.Height / 2));
-        dc.DrawRectangle(VideoBrush, VideoPen, video);
-        // Marca de orientación (esquina superior izquierda del vídeo)
-        dc.DrawRectangle(VideoPen.Brush, null,
-            new Rect(video.Left + 3, video.Top + 3, 10, 10));
+        if (_frame is not null)
+        {
+            // El fotograma va estirado al rectángulo del vídeo A PROPÓSITO: ese
+            // rectángulo YA lleva aplicada la relación de aspecto que tendrá en
+            // la salida, así que respetar aquí la del mapa de bits volvería a
+            // aplicarla y mentiría sobre el recorte.
+            dc.DrawImage(_frame, video);
+            dc.DrawRectangle(null, VideoPen, video);
+        }
+        else
+        {
+            dc.DrawRectangle(VideoBrush, VideoPen, video);
+            // Marca de orientación (esquina superior izquierda del vídeo).
+            // Con fotograma no hace falta: la propia imagen dice hacia dónde va.
+            dc.DrawRectangle(VideoPen.Brush, null,
+                new Rect(video.Left + 3, video.Top + 3, 10, 10));
+        }
         if (_rot != 0)
             dc.Pop();
         dc.Pop();
 
         // Marco del canvas SIEMPRE por encima (el recorte se lee al instante)
         dc.DrawRectangle(null, CanvasPen, canvas);
+
+        // Guías del imán: se resalta el EJE que está pegando, no el borde
+        // concreto, porque pegar por el centro no tiene un borde que señalar.
+        if (_snapX)
+        {
+            double sx = canvas.Left + canvas.Width / 2;
+            dc.DrawLine(SnapPen, new Point(sx, canvas.Top), new Point(sx, canvas.Bottom));
+            dc.DrawLine(SnapPen, new Point(canvas.Left, canvas.Top), new Point(canvas.Left, canvas.Bottom));
+            dc.DrawLine(SnapPen, new Point(canvas.Right, canvas.Top), new Point(canvas.Right, canvas.Bottom));
+        }
+        if (_snapY)
+        {
+            double sy = canvas.Top + canvas.Height / 2;
+            dc.DrawLine(SnapPen, new Point(canvas.Left, sy), new Point(canvas.Right, sy));
+            dc.DrawLine(SnapPen, new Point(canvas.Left, canvas.Top), new Point(canvas.Right, canvas.Top));
+            dc.DrawLine(SnapPen, new Point(canvas.Left, canvas.Bottom), new Point(canvas.Right, canvas.Bottom));
+        }
 
         // Tiradores de escala. Van FUERA del PushClip del canvas a propósito:
         // con el vídeo más grande que la superficie las esquinas caen fuera, y
@@ -305,6 +358,18 @@ public sealed class GeometryCanvasControl : FrameworkElement
             return;
         _tx = _txStart + (pos.X - _dragStart.X) / pxPerUnit;
         _ty = _tyStart - (pos.Y - _dragStart.Y) / pxPerUnit;   // +Y hacia arriba
+
+        // Imán a los bordes y al centro del canvas. Se aplica DESPUÉS de mover
+        // y sobre el valor ya calculado, no acumulando: si se acumulara, cada
+        // fotograma pegado volvería a corregir y el vídeo se quedaría clavado
+        // sin poder despegarlo.
+        var canvasRect = CanvasRect();
+        var (dx, dy, sx, sy) = SnapDelta(canvasRect, VideoRect(canvasRect));
+        _tx += dx / pxPerUnit;
+        _ty -= dy / pxPerUnit;
+        _snapX = sx;
+        _snapY = sy;
+
         InvalidateVisual();
         Translated?.Invoke(Math.Round(_tx), Math.Round(_ty));
     }
@@ -315,7 +380,11 @@ public sealed class GeometryCanvasControl : FrameworkElement
         {
             _dragging = false;
             _handle = -1;
+            // El aviso del imán solo tiene sentido MIENTRAS arrastras; dejarlo
+            // encendido al soltar se leería como un estado, y no lo es.
+            _snapX = _snapY = false;
             ReleaseMouseCapture();
+            InvalidateVisual();
         }
     }
 
@@ -323,6 +392,61 @@ public sealed class GeometryCanvasControl : FrameworkElement
     {
         double dx = a.X - b.X, dy = a.Y - b.Y;
         return Math.Sqrt(dx * dx + dy * dy);
+    }
+
+    /// <summary>Contorno del vídeo ALINEADO CON LOS EJES. A 90° y 270° el
+    /// rectángulo ocupa el ancho por el alto y al revés; sin esto el imán
+    /// pegaría por un borde que no es el que se ve.</summary>
+    private Rect SnapBounds(Rect video)
+    {
+        if (_rot != 90 && _rot != 270)
+            return video;
+        var c = VideoCenter(video);
+        double w = video.Height, h = video.Width;
+        return new Rect(c.X - w / 2, c.Y - h / 2, w, h);
+    }
+
+    /// <summary>Pega el vídeo a los bordes y al centro del canvas si anda cerca.
+    /// Devuelve el desplazamiento a aplicar, en píxeles de pantalla.
+    ///
+    /// Con Shift NO imanta: encuadrar a dos píxeles del borde es una petición
+    /// legítima, y un imán sin escape la vuelve imposible.</summary>
+    private (double dx, double dy, bool snapX, bool snapY) SnapDelta(Rect canvas, Rect video)
+    {
+        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
+            return (0, 0, false, false);
+
+        const double threshold = 8;   // px de pantalla
+        var v = SnapBounds(video);
+
+        double bestX = 0, bestY = 0;
+        bool gotX = false, gotY = false;
+
+        void TryX(double delta)
+        {
+            if (Math.Abs(delta) <= threshold && (!gotX || Math.Abs(delta) < Math.Abs(bestX)))
+            {
+                bestX = delta;
+                gotX = true;
+            }
+        }
+        void TryY(double delta)
+        {
+            if (Math.Abs(delta) <= threshold && (!gotY || Math.Abs(delta) < Math.Abs(bestY)))
+            {
+                bestY = delta;
+                gotY = true;
+            }
+        }
+
+        TryX(canvas.Left - v.Left);                                   // borde izquierdo
+        TryX(canvas.Right - v.Right);                                 // borde derecho
+        TryX((canvas.Left + canvas.Width / 2) - (v.Left + v.Width / 2));   // centrado
+        TryY(canvas.Top - v.Top);
+        TryY(canvas.Bottom - v.Bottom);
+        TryY((canvas.Top + canvas.Height / 2) - (v.Top + v.Height / 2));
+
+        return (gotX ? bestX : 0, gotY ? bestY : 0, gotX, gotY);
     }
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }

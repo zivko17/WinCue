@@ -113,8 +113,12 @@ public sealed class InspectorPanel : ContentControl
         // Scrub del trim → fotograma de referencia en el visor
         _wave.Scrubbing += seconds =>
         {
-            if (_cue is { Type: CueType.Video })
-                _editPreview.Scrub(seconds);
+            if (_cue is not { Type: CueType.Video })
+                return;
+            _editPreview.Scrub(seconds);
+            // El fotograma del lienzo sigue al trim: el encuadre se hace sobre
+            // el fotograma que de verdad va a verse al entrar el cue.
+            RefreshGeometryFrame();
         };
 
         _tabs.Items.Add(Tab(Loc.T("Básicos", "Basics"), BuildBasics()));
@@ -196,13 +200,47 @@ public sealed class InspectorPanel : ContentControl
         {
             _editPreview.ShowPaused(cue.FilePath, cue.TrimStart);
             ApplyPreviewGeometry(cue);
+            RefreshGeometryFrame();
         }
         else
         {
             _editPreview.Clear();
+            _geoCanvas.SetFrame(null);
         }
         RefreshPreviewVisibility();
     }
+
+    /// <summary>Pide al visor un fotograma fijo y lo mete en el lienzo de
+    /// geometría, para poder encuadrar contra la imagen real y no contra un
+    /// rectángulo abstracto.
+    ///
+    /// Se pide con retardo porque ShowPaused() acaba de mandarle a mpv el
+    /// fichero y el salto al punto de trim: si se capturase de inmediato saldría
+    /// el fotograma anterior, o nada. Y se pide MIENTRAS el visor sigue cargado,
+    /// no cuando se abre la pestaña, para que el mapa de bits ya esté listo
+    /// aunque el visor esté oculto.
+    ///
+    /// async void y no async Task: es un manejador de refresco, nadie lo espera.
+    /// Por eso se traga sus propios fallos — un fotograma que no llega deja el
+    /// relleno ámbar de siempre, que sigue siendo utilizable.</summary>
+    private async void RefreshGeometryFrame()
+    {
+        int token = ++_frameToken;
+        try
+        {
+            await Task.Delay(220);
+            // Otro cue entró mientras esperábamos: su fotograma manda.
+            if (token != _frameToken)
+                return;
+            var still = await _editPreview.TryGrabStillAsync();
+            if (token == _frameToken)
+                _geoCanvas.SetFrame(still);
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>Descarta capturas de fotograma que han quedado obsoletas.</summary>
+    private int _frameToken;
 
     /// <summary>Decide si se ve el visor de edición. Dos condiciones: que el cue
     /// tenga vídeo y que la pestaña abierta sea una de las dos donde el visor
@@ -217,8 +255,10 @@ public sealed class InspectorPanel : ContentControl
     /// arranque de mpv por clic.</summary>
     private void RefreshPreviewVisibility()
     {
-        bool usefulHere = ReferenceEquals(_tabs.SelectedItem, _geometryTab)
-                       || ReferenceEquals(_tabs.SelectedItem, _timeLoopsTab);
+        // En GEOMETRÍA ya no acompaña: el fotograma vive DENTRO del lienzo, que
+        // es donde se encuadra. Tenerlo además al lado sería la misma imagen dos
+        // veces robando 280 px al lienzo, que es justo lo que interesa grande.
+        bool usefulHere = ReferenceEquals(_tabs.SelectedItem, _timeLoopsTab);
         bool hasVideo = _cue is { Type: CueType.Video } c && c.FilePath.Length > 0;
 
         _previewHost.Visibility = usefulHere && hasVideo

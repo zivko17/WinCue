@@ -26,6 +26,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Forms.Integration;
 using System.Windows.Media;
+using System.Windows.Media.Imaging;
 using WinCue.Video;
 
 namespace WinCue.App;
@@ -324,6 +325,66 @@ public sealed class LiveMonitorControl : Border
         _msg.Text = message;
         _status.Text = "";
         _host.Visibility = Visibility.Collapsed;   // oculta el HWND nativo
+    }
+
+    /// <summary>Vuelca el fotograma que se está viendo a un PNG y lo devuelve
+    /// como imagen de WPF. null si no se pudo.
+    ///
+    /// POR QUÉ EXISTE ESTO: el visor es mpv dentro de un HWND nativo, y WPF no
+    /// puede pintar encima de un HWND (airspace — ver la cabecera de este
+    /// fichero). Por eso el lienzo de geometría no puede superponer el marco del
+    /// canvas ni los tiradores sobre el vídeo en vivo: quedarían DEBAJO. Con un
+    /// fotograma fijo el problema desaparece, porque pasa a ser un mapa de bits
+    /// de WPF como cualquier otro. Para encuadrar no hace falta movimiento: se
+    /// encuadra contra una imagen quieta.
+    ///
+    /// La bandera "video" pide el fotograma DECODIFICADO, no una captura de la
+    /// ventana: así no salen ni el OSD ni bordes del HWND, y sigue funcionando
+    /// aunque el visor esté oculto.</summary>
+    public async Task<BitmapSource?> TryGrabStillAsync()
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return null;
+
+        string file = System.IO.Path.Combine(
+            System.IO.Path.GetTempPath(), $"wincue-still-{Guid.NewGuid():N}.png");
+        try
+        {
+            _player.Command("screenshot-to-file", file, "video");
+        }
+        catch (Exception) { return null; }
+
+        try
+        {
+            // mpv atiende el comando en SU hilo: el fichero no está listo al
+            // volver de Command(). Se espera a que aparezca con contenido, con
+            // un tope para no colgar la UI si el vuelco falla en silencio.
+            for (int i = 0; i < 40; i++)
+            {
+                await Task.Delay(25).ConfigureAwait(true);
+                var info = new System.IO.FileInfo(file);
+                if (!info.Exists || info.Length == 0)
+                    continue;
+
+                // Un respiro extra: existir no es estar cerrado del todo.
+                await Task.Delay(40).ConfigureAwait(true);
+                var bmp = new BitmapImage();
+                bmp.BeginInit();
+                // OnLoad lo carga ENTERO en memoria ahora: sin esto WPF deja el
+                // fichero abierto en diferido y el borrado de abajo fallaría.
+                bmp.CacheOption = BitmapCacheOption.OnLoad;
+                bmp.UriSource = new Uri(file);
+                bmp.EndInit();
+                bmp.Freeze();
+                return bmp;
+            }
+            return null;
+        }
+        catch (Exception) { return null; }
+        finally
+        {
+            try { System.IO.File.Delete(file); } catch (Exception) { }
+        }
     }
 
     /// <summary>Libera la instancia mpv (al cerrar la app).</summary>
