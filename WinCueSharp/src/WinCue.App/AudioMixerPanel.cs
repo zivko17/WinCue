@@ -514,7 +514,10 @@ public sealed class AudioMixerPanel : ContentControl
                 FontSize = 11,
                 TextTrimming = TextTrimming.CharacterEllipsis,
                 HorizontalAlignment = HorizontalAlignment.Center,
-                VerticalAlignment = VerticalAlignment.Center,
+                // ARRIBA, no centrado: centrado, un nombre corto quedaba flotando
+                // a media tira y el número —que es lo que se busca— no estaba
+                // donde está en los strips abiertos.
+                VerticalAlignment = VerticalAlignment.Top,
                 // DE PIE: en una tira de 34 px no cabe una línea de texto, y
                 // rotarla deja leer el nombre sin ensanchar nada.
                 //
@@ -609,7 +612,15 @@ public sealed class AudioMixerPanel : ContentControl
             // misma fila: el clic en el nombre sigue llevando a los ajustes de
             // audio del cue (que es lo que se espera de un nombre) y plegar
             // tiene su propio botón, sin que un mismo clic haga dos cosas.
+            // DOS COLUMNAS, no superpuestas: el tirador tiene su propia columna
+            // y el rótulo se recorta ANTES de llegar a él. Encimados en un mismo
+            // hueco, un nombre largo pasaba por debajo del botón y no se leía ni
+            // una cosa ni la otra.
             var titleRow = new Grid();
+            titleRow.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+            titleRow.ColumnDefinitions.Add(
+                new ColumnDefinition { Width = GridLength.Auto });
             titleRow.Children.Add(TitleText);
             CollapseBtn = new Button
             {
@@ -624,6 +635,7 @@ public sealed class AudioMixerPanel : ContentControl
                 Content = "◀",
                 ToolTip = Loc.T("Plegar este canal", "Collapse this channel"),
             };
+            Grid.SetColumn(CollapseBtn, 1);
             titleRow.Children.Add(CollapseBtn);
             grid.Children.Add(titleRow);
 

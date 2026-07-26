@@ -301,6 +301,16 @@ public sealed class TimelineCanvas : FrameworkElement
     private bool _dragCursor;
 
     private double _pxPerSec = 20;
+
+    /// <summary>Zoom MÍNIMO, en píxeles por segundo.
+    ///
+    /// Estaba en 1, y eso ponía un techo duro a lo que se podía ver de una vez:
+    /// con 1 px/s, en una pantalla de 1400 px no caben más de ~23 minutos, así
+    /// que en un show con vídeos largos «Fit» dejaba clips fuera y no había
+    /// forma de alejarse más. No era un fallo de ajuste sino un imposible
+    /// aritmético. Con 0,02 px/s entran veinte horas.</summary>
+    private const double MinPxPerSec = 0.02;
+    private const double MaxPxPerSec = 400;
     private double _scrollX;
     private bool _fitDone;
 
@@ -806,7 +816,7 @@ public sealed class TimelineCanvas : FrameworkElement
     private void ZoomAt(double factor, double anchorX)
     {
         double sec = XToSec(anchorX);
-        _pxPerSec = Math.Clamp(_pxPerSec * factor, 1, 400);
+        _pxPerSec = Math.Clamp(_pxPerSec * factor, MinPxPerSec, MaxPxPerSec);
         _scrollX = Math.Max(0, sec * _pxPerSec - anchorX);
         InvalidateVisual();
     }
@@ -815,7 +825,7 @@ public sealed class TimelineCanvas : FrameworkElement
     {
         double total = Math.Max(10, TotalSeconds() + 2);
         double w = Math.Max(200, ActualWidth > 0 ? ActualWidth : 900);
-        _pxPerSec = Math.Clamp((w - 20) / total, 1, 400);
+        _pxPerSec = Math.Clamp((w - 20) / total, MinPxPerSec, MaxPxPerSec);
         _scrollX = 0;
         InvalidateVisual();
     }
@@ -857,7 +867,7 @@ public sealed class TimelineCanvas : FrameworkElement
         {
             _fitDone = true;
             double total = Math.Max(10, TotalSeconds() + 2);
-            _pxPerSec = Math.Clamp((w - 20) / total, 1, 400);
+            _pxPerSec = Math.Clamp((w - 20) / total, MinPxPerSec, MaxPxPerSec);
             _scrollX = 0;
         }
 
@@ -1202,16 +1212,30 @@ public sealed class TimelineCanvas : FrameworkElement
         return g;
     }
 
+    /// <summary>Separación de las marcas de la regla. La escalera llega hasta
+    /// las 4 horas porque el zoom puede alejarse mucho más que antes: con el
+    /// tope anterior (10 min) un show largo pintaba una marca cada 12 px y la
+    /// regla se convertía en un borrón de números encimados.</summary>
     private double RulerStep()
     {
-        foreach (double s in new[] { 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600 })
+        foreach (double s in new[]
+                 { 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600,
+                   900, 1800, 3600, 7200, 14400 })
             if (s * _pxPerSec >= 64)
                 return s;
-        return 600;
+        return 14400;
     }
 
     private static string FmtTime(double s)
     {
+        // A partir de la hora, h:mm:ss — «72:30.0» minutos no se lee de un
+        // vistazo, y con el zoom alejado esas cifras son las habituales.
+        if (s >= 3600)
+        {
+            int h = (int)(s / 3600);
+            int mm = (int)((s - h * 3600) / 60);
+            return $"{h}:{mm:00}:{s - h * 3600 - mm * 60:00}";
+        }
         int m = (int)(s / 60);
         double rest = s - m * 60;
         return s >= 60 ? $"{m}:{rest:00.#}" : $"{rest:0.#}s";

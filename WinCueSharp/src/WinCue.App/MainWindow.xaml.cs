@@ -657,6 +657,25 @@ public partial class MainWindow : Window, IShowView
         // y en el progreso de la fila; el centro es solo del reloj del show.
     }
 
+    /// <summary>Últimos cues activos recibidos. La mesa se sincroniza también
+    /// desde el reloj de la ventana, y para eso necesita saber qué suena.</summary>
+    private IReadOnlyList<ActiveCueInfo> _lastActive = Array.Empty<ActiveCueInfo>();
+
+    /// <summary>Pone al día la mesa con TODO el show: enseña un canal por cada
+    /// cue que pueda sonar, no solo por los que suenan.
+    ///
+    /// Se llama desde dos sitios a propósito. El controlador solo empuja cues
+    /// activos cuando HAY alguno —su Tick sale antes en reposo—, así que
+    /// colgando la mesa solo de ahí, los canales no aparecían hasta el primer
+    /// GO. Desde el reloj de la ventana se sincroniza también en reposo, que es
+    /// justo cuando se prepara el show.</summary>
+    private void SyncMixer() =>
+        Mixer.SyncActive(_lastActive, cueId =>
+        {
+            int r = _model.IndexOfId(cueId);
+            return r >= 0 ? _model.GetCue(r) : null;
+        }, _model.Cues);
+
     public void UpdateActiveCues(IReadOnlyList<ActiveCueInfo> rows)
     {
         // Reconciliar sin recrear (evita parpadeo del panel)
@@ -686,13 +705,8 @@ public partial class MainWindow : Window, IShowView
         Timeline.SetActive(rows);
 
         // Strips del panel Audio (misma cadencia; reconcilia sin recrear)
-        // Se le pasa la LISTA ENTERA: la mesa enseña todos los cues que pueden
-        // sonar, plegados, y abre el que suena.
-        Mixer.SyncActive(rows, cueId =>
-        {
-            int r = _model.IndexOfId(cueId);
-            return r >= 0 ? _model.GetCue(r) : null;
-        }, _model.Cues);
+        _lastActive = rows;
+        SyncMixer();
 
         // El fader del inspector y el del strip son EL MISMO fader: mover uno
         // tiene que mover el otro EN VIVO. El strip ya se refrescaba del modelo
@@ -700,6 +714,14 @@ public partial class MainWindow : Window, IShowView
         // así que el mismo volumen se veía en dos sitios con dos valores.
         if (CueGrid.SelectedIndex >= 0)
             Inspector.SyncVolumeFromModel(_model.GetCue(CueGrid.SelectedIndex));
+
+        // Y la mesa EN REPOSO: sin esto los canales no salían hasta el primer GO
+        // (el Tick del controlador no empuja nada mientras no suene nada).
+        if (_controller.RunningCueIds.Count == 0)
+        {
+            _lastActive = Array.Empty<ActiveCueInfo>();
+            SyncMixer();
+        }
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
