@@ -51,6 +51,9 @@ public sealed class AudioMixerPanel : ContentControl
 
     /// <summary>Qué cue suena por los cascos ahora mismo (−1 = ninguno).</summary>
     public Func<int>? AuditionSourceId;
+
+    /// <summary>Hay dispositivo de audición configurado (si no, no hay CUE).</summary>
+    public Func<bool>? CueAvailable;
     /// <summary>GR del limitador del bus master (dB ≥ 0), para el medidor.</summary>
     public Func<float>? MasterGainReductionProvider;
 
@@ -67,6 +70,11 @@ public sealed class AudioMixerPanel : ContentControl
     private readonly StackPanel _cueHost = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _emptyHint;
     private readonly Dictionary<int, CueStrip> _cueStrips = new();
+
+    /// <summary>Canales que el operador abrió A MANO estando parados. Sin
+    /// recordarlo, la siguiente vuelta de sincronía volvería a plegar el que
+    /// acaba de abrir.</summary>
+    private readonly HashSet<int> _abiertosAMano = new();
 
     /// <summary>Claves reservadas del board para los dos strips fijos. Van en
     /// negativo: los ids de cue reales nunca lo son.</summary>
@@ -217,16 +225,46 @@ public sealed class AudioMixerPanel : ContentControl
             s.SetLevels(l, r);
     }
 
-    /// <summary>Reconcilia los strips con los cues activos (misma cadencia que
-    /// el panel PLAYING). Solo Audio y Video tienen strip (los demás tipos no
-    /// suenan). No recrea strips existentes (sin parpadeo, sin soltar faders).</summary>
-    public void SyncActive(IReadOnlyList<ActiveCueInfo> rows, Func<int, Cue?> resolveCue)
+    /// <summary>Reconcilia los strips con el show. La mesa enseña TODOS los cues
+    /// que pueden sonar —audio y vídeo con archivo—, no solo los que suenan
+    /// ahora: así se ve la mesa entera y se puede dejar preparado un silencio
+    /// antes de disparar, en vez de que los canales aparezcan y desaparezcan.
+    ///
+    /// Los que NO suenan salen PLEGADOS a una tira estrecha (un cue parado no
+    /// tiene nivel ni VU que enseñar), y el que suena se abre solo. A mano se
+    /// puede abrir cualquiera con un clic, y esa decisión se respeta hasta que
+    /// el operador la deshaga.
+    ///
+    /// No recrea strips existentes: sin parpadeo y sin soltar faders.</summary>
+    public void SyncActive(IReadOnlyList<ActiveCueInfo> rows, Func<int, Cue?> resolveCue,
+                           IReadOnlyList<Cue>? allCues = null)
     {
-        var seen = new HashSet<int>();
-        foreach (var row in rows)
+        var sonando = rows.Where(r => r.Type is CueType.Audio or CueType.Video)
+                          .ToDictionary(r => r.Id);
+
+        // El orden de la mesa es el de la LISTA, no el del disparo: una mesa
+        // cuyos canales cambian de sitio no se puede tocar de memoria.
+        var deseados = new List<ActiveCueInfo>();
+        if (allCues is not null)
         {
-            if (row.Type != CueType.Audio && row.Type != CueType.Video)
-                continue;
+            foreach (var c in allCues)
+            {
+                if (c.Type is not (CueType.Audio or CueType.Video) || c.FilePath.Length == 0)
+                    continue;
+                deseados.Add(sonando.TryGetValue(c.Id, out var viva)
+                    ? viva
+                    : new ActiveCueInfo(c.Id, c.DisplayNumber, c.Name, c.Type, c.Color,
+                                        0.0, null, null));
+            }
+        }
+        else
+        {
+            deseados.AddRange(sonando.Values);
+        }
+
+        var seen = new HashSet<int>();
+        foreach (var row in deseados)
+        {
             seen.Add(row.Id);
             if (_cueStrips.TryGetValue(row.Id, out var strip))
             {
@@ -259,7 +297,13 @@ public sealed class AudioMixerPanel : ContentControl
             // único en solo, sin esto los demás se quedan mudos para siempre
             // por un solo que ya no existe.
             _board.Remove(id);
+            _abiertosAMano.Remove(id);
         }
+
+        // PLEGADO: abierto si suena, o si el operador lo abrió a mano.
+        foreach (var (id, strip) in _cueStrips)
+            strip.SetCollapsed(!sonando.ContainsKey(id) && !_abiertosAMano.Contains(id));
+
         _emptyHint.Visibility = _cueStrips.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         // Entrar o salir de la lista de activos habilita o deshabilita los
         // botones del inspector: sin strip vivo no hay nada que silenciar.
@@ -277,9 +321,23 @@ public sealed class AudioMixerPanel : ContentControl
         s.Board = _board;
         s.RepaintAll = RepaintAllStrips;
         s.AuditionSource = () => AuditionSourceId?.Invoke() ?? -1;
+        s.CueAvailable = () => CueAvailable?.Invoke() ?? true;
         s.CueRequested = id => CueRequested?.Invoke(id);
         // El solo solo existe entre cues: aquí sí hay algo contra lo que solear.
         s.EnableSolo();
+        // Plegable: el nombre de pie en la tira estrecha.
+        s.EnableCollapse($"{row.Number} · {row.Name}", Theme.Solid(Theme.TextSecondary));
+        s.CollapseToggled = st =>
+        {
+            // Abrir a mano es una decisión del operador y se RESPETA hasta que
+            // la deshaga: sin recordarla, la siguiente vuelta de sincronía
+            // volvería a plegar el canal que acaba de abrir.
+            if (st.IsCollapsed)
+                _abiertosAMano.Add(st.Key);
+            else
+                _abiertosAMano.Remove(st.Key);
+            st.SetCollapsed(!st.IsCollapsed);
+        };
         // El alta reparte el solo sola: si hay uno puesto, este nace mudo.
         _board.Add(row.Id, (int)Math.Round((resolveCue(row.Id)?.Volume ?? 1.0) * 100.0));
         s.PaintButtons();
@@ -396,6 +454,62 @@ public sealed class AudioMixerPanel : ContentControl
         protected StackPanel MeterZone = null!;
         protected TextBlock TitleText = null!;
         protected bool Syncing;
+
+        // ── Plegado (solo strips de cue) ───────────────────────────────
+        protected Grid ContentHost = null!;      // aloja completo y plegado
+        protected FrameworkElement FullContent = null!;
+        private Border? _collapsed;
+
+        /// <summary>Está plegado a una tira estrecha.</summary>
+        public bool IsCollapsed { get; private set; }
+
+        /// <summary>El operador pidió plegar o desplegar este strip.</summary>
+        public Action<Strip>? CollapseToggled;
+
+        /// <summary>Da de alta la vista PLEGADA: una tira con el nombre de pie.
+        /// Un cue parado no tiene nivel ni VU que enseñar, así que plegado no se
+        /// pierde información — se gana sitio para los que sí suenan.</summary>
+        public void EnableCollapse(string label, Brush accent)
+        {
+            var text = new TextBlock
+            {
+                Text = label,
+                Foreground = accent,
+                FontWeight = FontWeights.Bold,
+                FontSize = 11,
+                TextTrimming = TextTrimming.CharacterEllipsis,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+                // DE PIE: en una tira de 34 px no cabe una línea de texto, y
+                // rotarla deja leer el nombre entero sin ensanchar nada.
+                LayoutTransform = new RotateTransform(-90),
+            };
+            _collapsed = new Border
+            {
+                Background = System.Windows.Media.Brushes.Transparent,
+                Cursor = System.Windows.Input.Cursors.Hand,
+                ToolTip = Loc.T("Clic para desplegar este canal",
+                                "Click to expand this channel"),
+                Child = text,
+                Visibility = Visibility.Collapsed,
+            };
+            _collapsed.MouseLeftButtonUp += (_, _) => CollapseToggled?.Invoke(this);
+            ContentHost.Children.Add(_collapsed);
+        }
+
+        /// <summary>Pliega o despliega. Sin EnableCollapse no hace nada: el
+        /// MASTER y el CUE no se pliegan, siempre tienen algo que enseñar.</summary>
+        public void SetCollapsed(bool collapsed)
+        {
+            if (_collapsed is null || collapsed == IsCollapsed)
+                return;
+            IsCollapsed = collapsed;
+            FullContent.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
+            _collapsed.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
+            Root.Width = collapsed ? UiMetrics.StripCollapsedWidth : UiMetrics.StripWidth;
+            Root.Padding = collapsed
+                ? new Thickness(2, 6, 2, 6) : new Thickness(8, 6, 8, 6);
+        }
 
         /// <summary>El mute va en su forma ancha (MASTER/AUDICIÓN) o compacta
         /// (strips de cue, que comparten fila con el solo).</summary>
@@ -594,6 +708,13 @@ public sealed class AudioMixerPanel : ContentControl
             Grid.SetRow(Extras, 4);
             grid.Children.Add(Extras);
 
+            // El contenido completo y el colapsado conviven en el mismo hueco y
+            // se turnan: así el strip conserva su estado —fader, silencio, VU—
+            // al plegarlo y desplegarlo, en vez de reconstruirse y perderlo.
+            FullContent = grid;
+            ContentHost = new Grid();
+            ContentHost.Children.Add(grid);
+
             Root = new Border
             {
                 Width = UiMetrics.StripWidth, Margin = new Thickness(5, 8, 5, 8),
@@ -604,7 +725,7 @@ public sealed class AudioMixerPanel : ContentControl
                 Background = Frozen(new SolidColorBrush(Theme.ToolbarBg)),
                 BorderBrush = Frozen(new SolidColorBrush(Theme.ButtonBgAlt)),
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
-                Child = grid,
+                Child = ContentHost,
             };
 
             Fader.ValueChanged += (_, e) =>
@@ -715,6 +836,10 @@ public sealed class AudioMixerPanel : ContentControl
         /// botón CUE del strip que corresponda.</summary>
         public Func<int>? AuditionSource;
 
+        /// <summary>Hay dispositivo de cascos configurado. Sin él la preescucha
+        /// no tiene a dónde ir y el botón CUE se deshabilita.</summary>
+        public Func<bool>? CueAvailable;
+
         /// <summary>Da de alta el botón CUE. Solo lo llaman los strips de cue:
         /// el MASTER no se preescucha, y el strip CUE ES el bus de preescucha.</summary>
         public void EnableSolo()
@@ -745,6 +870,18 @@ public sealed class AudioMixerPanel : ContentControl
             bool muted = Board?.IsMuted(Key) ?? false;
             // CUE encendido = ESTE cue es el que suena por los cascos.
             bool soloed = AuditionSource?.Invoke() == Key;
+
+            // Sin dispositivo de cascos la preescucha NO TIENE A DÓNDE IR, así
+            // que el botón se deshabilita en vez de dejarse pulsar y no sonar.
+            // Un botón que se enciende sin efecto es peor que uno apagado: te
+            // hace buscar el fallo en el sitio equivocado.
+            bool hayCascos = CueAvailable?.Invoke() ?? true;
+            SoloButton.IsEnabled = hayCascos;
+            SoloButton.ToolTip = hayCascos
+                ? Loc.T("Escuchar este cue por los cascos (no toca la sala)",
+                        "Listen to this cue on headphones (does not touch the room)")
+                : Loc.T("Sin dispositivo de audición: elígelo en Ajustes → Audio",
+                        "No audition device: pick one in Settings → Audio");
             MuteButton.Background = muted
                 ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
             // En reposo, el botón ANCHO lleva la palabra en rojo: dice a qué

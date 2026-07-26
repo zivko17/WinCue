@@ -145,6 +145,10 @@ public partial class MainWindow : Window, IShowView
         Inspector.CueRequested = PedirCue;
         Mixer.AuditionSourceId = () => _controller.AuditionSourceCueId;
         Inspector.AuditionSourceId = () => _controller.AuditionSourceCueId;
+        // Sin dispositivo de cascos NO hay preescucha posible: el botón CUE se
+        // deshabilita en vez de encenderse y no sonar.
+        Mixer.CueAvailable = () => _settings.Get("audition_device_name", "").Length > 0;
+        Inspector.CueAvailable = Mixer.CueAvailable;
 
         Mixer.SetMasterFader(_settings.Get("master_volume", 100));
         Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
@@ -681,11 +685,13 @@ public partial class MainWindow : Window, IShowView
         Timeline.SetActive(rows);
 
         // Strips del panel Audio (misma cadencia; reconcilia sin recrear)
+        // Se le pasa la LISTA ENTERA: la mesa enseña todos los cues que pueden
+        // sonar, plegados, y abre el que suena.
         Mixer.SyncActive(rows, cueId =>
         {
             int r = _model.IndexOfId(cueId);
             return r >= 0 ? _model.GetCue(r) : null;
-        });
+        }, _model.Cues);
 
         // El fader del inspector y el del strip son EL MISMO fader: mover uno
         // tiene que mover el otro EN VIVO. El strip ya se refrescaba del modelo

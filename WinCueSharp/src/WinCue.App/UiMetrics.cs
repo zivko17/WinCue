@@ -70,6 +70,11 @@ public static class UiMetrics
     /// <summary>Ancho de un strip del mixer: escala + fader + dos VU + aire.</summary>
     public const double StripWidth = 140;
 
+    /// <summary>Ancho de un strip PLEGADO: solo el nombre de pie. Un cue que no
+    /// suena no tiene nivel ni VU que enseñar, así que plegado no se pierde
+    /// nada — se gana sitio para los que sí suenan.</summary>
+    public const double StripCollapsedWidth = 34;
+
     /// <summary>Alto RESERVADO bajo la lectura en dB de un strip.
     ///
     /// Ahí solo escribe el MASTER (la línea de GR del limitador), pero el hueco

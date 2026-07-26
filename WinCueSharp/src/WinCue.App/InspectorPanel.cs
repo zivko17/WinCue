@@ -61,6 +61,9 @@ public sealed class InspectorPanel : ContentControl
     /// <summary>Qué cue suena por los cascos ahora mismo (−1 = ninguno).</summary>
     public Func<int>? AuditionSourceId;
 
+    /// <summary>Hay dispositivo de audición configurado (si no, no hay CUE).</summary>
+    public Func<bool>? CueAvailable;
+
     private Button _muteBtn = null!;
     private Button _soloBtn = null!;
 
@@ -83,11 +86,18 @@ public sealed class InspectorPanel : ContentControl
     {
         bool live = _cue is not null && MuteSolo?.Knows(_cue.Id) == true;
         _muteBtn.IsEnabled = live;
-        // CUE es un PFL: pincha la señal VIVA. Si el cue no suena no hay señal
-        // que pinchar, así que va deshabilitado — un botón que se deja pulsar
-        // sin efecto enseña a no fiarse del resto. Para oír un cue parado
-        // sigue estando la audición en el menú de la lista.
-        _soloBtn.IsEnabled = live;
+        // CUE es un PFL: pincha la señal VIVA. Hace falta que el cue SUENE (si
+        // no, no hay señal que pinchar) y que haya dispositivo de cascos (si no,
+        // no hay a dónde mandarla). Si falta cualquiera de las dos va
+        // deshabilitado — un botón que se deja pulsar sin efecto te hace buscar
+        // el fallo donde no está.
+        bool hayCascos = CueAvailable?.Invoke() ?? true;
+        _soloBtn.IsEnabled = live && hayCascos;
+        _soloBtn.ToolTip = hayCascos
+            ? Loc.T("Escuchar este cue por los cascos (no toca la sala)",
+                    "Listen to this cue on headphones (does not touch the room)")
+            : Loc.T("Sin dispositivo de audición: elígelo en Ajustes → Audio",
+                    "No audition device: pick one in Settings → Audio");
 
         bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
         bool soloed = _cue is not null && AuditionSourceId?.Invoke() == _cue.Id;
