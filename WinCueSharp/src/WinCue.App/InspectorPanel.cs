@@ -1034,7 +1034,10 @@ public sealed class InspectorPanel : ContentControl
             BorderBrush = Theme.Solid(Theme.Divider),
             BorderThickness = new Thickness(0, 0, 1, 0),
             Child = BuildLevels(),
-            MaxWidth = 320,   // columna compacta: el ancho es para la EQ/comp
+            // 360 y no 320: con 320 el desplegable de «salida de este cue» se
+            // cortaba contra la columna de GANANCIA. Un desplegable que no deja
+            // leer la opción elegida no sirve para lo único que hace.
+            MaxWidth = 360,
         };
         var host = new DockPanel();
         DockPanel.SetDock(levelsHost, Dock.Left);

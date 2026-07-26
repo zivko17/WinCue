@@ -589,26 +589,19 @@ public sealed class EqCurveCanvas : FrameworkElement
 
     // ── Escala del analizador ──────────────────────────────────────────
     //
-    // El problema de la escala anterior (−90..0 dBFS a pantalla completa) es
-    // que mezclaba dos cosas: el nivel de una BANDA de la FFT no es el nivel
-    // del programa. La energía se reparte entre cientos de bandas, así que un
-    // tema a −12 dBFS tiene bandas a −60 o −70 — abajo del todo, contra el
-    // suelo. De ahí que hiciera falta subir la ganancia a mano, y de ahí que
-    // al subirla todo se aplastara contra el techo de 0 dBFS.
+    // La traza salía plana y pegada al fondo, y NO era cosa de la escala: el
+    // analizador estaba descalibrado 66 dB (dividía por N dos veces; ver
+    // CueSampleProvider y SpectrumCalibrationTests). Con el medidor ya diciendo
+    // la verdad en dBFS, aquí no hace falta compensar NADA — hubo una versión
+    // de esto con un offset de referencia de +24 dB y era exactamente el mismo
+    // error que los 18 dB de ganancia de fábrica: tapar un fallo con otro.
     //
-    // Se arregla por donde había que arreglarlo, en la escala:
-    //   · REFERENCIA — se le suma un offset fijo para que lo normal caiga a
-    //     media pantalla con la ganancia a 0.
-    //   · TECHO CON AIRE — la escala llega por encima de 0 dBFS, así que subir
-    //     la ganancia sube la traza en vez de aplanarla contra el borde.
+    // Queda una escala honesta: dBFS de verdad, con un dedo de aire por encima
+    // de 0 para que subir la ganancia de pantalla suba la traza en vez de
+    // aplastarla contra el borde.
 
-    /// <summary>Offset de referencia: sube la traza a la zona útil de la
-    /// pantalla, que es donde la pone un analizador de verdad.</summary>
-    private const double RtaRefDb = 24.0;
-
-    /// <summary>Suelo y techo de la escala. El techo va POR ENCIMA de 0 dBFS a
-    /// propósito: es el aire que evita la meseta plana al dar ganancia.</summary>
-    private const double RtaFloorDb = -78.0;
+    /// <summary>Suelo y techo de la escala, en dBFS reales.</summary>
+    private const double RtaFloorDb = -72.0;
     private const double RtaTopDb = 6.0;
     private static readonly Pen CurvePen = FrozenPen(Theme.Standby, 2.2);
     private static readonly Pen CurveOffPen = FrozenPen(Theme.EqCurveOff, 1.5);
@@ -738,7 +731,7 @@ public sealed class EqCurveCanvas : FrameworkElement
         if (_smooth is { Length: > 1 } spec)
         {
             double YFromRta(double db) => h * (1.0 - Math.Clamp(
-                (db + RtaRefDb - RtaFloorDb) / (RtaTopDb - RtaFloorDb), 0.0, 1.0));
+                (db - RtaFloorDb) / (RtaTopDb - RtaFloorDb), 0.0, 1.0));
             var area = new StreamGeometry();
             using (var ctx = area.Open())
             {

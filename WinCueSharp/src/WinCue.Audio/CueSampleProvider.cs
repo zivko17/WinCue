@@ -473,8 +473,19 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
                                  + work[k].Y * (double)work[k].Y;
                         if (m > peak) peak = m;
                     }
-                    // 2/N por la FFT + 2 por la ventana Hann ≈ amplitud real
-                    double amp = 4.0 * Math.Sqrt(peak) / FftSize;
+                    // CALIBRADO (ver SpectrumCalibrationTests): la FFT de NAudio
+                    // YA divide por N en la transformada directa, así que el
+                    // /FftSize que había aquí dividía por N por SEGUNDA vez —
+                    // 20·log10(2048) ≈ 66 dB de menos. Todo caía por debajo del
+                    // suelo de −90 dBFS y el RTA salía como una línea PLANA
+                    // pegada al fondo, sonara lo que sonara. De ahí venían los
+                    // 18 dB de «ganancia de visualización» que traía de fábrica:
+                    // una tirita sobre un medidor descalibrado.
+                    //
+                    // El 4 sí hace falta: 2 por quedarnos con medio espectro y 2
+                    // por la ganancia coherente de la ventana Hann (0,5). Con
+                    // eso, un tono a fondo de escala lee 0 dBFS.
+                    double amp = 4.0 * Math.Sqrt(peak);
                     _spectrumDb[b] = (float)Math.Clamp(
                         20.0 * Math.Log10(Math.Max(1e-9, amp)), -90.0, 0.0);
                 }
