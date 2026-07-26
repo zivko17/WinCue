@@ -16,6 +16,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using System.Windows.Threading;
 using WinCue.Controller;
 using WinCue.Core;
 
@@ -163,11 +164,38 @@ public sealed class InspectorPanel : ContentControl
     // Visor de edición (fotograma de referencia para trim y geometría)
     private readonly LiveMonitorControl _editPreview =
         new(Loc.T("EDICIÓN", "EDITING"), Theme.Warn);
-    private readonly Grid _previewHost = new()
+    private readonly DockPanel _previewHost = new()
     {
         Margin = new Thickness(8, 4, 8, 8),
         Visibility = Visibility.Collapsed,
     };
+
+    // ── Transporte del visor ───────────────────────────────────────────
+    // El visor cargaba el archivo en pausa y solo se movía arrastrando los
+    // manejadores del trim: para ver un trozo del medio había que buscarlo a
+    // ciegas. Con barra y play/pausa se recorre como cualquier reproductor.
+    private readonly Button _prevPlayBtn = new()
+    {
+        Width = 30, Height = 22, Padding = new Thickness(0),
+        FontSize = 12, VerticalAlignment = VerticalAlignment.Center,
+    };
+    private readonly Slider _prevSeek = new()
+    {
+        Minimum = 0, Maximum = 1000,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(6, 0, 6, 0),
+        IsMoveToPointEnabled = true,   // clic en la barra = saltar ahí
+    };
+    private readonly TextBlock _prevTime = new()
+    {
+        FontFamily = new FontFamily("Consolas"), FontSize = 11,
+        Foreground = Theme.TextDimBrush,
+        VerticalAlignment = VerticalAlignment.Center,
+        Width = 92, TextAlignment = TextAlignment.Right,
+    };
+    private readonly DispatcherTimer _prevTick =
+        new() { Interval = TimeSpan.FromMilliseconds(120) };
+    private bool _prevSeeking;   // el operador tiene la barra agarrada
 
     /// <summary>Chrome del monitor —barra del distintivo y bordes— que va por
     /// fuera del vídeo y no entra en el 16:9 (ver LiveMonitorControl).
@@ -175,7 +203,11 @@ public sealed class InspectorPanel : ContentControl
     /// Se estima POR LO ALTO a propósito: el monitor calcula su alto real a
     /// partir del ancho que se le da aquí, y quedarse corto por dos píxeles no
     /// se nota mientras que pasarse los recorta.</summary>
-    private const double PreviewChromeH = 26.0;
+    ///
+    /// Incluye AHORA la barra de transporte, que va debajo del monitor y también
+    /// come alto: sin contarla, el ancho salía calculado para un hueco mayor del
+    /// que hay y la barra quedaba recortada contra el borde del panel.
+    private const double PreviewChromeH = 56.0;
 
     public InspectorPanel()
     {
@@ -185,7 +217,17 @@ public sealed class InspectorPanel : ContentControl
         _editPreview.BorderThickness = new Thickness(2);
         // El alto NO se fija aquí: LiveMonitorControl lo deriva de su ancho en
         // 16:9, así que quien manda es el ancho del host (ver ResizePreview).
+        // Transporte ABAJO y el vídeo llenando el resto.
+        var prevBar = new DockPanel { Margin = new Thickness(0, 6, 0, 0) };
+        DockPanel.SetDock(_prevPlayBtn, Dock.Left);
+        DockPanel.SetDock(_prevTime, Dock.Right);
+        prevBar.Children.Add(_prevPlayBtn);
+        prevBar.Children.Add(_prevTime);
+        prevBar.Children.Add(_prevSeek);
+        DockPanel.SetDock(prevBar, Dock.Bottom);
+        _previewHost.Children.Add(prevBar);
         _previewHost.Children.Add(_editPreview);
+        BuildPreviewTransport();
 
         // La explicación del marco azul se va al TOOLTIP del visor, como el
         // detalle del dispositivo en el mixer: se lee una vez en la vida y
@@ -374,6 +416,76 @@ public sealed class InspectorPanel : ContentControl
     /// Se oculta, no se descarga: el vídeo sigue cargado y pausado, igual que
     /// antes. Descargarlo y recargarlo en cada cambio de pestaña costaría un
     /// arranque de mpv por clic.</summary>
+    /// <summary>Cablea el transporte del visor: reproducir/pausar y una barra
+    /// para saltar donde quieras. Todo esto vive en el VISOR y no toca la sala.</summary>
+    private void BuildPreviewTransport()
+    {
+        _prevPlayBtn.Click += (_, _) =>
+        {
+            if (_editPreview.PreviewIsPaused)
+                _editPreview.PreviewPlay();
+            else
+                _editPreview.PreviewPause();
+            RefreshPreviewTransport();
+        };
+        _prevPlayBtn.ToolTip = Loc.T("Reproducir / pausar el visor (no toca la sala)",
+                                     "Play / pause the preview (does not touch the room)");
+        _prevSeek.ToolTip = Loc.T("Arrastra para moverte por el vídeo",
+                                  "Drag to move through the video");
+
+        // Mientras se arrastra, el tic NO recoloca la barra: pelearse con la
+        // mano de quien arrastra hace el control inservible.
+        _prevSeek.PreviewMouseDown += (_, _) => _prevSeeking = true;
+        _prevSeek.PreviewMouseUp += (_, _) =>
+        {
+            _prevSeeking = false;
+            SeekPreviewToSlider();
+        };
+        _prevSeek.ValueChanged += (_, _) =>
+        {
+            if (_prevSeeking)
+                SeekPreviewToSlider();
+        };
+
+        _prevTick.Tick += (_, _) => RefreshPreviewTransport();
+        RefreshPreviewTransport();
+    }
+
+    private void SeekPreviewToSlider()
+    {
+        double dur = _editPreview.PreviewDuration;
+        if (dur > 0.05)
+            _editPreview.PreviewSeek(_prevSeek.Value / _prevSeek.Maximum * dur);
+    }
+
+    /// <summary>Pone al día el botón, la barra y el reloj del visor.</summary>
+    private void RefreshPreviewTransport()
+    {
+        bool paused = _editPreview.PreviewIsPaused;
+        _prevPlayBtn.Content = paused ? Icons.Play : Icons.Pause;
+
+        double dur = _editPreview.PreviewDuration;
+        double pos = _editPreview.PreviewPosition;
+        _prevTime.Text = $"{Mmss(pos)} / {Mmss(dur)}";
+        if (!_prevSeeking && dur > 0.05)
+        {
+            double v = Math.Clamp(pos / dur, 0.0, 1.0) * _prevSeek.Maximum;
+            if (Math.Abs(_prevSeek.Value - v) > 1.0)
+            {
+                _prevSeeking = true;    // no re-entrar por ValueChanged
+                _prevSeek.Value = v;
+                _prevSeeking = false;
+            }
+        }
+    }
+
+    private static string Mmss(double s)
+    {
+        if (double.IsNaN(s) || s < 0) s = 0;
+        int m = (int)(s / 60);
+        return $"{m}:{s - m * 60:00.0}";
+    }
+
     /// <summary>Ancho del visor a partir del alto DISPONIBLE, en 16:9. Se le da
     /// el ancho porque el monitor deriva su propio alto de él; darle el alto
     /// sería pelearse con su SizeChanged.</summary>
@@ -402,7 +514,17 @@ public sealed class InspectorPanel : ContentControl
         // Volver de Colapsado no cambia el tamaño del inspector, así que su
         // SizeChanged no salta y el visor se quedaría con el ancho sin calcular.
         if (show)
+        {
             ResizePreview();
+            RefreshPreviewTransport();
+        }
+        // El tic del transporte SOLO corre con el visor a la vista: pregunta la
+        // posición a mpv ocho veces por segundo y no tiene sentido pagarlo con
+        // el visor escondido.
+        if (show && !_prevTick.IsEnabled)
+            _prevTick.Start();
+        else if (!show && _prevTick.IsEnabled)
+            _prevTick.Stop();
     }
 
     /// <summary>Refleja la geometría del cue en el visor (misma matemática que

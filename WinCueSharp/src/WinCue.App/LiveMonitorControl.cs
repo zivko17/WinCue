@@ -278,6 +278,86 @@ public sealed class LiveMonitorControl : Border
         catch (Exception) { }
     }
 
+    // ── Transporte del VISOR (no toca la sala) ─────────────────────────
+    //
+    // El visor cargaba el archivo en pausa y solo se movía arrastrando el trim:
+    // para ver un trozo por el medio había que buscarlo a ciegas con los
+    // manejadores. Esto le da lo que tiene cualquier reproductor — reproducir,
+    // pausar y saltar donde quieras— sin tocar nada de lo que sale a la sala.
+
+    /// <summary>Reproduce en el visor desde donde esté.</summary>
+    public void PreviewPlay()
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return;
+        try
+        {
+            _player.SetProperty("pause", false);
+            _pauseState = false;
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>Pausa el visor dejando el fotograma a la vista.</summary>
+    public void PreviewPause()
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return;
+        try
+        {
+            _player.SetProperty("pause", true);
+            _pauseState = true;
+        }
+        catch (Exception) { }
+    }
+
+    /// <summary>true si el visor está pausado (o no hay nada cargado).</summary>
+    public bool PreviewIsPaused => _pauseState ?? true;
+
+    /// <summary>Segundo por el que va el visor, o 0 si no hay nada.</summary>
+    public double PreviewPosition
+    {
+        get
+        {
+            if (_player is null || _currentPath.Length == 0)
+                return 0.0;
+            try { return _player.GetPropertyDouble("time-pos") ?? 0.0; }
+            catch (Exception) { return 0.0; }
+        }
+    }
+
+    /// <summary>Duración del archivo cargado (0 = aún no se sabe).</summary>
+    public double PreviewDuration
+    {
+        get
+        {
+            if (_player is null || _currentPath.Length == 0)
+                return 0.0;
+            if (_cachedDuration <= 0.0)
+            {
+                try { _cachedDuration = _player.GetPropertyDouble("duration") ?? 0.0; }
+                catch (Exception) { return 0.0; }
+            }
+            return _cachedDuration;
+        }
+    }
+
+    /// <summary>Salta a un segundo SIN pausar: es el arrastre de la barra de
+    /// progreso, que tiene que poder usarse con el visor en marcha. Scrub()
+    /// pausa a propósito porque sirve para fijar un fotograma de trim.</summary>
+    public void PreviewSeek(double seconds)
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return;
+        try
+        {
+            _player.Command("seek",
+                Math.Max(0.0, seconds).ToString("F3", CultureInfo.InvariantCulture),
+                "absolute");
+        }
+        catch (Exception) { }
+    }
+
     /// <summary>Aplica zoom/pan/rotación al visor (misma matemática que la salida).</summary>
     public void SetGeometry(double zoom, double panX, double panY, long rotate, bool keepAspect)
     {
