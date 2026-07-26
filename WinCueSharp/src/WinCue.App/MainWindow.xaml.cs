@@ -127,6 +127,13 @@ public partial class MainWindow : Window, IShowView
         // botones de las dos pestañas son los mismos botones. Cada lado avisa
         // al otro para repintar, porque un solo cambia el aspecto de strips que
         // no son el pulsado.
+        // Alto del panel de pestañas tal como se dejó la última vez. El tope de
+        // abajo es el MinHeight de la fila; el de arriba evita que un valor
+        // raro guardado en otra pantalla deje la lista de cues sin sitio.
+        int panelH = _settings.Get("bottom_pane_height", 330);
+        BottomPaneRow.Height =
+            new GridLength(Math.Clamp(panelH, 140, 900), GridUnitType.Pixel);
+
         Inspector.MuteSolo = Mixer.Board;
         Inspector.MuteSoloChanged = () => Mixer.RefreshStripButtons();
         Mixer.StripsRepainted = () => Inspector.RefreshMuteSoloButtons();
@@ -2181,6 +2188,13 @@ public partial class MainWindow : Window, IShowView
                 return;
             }
         }
+        // El alto del panel de pestañas se GUARDA: «por defecto» tiene que ser
+        // el que dejó el operador la última vez, no un número que alguien
+        // eligió una vez. Se escribe aquí, con la ventana aún montada — en
+        // OnClosed el ActualHeight ya no vale nada.
+        if (!App.SmokeMode && BottomPaneRow.ActualHeight > 0)
+            _settings.Set("bottom_pane_height",
+                (int)Math.Round(BottomPaneRow.ActualHeight));
         base.OnClosing(e);
     }
 

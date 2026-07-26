@@ -316,7 +316,11 @@
             <Grid.RowDefinitions>
                 <RowDefinition Height="*" MinHeight="120"/>
                 <RowDefinition Height="Auto"/>
-                <RowDefinition Height="330" MinHeight="140"/>
+                <!-- Alto del panel de pestañas (Timeline/Inspector/Mixer). El
+                     330 es solo el arranque de la primera vez: a partir de ahí
+                     manda el que deje el operador, que se guarda al cerrar
+                     (bottom_pane_height). -->
+                <RowDefinition x:Name="BottomPaneRow" Height="330" MinHeight="140"/>
             </Grid.RowDefinitions>
 
         <DataGrid x:Name="CueGrid" Grid.Row="0"

@@ -579,8 +579,37 @@ public sealed class EqCurveCanvas : FrameworkElement
 
     /// <summary>Ganancia de VISUALIZACIÓN del RTA en dB (compartida por
     /// sesión; solo afecta a la pantalla, nunca al audio). Solo se toca
-    /// desde el hilo de UI.</summary>
-    public static double RtaGainDb { get; set; } = 18.0;
+    /// desde el hilo de UI.
+    ///
+    /// Arranca en 0: la escala ya viene referenciada (RtaRefDb) para que la
+    /// traza caiga donde tiene que caer sin ayuda. Los 18 dB que traía de
+    /// fábrica eran una tirita para compensar una escala mal centrada — y
+    /// además dejaban medio espectro pegado al techo.</summary>
+    public static double RtaGainDb { get; set; }
+
+    // ── Escala del analizador ──────────────────────────────────────────
+    //
+    // El problema de la escala anterior (−90..0 dBFS a pantalla completa) es
+    // que mezclaba dos cosas: el nivel de una BANDA de la FFT no es el nivel
+    // del programa. La energía se reparte entre cientos de bandas, así que un
+    // tema a −12 dBFS tiene bandas a −60 o −70 — abajo del todo, contra el
+    // suelo. De ahí que hiciera falta subir la ganancia a mano, y de ahí que
+    // al subirla todo se aplastara contra el techo de 0 dBFS.
+    //
+    // Se arregla por donde había que arreglarlo, en la escala:
+    //   · REFERENCIA — se le suma un offset fijo para que lo normal caiga a
+    //     media pantalla con la ganancia a 0.
+    //   · TECHO CON AIRE — la escala llega por encima de 0 dBFS, así que subir
+    //     la ganancia sube la traza en vez de aplanarla contra el borde.
+
+    /// <summary>Offset de referencia: sube la traza a la zona útil de la
+    /// pantalla, que es donde la pone un analizador de verdad.</summary>
+    private const double RtaRefDb = 24.0;
+
+    /// <summary>Suelo y techo de la escala. El techo va POR ENCIMA de 0 dBFS a
+    /// propósito: es el aire que evita la meseta plana al dar ganancia.</summary>
+    private const double RtaFloorDb = -78.0;
+    private const double RtaTopDb = 6.0;
     private static readonly Pen CurvePen = FrozenPen(Theme.Standby, 2.2);
     private static readonly Pen CurveOffPen = FrozenPen(Theme.EqCurveOff, 1.5);
     private static readonly Pen CurveGlowPen = FrozenPen(Theme.Alpha(Theme.Standby, 0x46), 5.5);
@@ -708,8 +737,8 @@ public sealed class EqCurveCanvas : FrameworkElement
         // (estilo analizador pro; dBFS -90..0 + ganancia de pantalla)
         if (_smooth is { Length: > 1 } spec)
         {
-            double YFromRta(double db) =>
-                h * (1.0 - Math.Clamp((db + 90.0) / 90.0, 0.0, 1.0));
+            double YFromRta(double db) => h * (1.0 - Math.Clamp(
+                (db + RtaRefDb - RtaFloorDb) / (RtaTopDb - RtaFloorDb), 0.0, 1.0));
             var area = new StreamGeometry();
             using (var ctx = area.Open())
             {
