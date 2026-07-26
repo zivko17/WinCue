@@ -158,7 +158,22 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
 
     private sealed record OutputBus(IWavePlayer Player, MixingSampleProvider Mixer,
                                     LimiterSampleProvider Limiter);
-    private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput, string Bus);
+    private sealed record ActiveCue(CueSampleProvider Provider, ISampleProvider MixerInput,
+                                    string Bus, PflTap? Tap);
+
+    // ── PREESCUCHA (CUE / PFL) ─────────────────────────────────────────
+    // Un solo cue pinchado a la vez, como en una mesa: el CUE es para
+    // comparar con lo que sale, no para hacerse otra mezcla.
+    // El anillo existe DESDE EL ARRANQUE (son unos kB) para que TODO cue nazca
+    // con su derivación puesta. Creándolo al primer CUE, los que ya estuvieran
+    // sonando se habrían quedado sin ella — y pinchar el que suena es justo el
+    // caso para el que existe esto.
+    private PflBus? _pfl;
+    private bool _pflAttached;         // el lector ya está en el bus de cascos
+    private int _pflCueId = -1;
+
+    /// <summary>Cue pinchado por los cascos ahora mismo (−1 = ninguno).</summary>
+    public int PflCueId => _pflCueId;
 
     // ------------------------------------------------------------------
     // Construcción
@@ -184,6 +199,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         _latencyMs = Math.Clamp(latencyMs, 20, 500);
         _asioDriverName = asioDriverName;
         _streamingFactory = streamingFactory;
+        _pfl = new PflBus(_mixSampleRate, 2);
     }
 
     // ------------------------------------------------------------------
@@ -400,6 +416,56 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
             return;
         _outputDescription = text;
         OutputDescriptionChanged?.Invoke(text);
+    }
+
+    /// <summary>PREESCUCHA (CUE/PFL): manda una réplica de lo que ESE cue está
+    /// sacando ahora mismo al dispositivo de cascos. No relanza nada — pincha
+    /// la señal viva. Un solo cue a la vez; volver a pedir el mismo lo suelta.
+    ///
+    /// Devuelve false si ese cue no se puede pinchar porque su audio no pasa
+    /// por este motor (vídeo cuyo sonido saca mpv): ahí no hay muestras que
+    /// derivar y fingirlo sería peor que decir que no.</summary>
+    public bool SetPfl(int cueId, string auditionDevice)
+    {
+        if (!_active.TryGetValue(cueId, out var target))
+            return false;
+
+        if (_pfl is null || target.Tap is not { } tap)
+            return false;
+
+        ClearPfl();
+
+        // El lector se engancha UNA vez al bus de cascos, que vive con
+        // ReadFully: se queda ahí emitiendo silencio mientras no haya nada
+        // pinchado, sin abrir y cerrar el dispositivo a cada pulsación.
+        if (!_pflAttached)
+        {
+            var mixer = EnsureOutput(cueId, auditionDevice ?? "");
+            if (mixer is null)
+                return false;
+            mixer.AddMixerInput(_pfl.Reader);
+            _pflAttached = true;
+        }
+
+        _pfl.Clear();          // sin cola del cue anterior
+        _pfl.Active = true;
+        tap.Armed = true;
+        _pflCueId = cueId;
+        return true;
+    }
+
+    /// <summary>Suelta la preescucha.</summary>
+    public void ClearPfl()
+    {
+        foreach (var a in _active.Values)
+            if (a.Tap is not null)
+                a.Tap.Armed = false;
+        _pflCueId = -1;
+        if (_pfl is not null)
+        {
+            _pfl.Active = false;
+            _pfl.Clear();
+        }
     }
 
     /// <summary>Volumen master global (0..AudioLevels.MaxGain, +10 dB de techo),
@@ -823,11 +889,20 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         if (source is StreamingAudioSource streaming)
             streaming.FatalError += msg => Post(() => OnStreamFatal(cueId, provider, msg));
 
-        var input = AdaptToMixerFormat(provider, p.Rate);
-        _active[cueId] = new ActiveCue(provider, input, bus);
+        // DERIVACIÓN DE PREESCUCHA sobre la entrada YA adaptada al mixer: por
+        // los cascos tiene que oírse exactamente lo que va a la sala —mismo
+        // resampleo, misma velocidad—, no una versión parecida.
+        var adapted = AdaptToMixerFormat(provider, p.Rate);
+        var tap = _pfl is null ? null : new PflTap(adapted, _pfl);
+        ISampleProvider input = tap ?? adapted;
+        _active[cueId] = new ActiveCue(provider, input, bus, tap);
         _clockProviders[cueId] = provider;
         _playStartedTicks[cueId] = Environment.TickCount64;
         mixer.AddMixerInput(input);
+        // Un cue que arranca mientras ESE cue está pinchado (relanzarlo con el
+        // CUE puesto) nace ya derivado.
+        if (tap is not null && cueId == _pflCueId)
+            tap.Armed = true;
         SetState(cueId, MediaCueState.Playing);
     }
 

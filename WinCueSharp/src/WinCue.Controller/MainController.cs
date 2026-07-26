@@ -510,9 +510,46 @@ public class MainController
     private int _auditionSourceCueId = -1;
 
     /// <summary>Id del cue que está SONANDO POR LOS CASCOS ahora mismo, o −1.
-    /// Lo usan los botones CUE de la mesa y del inspector para encenderse.</summary>
-    public int AuditionSourceCueId =>
-        _audio.IsPlaying(AuditionCueId) ? _auditionSourceCueId : -1;
+    /// Lo usan los botones CUE de la mesa y del inspector para encenderse.
+    ///
+    /// Cuenta las DOS rutas: el pinchazo en vivo (PFL, el botón CUE) y la
+    /// audición clásica que relanza el archivo (menú de la lista).</summary>
+    public int AuditionSourceCueId
+    {
+        get
+        {
+            int pfl = _audio.PflCueId;
+            if (pfl != -1)
+                return pfl <= VideoAudioBase ? VideoAudioBase - pfl : pfl;
+            return _audio.IsPlaying(AuditionCueId) ? _auditionSourceCueId : -1;
+        }
+    }
+
+    /// <summary>Botón CUE: pincha la señal VIVA de ese cue en los cascos. Es un
+    /// toggle. Devuelve false si no se pudo — el cue no suena, o su audio no
+    /// pasa por el motor (vídeo cuyo sonido saca mpv) y no hay nada que
+    /// derivar. En ese caso no se hace nada: fingir una preescucha con una
+    /// reproducción nueva desde el principio es justo lo que NO es un CUE.</summary>
+    public bool PflToggle(int cueId)
+    {
+        if (AuditionSourceCueId == cueId)
+        {
+            _audio.ClearPfl();
+            _view.FlashStatus(Loc.T("🎧 CUE fuera", "🎧 CUE off"));
+            return true;
+        }
+        // El audio de un cue de VÍDEO va por su id ESPEJO: es ahí donde hay
+        // muestras que pinchar, no en el id del cue.
+        int audioId = _running.ContainsKey(cueId) && _mirroredAudio.Contains(cueId)
+            ? VideoAudioId(cueId)
+            : cueId;
+        bool ok = _audio.SetPfl(audioId, _settings.Get("audition_device_name", ""));
+        _view.FlashStatus(ok
+            ? Loc.T("🎧 CUE — escuchando la señal en vivo", "🎧 CUE — listening to the live signal")
+            : Loc.T("CUE: ese cue no suena por el rack de audio",
+                    "CUE: that cue's audio does not go through the audio rack"));
+        return ok;
+    }
 
     /// <summary>Audición local: reproduce el cue de la fila por el dispositivo
     /// de audición (cascos) SIN pasar por el flujo del show. Toggle.</summary>

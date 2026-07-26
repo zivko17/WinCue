@@ -82,10 +82,11 @@ public sealed class InspectorPanel : ContentControl
     {
         bool live = _cue is not null && MuteSolo?.Knows(_cue.Id) == true;
         _muteBtn.IsEnabled = live;
-        // CUE no necesita que el cue esté SONANDO: preescuchar un cue parado es
-        // justo para lo que sirve — oírlo antes de lanzarlo. Solo pide que sea
-        // un cue de AUDIO con archivo, que es lo que sabe audicionar.
-        _soloBtn.IsEnabled = _cue is { Type: CueType.Audio } ac && ac.FilePath.Length > 0;
+        // CUE es un PFL: pincha la señal VIVA. Si el cue no suena no hay señal
+        // que pinchar, así que va deshabilitado — un botón que se deja pulsar
+        // sin efecto enseña a no fiarse del resto. Para oír un cue parado
+        // sigue estando la audición en el menú de la lista.
+        _soloBtn.IsEnabled = live;
 
         bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
         bool soloed = _cue is not null && AuditionSourceId?.Invoke() == _cue.Id;

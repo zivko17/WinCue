@@ -136,14 +136,10 @@ public partial class MainWindow : Window, IShowView
         Inspector.MuteSoloChanged = () => Mixer.RefreshStripButtons();
         Mixer.StripsRepainted = () => Inspector.RefreshMuteSoloButtons();
 
-        // CUE (preescucha) desde los dos sitios, al MISMO bus: el de audición.
-        // AuditionToggle va por FILA, no por id.
-        void PedirCue(int cueId)
-        {
-            int row = _model.IndexOfId(cueId);
-            if (row >= 0)
-                _controller.AuditionToggle(row);
-        }
+        // CUE = PFL: pinchar la señal VIVA de ese cue en los cascos. No es la
+        // audición clásica, que relanza el archivo desde el principio — eso es
+        // un preview y no dice nada de lo que está pasando en la sala ahora.
+        void PedirCue(int cueId) => _controller.PflToggle(cueId);
         Mixer.CueRequested = PedirCue;
         Inspector.CueRequested = PedirCue;
         Mixer.AuditionSourceId = () => _controller.AuditionSourceCueId;

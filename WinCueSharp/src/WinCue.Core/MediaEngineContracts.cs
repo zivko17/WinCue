@@ -170,6 +170,17 @@ public interface IAudioEngine
     /// en dBFS, o null si no suena. Por defecto: null (motores falsos).</summary>
     float[]? GetSpectrum(int cueId) => null;
 
+    /// <summary>PREESCUCHA (CUE/PFL): manda una réplica de lo que ese cue está
+    /// sacando AHORA MISMO al dispositivo de cascos. No relanza nada. false si
+    /// ese cue no se puede pinchar (su audio no pasa por este motor).</summary>
+    bool SetPfl(int cueId, string auditionDevice) => false;
+
+    /// <summary>Suelta la preescucha.</summary>
+    void ClearPfl() { }
+
+    /// <summary>Cue pinchado ahora mismo (−1 = ninguno).</summary>
+    int PflCueId => -1;
+
     /// <summary>Reducción de ganancia actual del compresor del cue (dB ≥ 0)
     /// para el medidor GR. Por defecto: 0 (motores falsos).</summary>
     float GetGainReductionDb(int cueId) => 0f;
