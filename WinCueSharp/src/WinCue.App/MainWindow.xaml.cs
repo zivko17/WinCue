@@ -30,6 +30,7 @@ public partial class MainWindow : Window, IShowView
 
     // Mini-monitores PVW/PGM en vivo (mpv embebido y silenciado)
     private readonly LiveMonitorControl _pvw = new("PVW", Theme.GoDeep);
+    private MonitorTransportBar _pvwBar = null!;   // reproducir/pausar el PVW
     private readonly LiveMonitorControl _pgm = new("PGM", Theme.Pgm);
     private DispatcherTimer? _pgmTimer;
 
@@ -203,9 +204,15 @@ public partial class MainWindow : Window, IShowView
         MonitorHost.Children.Add(MonitorRow(_pgm, _pgmVuL, _pgmVuR,
             Loc.T("Nivel L/R del PROGRAMA. Por loopback mide TODO lo que sale del dispositivo (cues, audio de los vídeos —incluidos los que van con AUDIO ESPEJO por el rack—, sistema); con ASIO o si el loopback no está disponible, mide la mezcla interna de cues. El strip MASTER del panel Audio dice cuál de las dos.",
                   "L/R level of PROGRAM. Via loopback it measures EVERYTHING leaving the device (cues, video audio —including videos whose MIRRORED AUDIO goes through the rack—, system); with ASIO or if loopback isn't available, it measures the internal cue mix. The MASTER strip in the Audio panel says which one.")));
+        // El PVW lleva transporte: es el monitor de PREPARACIÓN, y prepararse
+        // es poder recorrer el cue antes de lanzarlo. El PGM no, porque
+        // refleja lo que va a la sala.
+        _pvwBar = new MonitorTransportBar(_pvw);
         MonitorHost.Children.Add(MonitorRow(_pvw, _pvwVuL, _pvwVuR,
             Loc.T($"Nivel L/R de la AUDICIÓN local ({Icons.Headphones})",
-                  $"L/R level of the local AUDITION ({Icons.Headphones})")));
+                  $"L/R level of the local AUDITION ({Icons.Headphones})"),
+            _pvwBar));
+        _pvwBar.Start();
         _pvw.Clear("—");
         _pgm.Clear(Loc.T("NEGRO", "BLACK"));
         _pgmTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
@@ -689,8 +696,13 @@ public partial class MainWindow : Window, IShowView
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
+    /// <param name="transport">Barra de reproducir/pausar y salto, DEBAJO del
+    /// monitor. Solo la lleva el PVW: el PGM refleja lo que va a la sala y ahí
+    /// un botón de pausa sería un botón para parar la función desde un sitio
+    /// que no es el transporte.</param>
     private static DockPanel MonitorRow(LiveMonitorControl monitor,
-        VuMeterControl left, VuMeterControl right, string tooltip)
+        VuMeterControl left, VuMeterControl right, string tooltip,
+        MonitorTransportBar? transport = null)
     {
         var vu = new StackPanel
         {
@@ -708,7 +720,21 @@ public partial class MainWindow : Window, IShowView
         var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
         DockPanel.SetDock(vu, Dock.Right);
         row.Children.Add(vu);
-        row.Children.Add(monitor);
+        if (transport is not null)
+        {
+            // La barra va abajo del TODO, por debajo del VU: si se metiera
+            // dentro del bloque monitor+VU, el VU se estiraría también sobre
+            // ella y dejaría de medir el alto del vídeo.
+            DockPanel.SetDock(transport, Dock.Bottom);
+            var stack = new DockPanel();
+            stack.Children.Add(row);
+            DockPanel.SetDock(row, Dock.Top);
+            stack.Children.Add(transport);
+            var outer = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+            outer.Children.Add(stack);
+            row.Margin = new Thickness(0);
+            return outer;
+        }
         return row;
     }
 
