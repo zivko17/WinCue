@@ -62,6 +62,15 @@ public sealed class AudioMixerPanel : ContentControl
     private readonly TextBlock _emptyHint;
     private readonly Dictionary<int, CueStrip> _cueStrips = new();
 
+    /// <summary>Claves reservadas del board para los dos strips fijos. Van en
+    /// negativo: los ids de cue reales nunca lo son.</summary>
+    private const int MasterKey = -1;
+    private const int AuditionKey = -2;
+
+    /// <summary>Silencio y solo, FUERA de la interfaz para poder probarlos
+    /// (WinCue.Controller.MuteSoloBoard). El panel solo pulsa y pinta.</summary>
+    private readonly MuteSoloBoard _board = new();
+
     public AudioMixerPanel()
     {
         _master = Strip.Build("MASTER", AccentPgm, withVu: true, extraMeter: _grBar);
@@ -124,6 +133,15 @@ public sealed class AudioMixerPanel : ContentControl
             Content = strips,
         };
 
+        // Alta en el board. Sin solo: no hay nada contra lo que solearlos.
+        _master.Key = MasterKey;
+        _master.Board = _board;
+        _audition.Key = AuditionKey;
+        _audition.Board = _board;
+        _board.Add(MasterKey, 100, canSolo: false);
+        _board.Add(AuditionKey, 100, canSolo: false);
+        _board.GainChanged = OnBoardGain;
+
         // Faders fijos: en vivo a cada cambio + commit final con debounce
         WireDebouncedFader(_master, (v, final) => MasterVolumeChanged?.Invoke(v, final));
         WireDebouncedFader(_audition, (v, final) => AuditionVolumeChanged?.Invoke(v, final));
@@ -147,9 +165,22 @@ public sealed class AudioMixerPanel : ContentControl
 
     public void SetAuditionLevel(float l, float r) => _audition.SetLevels(l, r);
 
-    public void SetMasterFader(int value) => _master.SetFaderSilent(value);
+    /// <summary>Coloca el fader MASTER desde los ajustes guardados. El board se
+    /// entera también: si la mesa está silenciada, ese es el volumen al que
+    /// tiene que volver al quitar el silencio (y el fader se queda abajo).</summary>
+    public void SetMasterFader(int value)
+    {
+        _board.SetGainSilently(MasterKey, value);
+        if (!_board.IsMuted(MasterKey))
+            _master.SetFaderSilent(value);
+    }
 
-    public void SetAuditionFader(int value) => _audition.SetFaderSilent(value);
+    public void SetAuditionFader(int value)
+    {
+        _board.SetGainSilently(AuditionKey, value);
+        if (!_board.IsMuted(AuditionKey))
+            _audition.SetFaderSilent(value);
+    }
 
     /// <summary>Detalle del dispositivo. Va al TOOLTIP del strip MASTER, no
     /// debajo del fader: es información de configuración, se consulta de uvas a
@@ -194,8 +225,9 @@ public sealed class AudioMixerPanel : ContentControl
                 _cueHost.Children.Insert(at, recreated.Root);
                 continue;
             }
+            // MakeStrip lo da de alta en el board, y el alta ya reparte el solo:
+            // si hay uno puesto, el strip nuevo nace mudo.
             _cueHost.Children.Add(MakeStrip(row, resolveCue).Root);
-            ApplySolo();   // nace enmudecido si hay un solo puesto
         }
         foreach (int id in _cueStrips.Keys.ToList())
         {
@@ -203,6 +235,10 @@ public sealed class AudioMixerPanel : ContentControl
                 continue;
             _cueHost.Children.Remove(_cueStrips[id].Root);
             _cueStrips.Remove(id);
+            // BAJA EN EL BOARD, y no es un detalle: si el cue que se va era el
+            // único en solo, sin esto los demás se quedan mudos para siempre
+            // por un solo que ya no existe.
+            _board.Remove(id);
         }
         _emptyHint.Visibility = _cueStrips.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
     }
@@ -214,23 +250,39 @@ public sealed class AudioMixerPanel : ContentControl
         var s = new CueStrip(row, resolveCue(row.Id),
             (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
             id => CueStripActivated?.Invoke(id));
+        s.Key = row.Id;
+        s.Board = _board;
         // El solo solo existe entre cues: aquí sí hay algo contra lo que solear.
         s.EnableSolo();
-        s.SoloToggled = _ => ApplySolo();
+        // El alta reparte el solo sola: si hay uno puesto, este nace mudo.
+        _board.Add(row.Id, (int)Math.Round((resolveCue(row.Id)?.Volume ?? 1.0) * 100.0));
+        s.PaintButtons();
         _cueStrips[row.Id] = s;
         return s;
     }
 
-    /// <summary>Reparte el silencio del SOLO. Con uno o más cues en solo, los
-    /// demás enmudecen; al soltar el último, vuelven — pero solo los que enmudeció
-    /// el solo: si el operador silenció uno a mano, sigue mudo. Un cue que entra
-    /// a sonar con un solo puesto nace enmudecido, o el solo duraría hasta el
-    /// siguiente GO y no hasta que se suelte.</summary>
-    private void ApplySolo()
+    /// <summary>El board dice qué debe sonar en un strip. Aquí solo se reparte:
+    /// el fader baja a la vista y el valor sale por la ruta que corresponda.
+    ///
+    /// MASTER y AUDICIÓN van EN VIVO Y SIN PERSISTIR (final:false). Es
+    /// deliberado: el silencio es una maniobra de directo, no un ajuste — si se
+    /// guardara, mañana la app arrancaría muda.</summary>
+    private void OnBoardGain(int key, int gain)
     {
-        bool anySolo = _cueStrips.Values.Any(s => s.Soloed);
-        foreach (var s in _cueStrips.Values)
-            s.SetMutedBySolo(anySolo && !s.Soloed);
+        var strip = key == MasterKey ? _master
+                  : key == AuditionKey ? _audition
+                  : _cueStrips.GetValueOrDefault(key);
+        if (strip is null)
+            return;
+        strip.SetFaderSilent(gain);
+        strip.PaintButtons();
+
+        if (key == MasterKey)
+            MasterVolumeChanged?.Invoke(gain, false);
+        else if (key == AuditionKey)
+            AuditionVolumeChanged?.Invoke(gain, false);
+        else
+            CueVolumeCommitted?.Invoke(key, gain / 100.0);
     }
 
     private static void WireDebouncedFader(Strip strip, Action<int, bool> emit)
@@ -251,15 +303,9 @@ public sealed class AudioMixerPanel : ContentControl
             final.Stop();
             final.Start();
         };
-        // El silencio se aplica EN VIVO y no se guarda: el ajuste persistido
-        // sigue siendo el volumen real, para que quitar el mute lo devuelva y
-        // para que la app no arranque muda mañana.
-        strip.MuteChanged = v =>
-        {
-            emit(v, false);
-            final.Stop();
-            pending = -1;
-        };
+        // El silencio NO pasa por aquí: lo emite OnBoardGain con final:false,
+        // en vivo y sin persistir. El ajuste guardado sigue siendo el volumen
+        // real, para que quitar el mute lo devuelva y la app no arranque muda.
     }
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
@@ -335,29 +381,19 @@ public sealed class AudioMixerPanel : ContentControl
         /// es lo que guardan el modelo y los ajustes desde siempre.</summary>
         public Action<int>? FaderChanged;
 
-        /// <summary>Cambio que NO debe PERSISTIR: el silencio es una maniobra de
-        /// directo, no un ajuste. Sin esta ruta aparte, silenciar el MASTER
-        /// guardaba master_volume=0 y al reabrir la app la mesa arrancaba muda.
-        /// Si nadie la cablea (strips de cue) se cae a FaderChanged.</summary>
-        public Action<int>? MuteChanged;
+        /// <summary>Clave de este strip en el MuteSoloBoard (id de cue, o las
+        /// reservadas de MASTER/AUDICIÓN).</summary>
+        public int Key = int.MinValue;
 
-        /// <summary>Al entrar o salir del solo (solo strips de cue).</summary>
-        public Action<Strip>? SoloToggled;
+        /// <summary>La máquina de silencio/solo, que vive FUERA de la interfaz
+        /// (WinCue.Controller.MuteSoloBoard) precisamente para poder probarla.
+        /// Aquí dentro solo queda pulsar botones y pintar.</summary>
+        public MuteSoloBoard? Board;
 
         protected VuMeterControl? VuL, VuR;
         protected StackPanel MeterZone = null!;
         protected TextBlock TitleText = null!;
         protected bool Syncing;
-
-        /// <summary>Silenciado a mano (botón M) o por el solo de otro strip.</summary>
-        public bool Muted { get; private set; }
-        public bool Soloed { get; private set; }
-
-        /// <summary>Ganancia por ciento anterior al silencio, para devolverla
-        /// intacta al quitarlo: el mute NO es «bajar el fader a cero», es
-        /// apartarlo un momento y poder volver exactamente a donde estaba.</summary>
-        private int _preMuteGain = 100;
-        private bool _mutedBySolo;
 
         public static Strip Build(string title, Brush accent, bool withVu,
                                   FrameworkElement? extraMeter = null)
@@ -490,7 +526,7 @@ public sealed class AudioMixerPanel : ContentControl
             Grid.SetRow(buttons, 3);
             grid.Children.Add(buttons);
 
-            MuteButton.Click += (_, _) => SetMuted(!Muted);
+            MuteButton.Click += (_, _) => Board?.ToggleMute(Key);
 
             // Alto RESERVADO e IGUAL en todos, escriban algo ahí o no: un
             // TextBlock vacío de WPF sigue midiendo una línea, así que el hueco
@@ -516,11 +552,14 @@ public sealed class AudioMixerPanel : ContentControl
                 Db.Text = AudioLevels.DbLabel(gain);
                 if (Syncing)
                     return;
-                // Mover el fader a mano deshace el silencio: si no, el operador
-                // subiría un fader mudo sin entender por qué no suena.
-                if (Muted)
-                    ClearMuteFlag();
-                FaderChanged?.Invoke(GainPercent(gain));
+                // Lo que se manda al motor es lo que dice el BOARD, no lo que
+                // marca el control: con un solo ajeno puesto este strip sigue
+                // callado por mucho que se le suba el fader, y emitir el valor
+                // del control desharía el solo de otro sin querer.
+                int pedido = GainPercent(gain);
+                int suena = Board?.FaderMoved(Key, pedido) ?? pedido;
+                PaintButtons();
+                FaderChanged?.Invoke(suena);
             };
 
             PaintButtons();
@@ -544,67 +583,23 @@ public sealed class AudioMixerPanel : ContentControl
         {
             SoloButton.Visibility = Visibility.Visible;
             SoloButton.Click += (_, _) =>
-            {
-                Soloed = !Soloed;
-                PaintButtons();
-                SoloToggled?.Invoke(this);
-            };
+                Board?.SetSolo(Key, !Board.IsSoloed(Key));
         }
 
-        /// <summary>Silencio a mano (botón M).</summary>
-        public void SetMuted(bool muted)
+        /// <summary>Refleja el estado que dicta el board. Es TODO lo que le
+        /// queda al strip del asunto: encender los botones y bajar el fader a
+        /// cero, para que lo que se ve sea lo que suena.</summary>
+        public void PaintButtons()
         {
-            if (muted == Muted)
-                return;
-            _mutedBySolo = false;
-            ApplyMute(muted);
-        }
-
-        /// <summary>Silencio IMPUESTO por el solo de otro strip. Se distingue
-        /// del manual para no pisarlo: un strip silenciado a mano sigue mudo
-        /// cuando se acaba el solo.</summary>
-        public void SetMutedBySolo(bool muted)
-        {
-            if (muted == Muted)
-                return;
-            if (!muted && !_mutedBySolo)
-                return;   // lo silenció el operador: no lo devuelve el solo
-            _mutedBySolo = muted;
-            ApplyMute(muted);
-        }
-
-        private void ApplyMute(bool muted)
-        {
-            if (muted)
-                _preMuteGain = GainPercent(
-                    AudioLevels.PositionToGain(Fader.Value / PosSteps));
-            Muted = muted;
-            PaintButtons();
-            // El fader BAJA a cero a la vista y el valor viaja por la ruta de
-            // siempre: lo que se ve es lo que suena, sin un silencio invisible
-            // por debajo que no cuadre con la posición del fader.
-            SetFaderSilent(muted ? 0 : _preMuteGain);
-            (MuteChanged ?? FaderChanged)?.Invoke(muted ? 0 : _preMuteGain);
-        }
-
-        /// <summary>El operador movió el fader a mano estando en silencio: el
-        /// silencio se levanta sin tocar el valor que acaba de poner.</summary>
-        private void ClearMuteFlag()
-        {
-            Muted = false;
-            _mutedBySolo = false;
-            PaintButtons();
-        }
-
-        protected void PaintButtons()
-        {
-            MuteButton.Background = Muted
+            bool muted = Board?.IsMuted(Key) ?? false;
+            bool soloed = Board?.IsSoloed(Key) ?? false;
+            MuteButton.Background = muted
                 ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
-            MuteButton.Foreground = Muted
+            MuteButton.Foreground = muted
                 ? System.Windows.Media.Brushes.Black : Theme.TextPrimaryBrush;
-            SoloButton.Background = Soloed
+            SoloButton.Background = soloed
                 ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
-            SoloButton.Foreground = Soloed
+            SoloButton.Foreground = soloed
                 ? System.Windows.Media.Brushes.Black : Theme.TextPrimaryBrush;
         }
 
@@ -693,9 +688,13 @@ public sealed class AudioMixerPanel : ContentControl
             if (cue is null || Fader.IsMouseCaptureWithin || Fader.IsKeyboardFocusWithin)
                 return;
             // Silenciado: el modelo dice 0 porque lo puso el propio silencio.
-            // Recolocar el fader aquí borraría el valor guardado para volver.
-            if (Muted)
+            // Recolocar el fader aquí borraría el valor guardado para volver —
+            // se le pasa al board, que sí lo recuerda, y el fader se queda abajo.
+            if (Board?.IsMuted(Key) == true)
+            {
+                Board.SetGainSilently(Key, (int)Math.Round(cue.Volume * 100.0));
                 return;
+            }
             // La comparación va en POSICIÓN, no en ganancia: son unidades
             // distintas desde que el recorrido se reparte en dB, y comparar una
             // con otra recolocaba el fader en cada vuelta de sincronía.
