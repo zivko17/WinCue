@@ -1304,7 +1304,10 @@ public sealed class InspectorPanel : ContentControl
         {
             outCombo.Items.Clear();
             outCombo.Items.Add(new ComboBoxItem
-            { Content = "(salida principal)", Tag = "" });
+            // Escrito a mano EN ESPAÑOL: se colaba en la interfaz inglesa, con
+            // la cabecera en inglés y la opción en español. Va por Loc, como en
+            // Ajustes, que ya lo tenía bien.
+            { Content = Loc.T("(salida principal)", "(main output)"), Tag = "" });
             try
             {
                 foreach (var dev in WinCue.Audio.AudioEngine.ListDevices())

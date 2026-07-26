@@ -543,7 +543,17 @@ public class MainController
         int audioId = _running.ContainsKey(cueId) && _mirroredAudio.Contains(cueId)
             ? VideoAudioId(cueId)
             : cueId;
-        bool ok = _audio.SetPfl(audioId, _settings.Get("audition_device_name", ""));
+        string device = _settings.Get("audition_device_name", "");
+        if (device.Length == 0)
+        {
+            // Sin cascos, la preescucha no tiene dónde ir. Se dice DÓNDE se
+            // arregla: un «no se puede» sin salida obliga a buscarla a ciegas.
+            _view.FlashStatus(Loc.T(
+                "CUE: falta el dispositivo de audición (Ajustes → Audio)",
+                "CUE: no audition device set (Settings → Audio)"));
+            return false;
+        }
+        bool ok = _audio.SetPfl(audioId, device);
         _view.FlashStatus(ok
             ? Loc.T("🎧 CUE — escuchando la señal en vivo", "🎧 CUE — listening to the live signal")
             : Loc.T("CUE: ese cue no suena por el rack de audio",

@@ -427,6 +427,15 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
     /// derivar y fingirlo sería peor que decir que no.</summary>
     public bool SetPfl(int cueId, string auditionDevice)
     {
+        // SIN DISPOSITIVO DE CASCOS NO HAY PREESCUCHA, y hay que decirlo en vez
+        // de apañarlo: el bus "" es la SALIDA PRINCIPAL, así que enganchar ahí
+        // el lector mandaría la réplica A LA SALA. El cue se oiría DOBLE por los
+        // altavoces —+6 dB y con phasing— en mitad de la función, y encima el
+        // botón se habría encendido como si todo fuera bien. Un CUE que suena
+        // en la sala no es un CUE.
+        if (string.IsNullOrEmpty(auditionDevice))
+            return false;
+
         if (!_active.TryGetValue(cueId, out var target))
             return false;
 
@@ -440,7 +449,7 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         // pinchado, sin abrir y cerrar el dispositivo a cada pulsación.
         if (!_pflAttached)
         {
-            var mixer = EnsureOutput(cueId, auditionDevice ?? "");
+            var mixer = EnsureOutput(cueId, auditionDevice);
             if (mixer is null)
                 return false;
             mixer.AddMixerInput(_pfl.Reader);

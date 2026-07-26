@@ -119,6 +119,18 @@ public class PflBusTests
     }
 
     [Fact]
+    public void SinDispositivoDeCascos_NoSePinchaNADA()
+    {
+        // El bus "" es la SALIDA PRINCIPAL. Si la preescucha se enganchara ahí
+        // por no haber cascos configurados, el cue sonaría DOBLE por los
+        // altavoces en mitad de la función — y con el botón encendido, como si
+        // todo fuera bien. Tiene que decir que no.
+        using var engine = new AudioEngine();
+        Assert.False(engine.SetPfl(1, ""));
+        Assert.Equal(-1, engine.PflCueId);
+    }
+
+    [Fact]
     public void AlSoltarYVolverAPinchar_NoSeArrastraLaColaDelAnterior()
     {
         var bus = new PflBus(SR, 2);
