@@ -54,6 +54,9 @@ public sealed class AudioMixerPanel : ContentControl
 
     /// <summary>Hay dispositivo de audición configurado (si no, no hay CUE).</summary>
     public Func<bool>? CueAvailable;
+
+    /// <summary>Qué fuente ocupa el bus CUE ahora mismo.</summary>
+    public Func<CueBusSource>? CueBusSourceNow;
     /// <summary>GR del limitador del bus master (dB ≥ 0), para el medidor.</summary>
     public Func<float>? MasterGainReductionProvider;
 
@@ -67,6 +70,7 @@ public sealed class AudioMixerPanel : ContentControl
     private readonly TextBlock _grText;
     private readonly GrBar _grBar = new();
     private readonly TextBlock _deviceInfo;
+    private readonly TextBlock _cueSourceText;   // qué fuente ocupa el bus CUE
     private readonly StackPanel _cueHost = new() { Orientation = Orientation.Horizontal };
     private readonly TextBlock _emptyHint;
     private readonly Dictionary<int, CueStrip> _cueStrips = new();
@@ -130,6 +134,19 @@ public sealed class AudioMixerPanel : ContentControl
         _audition = Strip.Build($"{Icons.Headphones} CUE", AccentPvw, withVu: true);
         _audition.VuTooltip(Loc.T("VU de la preescucha (PVW).", "Audition (PVW) VU."));
         _audition.Root.ToolTip = Loc.T("Trim × volumen del cue", "Trim × cue volume");
+
+        // QUÉ estás oyendo por los cascos. Las dos fuentes del bus se relevan,
+        // así que lo único que falta para no perderse es saber cuál manda ahora.
+        // Es INFORMACIÓN, no un modo: no puede contradecir a ningún botón, que
+        // es justo lo que haría un selector de fuente.
+        _cueSourceText = new TextBlock
+        {
+            FontSize = 10, FontWeight = FontWeights.Bold,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Foreground = AccentPvw,
+            Text = "",
+        };
+        _audition.Extras.Children.Add(_cueSourceText);
 
         _emptyHint = new TextBlock
         {
@@ -353,6 +370,20 @@ public sealed class AudioMixerPanel : ContentControl
     {
         _master.PaintButtons();
         _audition.PaintButtons();
+
+        // El rótulo de la fuente del bus CUE se repinta con la mesa: es el
+        // mismo tic que ya recorre los strips, no hace falta uno propio.
+        var src = CueBusSourceNow?.Invoke() ?? CueBusSource.None;
+        _cueSourceText.Text = src switch
+        {
+            CueBusSource.Pfl => Loc.T("● EN VIVO", "● LIVE"),
+            CueBusSource.Preview => Loc.T("▶ PREVIEW", "▶ PREVIEW"),
+            _ => "",
+        };
+        _cueSourceText.Foreground = src == CueBusSource.Pfl
+            ? Theme.Solid(Theme.Pgm)      // pinchando señal que SÍ está al aire
+            : Theme.Solid(Theme.Standby); // preview: algo que aún no ha salido
+
         foreach (var s in _cueStrips.Values)
             s.PaintButtons();
         // El inspector enseña los MISMOS botones para el cue seleccionado: si

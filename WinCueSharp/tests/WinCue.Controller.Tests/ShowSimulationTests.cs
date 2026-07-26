@@ -435,6 +435,29 @@ public class ShowSimulationTests : ControllerTestBase
     }
 
     [Fact]
+    public void ElBusCue_DiceQUEFuenteEstaSonando()
+    {
+        // El rótulo del strip CUE existe para que nunca haya que preguntarse
+        // «¿por qué suena esto?»: las dos fuentes se relevan y hay que poder
+        // decir cuál manda ahora.
+        BuildShow();
+        Settings.Set("audition_device_name", "Cascos de prueba");
+        Assert.Equal(CueBusSource.None, Controller.CueBusNow);
+
+        Controller.OnSetPlayhead(0);
+        Controller.AuditionToggle(0);
+        Assert.Equal(CueBusSource.Preview, Controller.CueBusNow);
+
+        Controller.OnGoPressed();
+        Clock.Advance(200);
+        Controller.PflToggle(Model.GetCue(0)!.Id);
+        Assert.Equal(CueBusSource.Pfl, Controller.CueBusNow);
+
+        Controller.PflToggle(Model.GetCue(0)!.Id);   // soltar
+        Assert.Equal(CueBusSource.None, Controller.CueBusNow);
+    }
+
+    [Fact]
     public void ElFaderCue_LlegaAlBusEntero_NoSoloAlPreview()
     {
         BuildShow();

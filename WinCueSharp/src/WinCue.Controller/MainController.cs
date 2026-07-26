@@ -525,6 +525,14 @@ public class MainController
         }
     }
 
+    /// <summary>Qué fuente está sonando por el bus CUE ahora mismo. Las dos van
+    /// al mismo oído y se relevan, así que saber CUÁL es lo que evita el
+    /// «¿por qué suena esto?» — y es información, no un modo que recordar.</summary>
+    public CueBusSource CueBusNow =>
+        _audio.PflCueId != -1 ? CueBusSource.Pfl
+        : _audio.IsPlaying(AuditionCueId) ? CueBusSource.Preview
+        : CueBusSource.None;
+
     /// <summary>Botón CUE: pincha la señal VIVA de ese cue en los cascos. Es un
     /// toggle. Devuelve false si no se pudo — el cue no suena, o su audio no
     /// pasa por el motor (vídeo cuyo sonido saca mpv) y no hay nada que

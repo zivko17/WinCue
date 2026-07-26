@@ -149,6 +149,7 @@ public partial class MainWindow : Window, IShowView
         // deshabilita en vez de encenderse y no sonar.
         Mixer.CueAvailable = () => _settings.Get("audition_device_name", "").Length > 0;
         Inspector.CueAvailable = Mixer.CueAvailable;
+        Mixer.CueBusSourceNow = () => _controller.CueBusNow;
 
         Mixer.SetMasterFader(_settings.Get("master_volume", 100));
         Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));

@@ -29,6 +29,18 @@ public sealed record ActiveCueInfo(
     double? PreWaitRemaining = null,
     bool MirrorAudio = false);
 
+/// <summary>Qué fuente ocupa el bus CUE (los cascos). Son dos y se relevan: la
+/// última que se pide manda, así que hace falta poder decir cuál es.</summary>
+public enum CueBusSource
+{
+    /// <summary>Nada sonando por los cascos.</summary>
+    None,
+    /// <summary>Pinchazo en vivo de un cue que ya suena (botón CUE).</summary>
+    Pfl,
+    /// <summary>Reproducción de un cue parado, desde el principio.</summary>
+    Preview,
+}
+
 public interface IShowView
 {
     // ── Feedback de estado ─────────────────────────────────────────────
