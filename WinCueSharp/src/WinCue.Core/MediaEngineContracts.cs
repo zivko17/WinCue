@@ -181,6 +181,10 @@ public interface IAudioEngine
     /// <summary>Cue pinchado ahora mismo (−1 = ninguno).</summary>
     int PflCueId => -1;
 
+    /// <summary>Ganancia del BUS de preescucha (fader CUE): manda sobre todo lo
+    /// que entra en él, pinchazo y preview.</summary>
+    void SetPflBusGain(double gain) { }
+
     /// <summary>Reducción de ganancia actual del compresor del cue (dB ≥ 0)
     /// para el medidor GR. Por defecto: 0 (motores falsos).</summary>
     float GetGainReductionDb(int cueId) => 0f;

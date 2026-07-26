@@ -119,6 +119,28 @@ public class PflBusTests
     }
 
     [Fact]
+    public void ElFaderDelBus_MandaSobreElPinchazo()
+    {
+        // El fader CUE es el master del bus: si no tocara el pinchazo, el mismo
+        // fader haría una cosa u otra según qué fuente estuvieras oyendo.
+        var bus = new PflBus(SR, 2) { Gain = 0.5f };
+        var tap = new PflTap(new Ramp(), bus) { Armed = true };
+
+        Read(tap, 4);
+
+        Assert.Equal(new float[] { 0.5f, 1f, 1.5f, 2f }, Read(bus.Reader, 4));
+    }
+
+    [Fact]
+    public void ConElFaderAbajo_ElBusCalla()
+    {
+        var bus = new PflBus(SR, 2) { Gain = 0f };
+        var tap = new PflTap(new Ramp(), bus) { Armed = true };
+        Read(tap, 4);
+        Assert.Equal(new float[4], Read(bus.Reader, 4));
+    }
+
+    [Fact]
     public void SinDispositivoDeCascos_NoSePinchaNADA()
     {
         // El bus "" es la SALIDA PRINCIPAL. Si la preescucha se enganchara ahí

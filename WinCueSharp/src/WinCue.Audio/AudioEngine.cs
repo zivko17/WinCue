@@ -472,6 +472,15 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         return true;
     }
 
+    /// <summary>Ganancia del BUS de preescucha (el fader CUE). Manda sobre todo
+    /// lo que entra en él; el preview lleva además su propio volumen de stream,
+    /// como cualquier cue.</summary>
+    public void SetPflBusGain(double gain)
+    {
+        if (_pfl is not null)
+            _pfl.Gain = (float)Math.Clamp(gain, 0.0, AudioLevels.MaxGain);
+    }
+
     /// <summary>¿Existe ese dispositivo de salida (WASAPI o driver ASIO)?</summary>
     private static bool DeviceExists(string name)
     {

@@ -532,17 +532,22 @@ public class MainController
     /// reproducción nueva desde el principio es justo lo que NO es un CUE.</summary>
     public bool PflToggle(int cueId)
     {
-        if (AuditionSourceCueId == cueId)
-        {
-            _audio.ClearPfl();
-            _view.FlashStatus(Loc.T("🎧 CUE fuera", "🎧 CUE off"));
-            return true;
-        }
         // El audio de un cue de VÍDEO va por su id ESPEJO: es ahí donde hay
         // muestras que pinchar, no en el id del cue.
         int audioId = _running.ContainsKey(cueId) && _mirroredAudio.Contains(cueId)
             ? VideoAudioId(cueId)
             : cueId;
+
+        // El toggle mira EL PINCHAZO, no «este cue está en mis cascos por la
+        // vía que sea». Mirando lo segundo, pulsar CUE sobre el cue que estabas
+        // PREVISUALIZANDO se entendía como «ya lo tienes, apágalo»: soltaba un
+        // pinchazo que no existía y dejaba el preview sonando.
+        if (_audio.PflCueId == audioId)
+        {
+            _audio.ClearPfl();
+            _view.FlashStatus(Loc.T("🎧 CUE fuera", "🎧 CUE off"));
+            return true;
+        }
         string device = _settings.Get("audition_device_name", "");
         if (device.Length == 0)
         {
@@ -556,6 +561,13 @@ public class MainController
         bool ok = _audio.SetPfl(audioId, device);
         if (ok)
         {
+            // Y el pinchazo releva al preview, por lo mismo que el preview
+            // releva al pinchazo: una fuente cada vez en el oído.
+            if (_audio.IsPlaying(AuditionCueId))
+            {
+                _audio.Stop(AuditionCueId);
+                _auditionSourceCueId = -1;
+            }
             _view.FlashStatus(Loc.T("🎧 CUE — escuchando la señal en vivo",
                                     "🎧 CUE — listening to the live signal"));
             return true;
@@ -578,15 +590,20 @@ public class MainController
         {
             _audio.Stop(AuditionCueId);
             _auditionSourceCueId = -1;
-            _view.FlashStatus(Loc.T("🎧 Audición detenida", "🎧 Audition stopped"));
+            _view.FlashStatus(Loc.T("🎧 Preview detenido", "🎧 Preview stopped"));
             return;
         }
         var cue = _model.GetCue(row);
         if (cue is null || cue.Type != CueType.Audio || cue.FilePath.Length == 0)
         {
-            _view.FlashStatus(Loc.T("Audición: selecciona un cue de AUDIO con archivo", "Audition: select an AUDIO cue with a file"));
+            _view.FlashStatus(Loc.T("Preview: selecciona un cue de AUDIO con archivo", "Preview: select an AUDIO cue with a file"));
             return;
         }
+        // EL PREVIEW RELEVA AL PINCHAZO. Las dos fuentes van al mismo oído: con
+        // las dos sonando a la vez no se distingue cuál es cuál, y el preview es
+        // lo que acabas de pedir expresamente. No vuelve solo al terminar —
+        // volver a pulsar CUE es un gesto, dar por hecho un estado no lo es.
+        _audio.ClearPfl();
         _auditionSourceCueId = cue.Id;
         _audio.Play(AuditionCueId, cue.FilePath, new AudioPlayParams(
             Volume: cue.Volume * AuditionTrim, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
@@ -595,7 +612,7 @@ public class MainController
             // FUERA DEL MASTER: la preescucha es del técnico, no de la sala.
             // Sin esto, bajar el master bajaba también los cascos.
             BypassMaster: true));
-        _view.FlashStatus(Loc.T($"🎧 Audición: {cue.Name}", $"🎧 Audition: {cue.Name}"));
+        _view.FlashStatus(Loc.T($"🎧 Preview: {cue.Name}", $"🎧 Preview: {cue.Name}"));
     }
 
     /// <summary>Trim del fader de audición (0..1) del panel Audio: se aplica
@@ -611,6 +628,10 @@ public class MainController
         value = Math.Clamp(value, 0, (int)Math.Round(AudioLevels.MaxGain * 100.0));
         if (persist)
             _settings.Set("audition_volume", value);
+        // El fader CUE es el master del BUS: manda sobre las dos fuentes, el
+        // pinchazo en vivo (PFL) y el preview. Antes solo tocaba el preview, y
+        // el mismo fader hacía una cosa u otra según qué estuvieras oyendo.
+        _audio.SetPflBusGain(value / 100.0);
         if (!_audio.IsPlaying(AuditionCueId))
             return;
         int row = _model.IndexOfId(_auditionSourceCueId);

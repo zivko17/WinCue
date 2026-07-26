@@ -413,6 +413,36 @@ public class ShowSimulationTests : ControllerTestBase
     }
 
     [Fact]
+    public void ElPreview_RelevaAlPinchazo_YElPinchazoAlPreview()
+    {
+        // Las dos fuentes del bus CUE van al MISMO oído. Con las dos sonando no
+        // se distingue cuál es cuál, así que la última que pides manda.
+        BuildShow();
+        // Sin cascos configurados no hay preescucha ninguna y PflToggle sale
+        // antes de llegar al relevo — el bus CUE necesita a dónde salir.
+        Settings.Set("audition_device_name", "Cascos de prueba");
+        Controller.OnSetPlayhead(0);
+
+        Controller.AuditionToggle(0);                    // preview en marcha
+        Assert.True(Audio.IsPlaying(MainController.AuditionCueId));
+
+        Controller.OnGoPressed();                        // el cue suena de verdad
+        Clock.Advance(200);
+        Controller.PflToggle(Model.GetCue(0)!.Id);       // ...y lo pincho
+
+        Assert.False(Audio.IsPlaying(MainController.AuditionCueId),
+            "el pinchazo tiene que relevar al preview");
+    }
+
+    [Fact]
+    public void ElFaderCue_LlegaAlBusEntero_NoSoloAlPreview()
+    {
+        BuildShow();
+        Controller.OnAuditionVolume(50);
+        Assert.Equal(0.5, Audio.PflBusGain, 4);
+    }
+
+    [Fact]
     public void ElMaster_AceptaElRefuerzoPorEncimaDeLaUnidad()
     {
         // El tope estaba clavado en 1,0 y recortaba en silencio todo lo que el

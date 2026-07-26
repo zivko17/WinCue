@@ -125,6 +125,23 @@ public sealed class FakeAudioEngine : IAudioEngine
 
     public void SetVolume(int cueId, double volume) => Volumes[cueId] = volume;
     public void SetMasterVolume(double volume) => Master = volume;
+
+    // ── Preescucha (bus CUE) ──────────────────────────────────────────
+    public int PflCueId { get; private set; } = -1;
+    public double PflBusGain { get; private set; } = 1.0;
+    public readonly List<(int CueId, string Device)> PflRequests = new();
+
+    public bool SetPfl(int cueId, string auditionDevice)
+    {
+        PflRequests.Add((cueId, auditionDevice));
+        if (auditionDevice.Length == 0 || !Playing.Contains(cueId))
+            return false;
+        PflCueId = cueId;
+        return true;
+    }
+
+    public void ClearPfl() => PflCueId = -1;
+    public void SetPflBusGain(double gain) => PflBusGain = gain;
     public void PauseAll() => PausedAll = true;
     public void ResumeAll() => ResumedAll = true;
     public void PauseCue(int cueId) => PausedCues.Add(cueId);

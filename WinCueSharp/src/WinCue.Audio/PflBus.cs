@@ -46,6 +46,12 @@ public sealed class PflBus
     /// <summary>Hay algún cue pinchado ahora mismo.</summary>
     public volatile bool Active;
 
+    /// <summary>Ganancia del bus, la del fader CUE. El fader del bus manda
+    /// sobre TODO lo que entra en él: sin esto controlaba el preview (que va
+    /// como un stream normal, con su volumen) pero no el pinchazo, y hacía una
+    /// cosa u otra según qué estuvieras oyendo.</summary>
+    public volatile float Gain = 1.0f;
+
     /// <summary>Vacía el anillo (al cambiar de cue pinchado o al soltar el CUE):
     /// sin esto se oiría la cola del anterior al pinchar el siguiente.</summary>
     public void Clear()
@@ -84,12 +90,13 @@ public sealed class PflBus
 
     private int ReadInto(float[] buffer, int offset, int count)
     {
+        float g = Gain;
         lock (_lock)
         {
             int n = Math.Min(count, _count);
             for (int i = 0; i < n; i++)
             {
-                buffer[offset + i] = _ring[_read];
+                buffer[offset + i] = _ring[_read] * g;
                 _read = (_read + 1) % _ring.Length;
             }
             _count -= n;

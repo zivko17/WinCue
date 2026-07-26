@@ -1770,7 +1770,11 @@ public partial class MainWindow : Window, IShowView
                 () => _controller.TriggerCueId(cue.Id)));
             if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
             {
-                menu.Items.Add(Mi($"{Icons.Headphones} {Loc.T("Audición (cascos)", "Audition (headphones)")}", "",
+                // PREVIEW, no «audición»: es la fuente del bus CUE que
+                // reproduce un cue PARADO desde el principio. La otra fuente es
+                // el pinchazo en vivo, y esa se llama CUE. Un nombre por
+                // concepto — «audición» era un tercer nombre para esto mismo.
+                menu.Items.Add(Mi($"{Icons.Headphones} {Loc.T("Preview (cascos)", "Preview (headphones)")}", "",
                     () => _controller.AuditionToggle(row)));
                 menu.Items.Add(Mi($"{Icons.Clef} Normalizar sonoridad (−16 LUFS)", "",
                     () => NormalizeLoudness(selRows), edit));
