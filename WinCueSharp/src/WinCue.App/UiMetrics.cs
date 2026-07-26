@@ -75,6 +75,17 @@ public static class UiMetrics
     /// nada — se gana sitio para los que sí suenan.</summary>
     public const double StripCollapsedWidth = 34;
 
+    /// <summary>Alto de TODOS los strips, plegados o no.
+    ///
+    /// Es FIJO porque si no, la caja plegada mide lo que mida el NOMBRE puesto
+    /// de pie: nombres largos daban cajas más altas que las de los faders y la
+    /// fila quedaba en escalera. Con el alto fijo, plegar solo cambia el ancho
+    /// —que es lo que se quiere— y el nombre se recorta si no cabe.
+    ///
+    /// Da de sí para el contenido desplegado (rótulo + lectura + fader de 170 +
+    /// botonera + extras + márgenes) con un dedo de sobra.</summary>
+    public const double StripHeight = 292;
+
     /// <summary>Alto RESERVADO bajo la lectura en dB de un strip.
     ///
     /// Ahí solo escribe el MASTER (la línea de GR del limitador), pero el hueco

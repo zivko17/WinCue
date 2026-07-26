@@ -516,8 +516,16 @@ public sealed class AudioMixerPanel : ContentControl
                 HorizontalAlignment = HorizontalAlignment.Center,
                 VerticalAlignment = VerticalAlignment.Center,
                 // DE PIE: en una tira de 34 px no cabe una línea de texto, y
-                // rotarla deja leer el nombre entero sin ensanchar nada.
-                LayoutTransform = new RotateTransform(-90),
+                // rotarla deja leer el nombre sin ensanchar nada.
+                //
+                // +90 y no −90: así el texto empieza ARRIBA y el número del cue
+                // queda en la cabecera, donde se busca — girado al revés, los
+                // números quedaban abajo del todo y había que recorrer la tira
+                // entera para saber de qué cue era.
+                LayoutTransform = new RotateTransform(90),
+                // Se recorta por el final si el nombre no cabe en el alto fijo:
+                // el número y el principio del nombre son lo que identifica.
+                MaxWidth = UiMetrics.StripHeight - 16,
             };
             _collapsed = new Border
             {
@@ -782,7 +790,12 @@ public sealed class AudioMixerPanel : ContentControl
 
             Root = new Border
             {
-                Width = UiMetrics.StripWidth, Margin = new Thickness(5, 8, 5, 8),
+                Width = UiMetrics.StripWidth,
+                // Alto FIJO e igual en todos: plegar cambia solo el ANCHO. Sin
+                // esto, la caja plegada medía lo que midiera el nombre puesto de
+                // pie y la fila quedaba en escalera.
+                Height = UiMetrics.StripHeight,
+                Margin = new Thickness(5, 8, 5, 8),
                 Padding = new Thickness(8, 6, 8, 6),
                 // Anclado ARRIBA: sin esto el Border se estira al alto del panel
                 // aunque sus filas ya no lo hagan, y vuelve el vacío de antes.
