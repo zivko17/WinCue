@@ -1321,25 +1321,12 @@ public sealed class InspectorPanel : ContentControl
             outCombo.SelectedIndex = 0;
         };
 
-        // ── Audición local ──────────────────────────────────────────────
-        var audBtn = new Button
-        {
-            Content = $"{Icons.Headphones} {Loc.T("Audición (cascos)", "Audition (headphones)")}",
-            Margin = new Thickness(0, 8, 0, 0),
-            Padding = new Thickness(12, 5, 12, 5),
-            HorizontalAlignment = HorizontalAlignment.Left,
-        };
-        audBtn.Click += (_, _) => AuditionRequested?.Invoke();
-        audBtn.ToolTip = Loc.T(
-            "Por el dispositivo de audición, sin pasar por la sala. Otra pulsación para parar.",
-            "On the audition device, without going to the room. Press again to stop.");
-        audioOnly.Children.Add(audBtn);
-
+        // AQUÍ IBA el botón «Audición (cascos)». Lo hace el botón CUE del strip,
+        // que es el mismo bus: dos botones para lo mismo, en la misma pestaña,
+        // solo sirven para que te preguntes en qué se diferencian. Se queda el
+        // CUE, que además dice si está sonando encendiéndose.
         return scroll;
     }
-
-    /// <summary>El botón de audición fue pulsado (la ventana llama al controlador).</summary>
-    public event Action? AuditionRequested;
 
     /// <summary>Libera el mpv del visor de edición (al cerrar la app).</summary>
     public void ShutdownPreview() => _editPreview.Shutdown();

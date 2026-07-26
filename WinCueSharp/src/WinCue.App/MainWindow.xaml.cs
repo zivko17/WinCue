@@ -88,8 +88,6 @@ public partial class MainWindow : Window, IShowView
                 _controller.OnCueEditCommitted(row,
                     new Dictionary<string, object?> { [key] = value });
         };
-        Inspector.AuditionRequested += () =>
-            _controller.AuditionToggle(CueGrid.SelectedIndex);
         Inspector.SpectrumProvider = cueId => _controller.GetAudioSpectrum(cueId);
         Inspector.GainReductionProvider = cueId => _controller.GetAudioGainReduction(cueId);
         Inspector.AudioAnalysisProvider = cueId => _controller.CueHasAudioAnalysis(cueId);
