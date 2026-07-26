@@ -89,6 +89,41 @@ public sealed class InspectorPanel : ContentControl
     /// <summary>La mesa cambió de estado (o entró/salió un cue): repintar.</summary>
     public void RefreshMuteSoloButtons() => RefreshMuteSolo();
 
+    /// <summary>Coloca el fader donde diga el MODELO. Lo llama la ventana en
+    /// cada vuelta de sincronía para que el fader del inspector y el del strip
+    /// del mixer sean EL MISMO fader: mover uno movía el otro solo al
+    /// reseleccionar el cue, así que el mismo volumen se veía en dos sitios con
+    /// dos valores distintos.
+    ///
+    /// No toca nada mientras el operador tenga ESTE fader agarrado — sería
+    /// pelearse con su mano — ni si está escribiendo la cifra.</summary>
+    public void SyncVolumeFromModel(Cue? cue)
+    {
+        if (cue is null || _cue is null || cue.Id != _cue.Id || _volSlider is null)
+            return;
+        if (_volSlider.IsMouseCaptureWithin || _volSlider.IsKeyboardFocusWithin)
+            return;
+        if (_volBox is not null && _volBox.IsKeyboardFocusWithin)
+            return;
+        double target = AudioLevels.GainToPosition(cue.Volume) * VolPosSteps;
+        if (Math.Abs(_volSlider.Value - target) < 1.0)
+            return;
+        _loading = true;   // reflejar, no commitear: el valor ya está en el modelo
+        try
+        {
+            _volSlider.Value = target;
+            if (_volBox is not null)
+                _volBox.Text = VolumeLabel(cue.Volume);
+        }
+        finally { _loading = false; }
+    }
+
+    /// <summary>Pasos del recorrido del fader de volumen (posición, no ganancia).</summary>
+    private const double VolPosSteps = 1000.0;
+
+    private Slider? _volSlider;
+    private TextBox? _volBox;
+
     private readonly TabControl _tabs = new()
     {
         Background = Theme.PanelBgBrush,
@@ -956,18 +991,29 @@ public sealed class InspectorPanel : ContentControl
         };
     }
 
-    // VU vertical del cue seleccionado (recibe niveles reales del mixer)
-    private readonly VuMeterControl _levelVu = new(vertical: true)
-    {
-        Width = 16,
-        Height = 170,
-    };
+    // VU ESTÉREO del cue seleccionado (recibe niveles reales del mixer), con las
+    // mismas medidas que el par de la mesa.
+    private readonly VuMeterControl _levelVu = new(vertical: true);
+    private readonly VuMeterControl _levelVuR = new(vertical: true);
 
     /// <summary>Nivel RMS de un cue (solo se pinta si es el seleccionado).</summary>
     public void UpdateCueLevel(int cueId, float rms)
     {
         if (_cue?.Id == cueId)
+        {
             _levelVu.SetLevel(rms);
+            _levelVuR.SetLevel(rms);
+        }
+    }
+
+    /// <summary>Nivel ESTÉREO del cue seleccionado. Es el que usa la ventana:
+    /// el mono de arriba se queda para quien solo tenga un valor.</summary>
+    public void UpdateCueLevel(int cueId, float left, float right)
+    {
+        if (_cue?.Id != cueId)
+            return;
+        _levelVu.SetLevel(left);
+        _levelVuR.SetLevel(right);
     }
 
     private TabItem _audioTab = null!;
@@ -1019,7 +1065,7 @@ public sealed class InspectorPanel : ContentControl
         // mixer (AudioLevels): dos faders del mismo volumen tienen que estar a
         // la misma altura, y el techo (+10 dB) tiene que ser el mismo en los
         // dos sitios o el mixer permitiría lo que el inspector recorta.
-        const double posSteps = 1000.0;
+        const double posSteps = VolPosSteps;
         var slider = new Slider
         {
             Orientation = Orientation.Vertical,
@@ -1033,8 +1079,19 @@ public sealed class InspectorPanel : ContentControl
         var faderRow = new StackPanel
         { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
         faderRow.Children.Add(new FaderScaleControl
-        { Width = UiMetrics.FaderScaleWidth, Height = UiMetrics.FaderHeight, Margin = new Thickness(0, 4, 0, 0) });
+        { Width = UiMetrics.FaderScaleWidth, Height = UiMetrics.FaderHeight });
         faderRow.Children.Add(slider);
+        // VU ESTÉREO pegado al fader, con las mismas medidas que en la mesa: dos
+        // medidores de la misma señal con distinto ancho y distinto largo se
+        // leen como si midieran cosas distintas.
+        _levelVu.Width = 7;
+        _levelVu.Height = UiMetrics.FaderHeight;
+        _levelVu.Margin = new Thickness(6, 0, 0, 0);
+        _levelVuR.Width = 7;
+        _levelVuR.Height = UiMetrics.FaderHeight;
+        _levelVuR.Margin = new Thickness(1, 0, 0, 0);
+        faderRow.Children.Add(_levelVu);
+        faderRow.Children.Add(_levelVuR);
         faderCol.Children.Add(faderRow);
 
         // La lectura va DEBAJO del fader, como en el mixer y en el GAIN del EQ.
@@ -1090,14 +1147,21 @@ public sealed class InspectorPanel : ContentControl
         };
         label.LostFocus += (_, _) => CommitTypedVolume();
         label.GotKeyboardFocus += (_, _) => label.SelectAll();
-        faderCol.Children.Add(new Border
+        // Referencias para la sincronía con el strip del mixer (SyncVolumeFromModel)
+        _volSlider = slider;
+        _volBox = label;
+        // La lectura va ARRIBA, como en el strip del mixer. Se INSERTA delante
+        // del fader (índice 1, tras el rótulo VOL) en vez de añadirse al final:
+        // este strip tiene que leerse igual que el de la mesa, y ahí la cifra
+        // está encima.
+        faderCol.Children.Insert(1, new Border
         {
             Background = Theme.Solid(Theme.SunkenBg),
             BorderBrush = Theme.Solid(Theme.Divider),
             BorderThickness = new Thickness(1),
             CornerRadius = new CornerRadius(4),
             Padding = new Thickness(4, 2, 4, 2),
-            Margin = new Thickness(0, 6, 0, 0),
+            Margin = new Thickness(0, 4, 0, 4),
             HorizontalAlignment = HorizontalAlignment.Center,
             Child = label,
         });
@@ -1134,23 +1198,20 @@ public sealed class InspectorPanel : ContentControl
         };
         _loaders["__mute_solo"] = _ => RefreshMuteSolo();
 
-        mixer.Children.Add(faderCol);
-
-        var vuCol = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
-        vuCol.Children.Add(new TextBlock
+        // EL MISMO STRIP QUE EN LA MESA, en su misma caja: mismo reparto, mismas
+        // medidas y los mismos VU estéreo pegados al fader. Antes el VU vivía en
+        // una columna aparte, con su propio rótulo y de otro ancho, y el mismo
+        // cue se veía de dos maneras distintas según la pestaña.
+        mixer.Children.Add(new Border
         {
-            Text = "VU",
-            FontSize = 10,
-            FontWeight = FontWeights.Bold,
-            Foreground = Theme.TextDimBrush,
-            HorizontalAlignment = HorizontalAlignment.Center,
+            Background = Theme.Solid(Theme.ToolbarBg),
+            BorderBrush = Theme.Solid(Theme.ButtonBgAlt),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, 6, 8, 6),
+            VerticalAlignment = VerticalAlignment.Top,
+            Child = faderCol,
         });
-        // Mismo alto que el fader, como en la mesa: dos medidores de la misma
-        // señal con escalas de distinto largo se leen como una avería.
-        _levelVu.Margin = new Thickness(0, 4, 0, 0);
-        _levelVu.Height = UiMetrics.FaderHeight;
-        vuCol.Children.Add(_levelVu);
-        mixer.Children.Add(vuCol);
 
         // Columna de información y ajustes a la derecha del fader — COMPACTA:
         // esta columna comparte pestaña con el editor de EQ/comp, que es quien
@@ -1186,8 +1247,11 @@ public sealed class InspectorPanel : ContentControl
         };
         // El VU por cue existe donde hay rack nativo: cues de AUDIO y cues de
         // VÍDEO con AUDIO ESPEJO (motor HAP propio o ruta híbrida). El vídeo
-        // cuyo audio sale por mpv no es medible → sin columna VU.
-        _conditional.Add((vuCol, HasAudioAnalysis));
+        // cuyo audio sale por mpv no es medible → sin VU, igual que en la mesa
+        // (allí es el withVu:false del strip). Se ocultan los DOS medidores,
+        // que ahora viven pegados al fader y ya no en una columna propia.
+        _conditional.Add((_levelVu, HasAudioAnalysis));
+        _conditional.Add((_levelVuR, HasAudioAnalysis));
 
         // La salida por cue y la audición van en la columna de información
         panel = infoCol;

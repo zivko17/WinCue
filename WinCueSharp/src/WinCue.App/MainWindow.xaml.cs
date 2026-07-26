@@ -665,6 +665,13 @@ public partial class MainWindow : Window, IShowView
             int r = _model.IndexOfId(cueId);
             return r >= 0 ? _model.GetCue(r) : null;
         });
+
+        // El fader del inspector y el del strip son EL MISMO fader: mover uno
+        // tiene que mover el otro EN VIVO. El strip ya se refrescaba del modelo
+        // en cada vuelta; el inspector solo se enteraba al reseleccionar el cue,
+        // así que el mismo volumen se veía en dos sitios con dos valores.
+        if (CueGrid.SelectedIndex >= 0)
+            Inspector.SyncVolumeFromModel(_model.GetCue(CueGrid.SelectedIndex));
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>
@@ -712,7 +719,7 @@ public partial class MainWindow : Window, IShowView
             Mixer.SetAuditionLevel(left, right);
             return;
         }
-        Inspector.UpdateCueLevel(cueId, Math.Max(left, right));
+        Inspector.UpdateCueLevel(cueId, left, right);   // el inspector ya es estéreo
         Mixer.UpdateCueLevel(cueId, left, right);
     }
 
