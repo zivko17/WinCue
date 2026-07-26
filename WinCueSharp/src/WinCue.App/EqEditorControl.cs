@@ -87,7 +87,13 @@ public sealed class EqEditorControl : ContentControl
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(2, GridUnitType.Star), MinWidth = 180 });
-        _root.RowDefinitions.Add(new RowDefinition());
+        // Auto y no Star: con la fila en Star, la curva de la EQ y la del
+        // compresor se estiraban con el panel. Al subir el separador del
+        // inspector las gráficas crecían sin parar y la pestaña dejaba de tener
+        // el mismo aspecto de una vez a otra. Miden lo que miden y el alto que
+        // sobre se queda en el panel.
+        _root.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+        _root.VerticalAlignment = VerticalAlignment.Top;
 
         // ── Fader de ganancia del clip (dB) ────────────────────────────
         // Columna con el MISMO reparto que la de VOL del inspector, que está
@@ -289,6 +295,10 @@ public sealed class EqEditorControl : ContentControl
         Grid.SetColumn(eqParsScroll, 1);
         _root.Children.Add(eqParsScroll);
 
+        // Alto FIJO, el mismo que el compresor de al lado y del orden del strip
+        // de volumen: las tres cosas de la pestaña miden lo mismo y la fila se
+        // lee de un vistazo.
+        _canvas.Height = UiMetrics.EqCanvasHeight;
         Grid.SetColumn(_canvas, 2);
         _root.Children.Add(_canvas);
         _canvas.ReadoutChanged += text => _readout!.Text = text;
@@ -348,6 +358,7 @@ public sealed class EqEditorControl : ContentControl
         Grid.SetColumn(compParsScroll, 3);
         _root.Children.Add(compParsScroll);
 
+        _compCanvas.Height = UiMetrics.EqCanvasHeight;
         Grid.SetColumn(_compCanvas, 4);
         _root.Children.Add(_compCanvas);
 

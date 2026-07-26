@@ -1039,7 +1039,15 @@ public sealed class InspectorPanel : ContentControl
         var host = new DockPanel();
         DockPanel.SetDock(levelsHost, Dock.Left);
         host.Children.Add(levelsHost);
-        host.Children.Add(_eqEditor);
+        // Ahora que la EQ y el compresor tienen alto FIJO, hace falta la misma
+        // red de seguridad que en Geometría: con el inspector muy bajo se
+        // recortarían sin salida. Con la altura normal la barra no aparece.
+        host.Children.Add(new ScrollViewer
+        {
+            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+            Content = _eqEditor,
+        });
         return host;
     }
 

@@ -46,6 +46,14 @@ public static class UiMetrics
     /// <summary>Ancho de la columna de la escala en dB, al costado del fader.</summary>
     public const double FaderScaleWidth = 30;
 
+    /// <summary>Alto de las gráficas de EQ y compresor.
+    ///
+    /// FIJO: estiradas con el panel, la pestaña Audio cambiaba de aspecto cada
+    /// vez que se movía el separador del inspector. Del orden del strip de
+    /// volumen que tienen al lado, para que las tres cosas de la fila midan lo
+    /// mismo y se lea de un vistazo.</summary>
+    public const double EqCanvasHeight = 270;
+
     /// <summary>Botón MUTE de los strips SIN solo (MASTER y AUDICIÓN). Ocupa
     /// casi el ancho del strip y lleva la palabra entera: sin un segundo botón
     /// con el que repartirse la fila, no hay motivo para encogerlo, y un mute

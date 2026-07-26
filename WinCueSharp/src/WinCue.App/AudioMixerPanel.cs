@@ -398,12 +398,16 @@ public sealed class AudioMixerPanel : ContentControl
                             FrameworkElement? extraMeter = null)
         {
             // 0 rótulo · 1 lectura dB · 2 escala+fader+VU · 3 botones · 4 extras
+            //
+            // TODAS Auto, ninguna Star. Con la fila del fader en Star, el strip
+            // se estiraba con el panel: al subir el separador, el fader se
+            // quedaba arriba —está anclado ahí— y los botones se iban al fondo,
+            // con un palmo de vacío en medio. Un strip mide lo que miden sus
+            // piezas, que ya son todas de tamaño fijo, y el alto que sobre se
+            // queda debajo, en el panel, que es a quien pertenece.
             var grid = new Grid();
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
-            grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
+            for (int i = 0; i < 5; i++)
+                grid.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
 
             TitleText = new TextBlock
             {
@@ -572,6 +576,9 @@ public sealed class AudioMixerPanel : ContentControl
             {
                 Width = UiMetrics.StripWidth, Margin = new Thickness(5, 8, 5, 8),
                 Padding = new Thickness(8, 6, 8, 6),
+                // Anclado ARRIBA: sin esto el Border se estira al alto del panel
+                // aunque sus filas ya no lo hagan, y vuelve el vacío de antes.
+                VerticalAlignment = VerticalAlignment.Top,
                 Background = Frozen(new SolidColorBrush(Theme.ToolbarBg)),
                 BorderBrush = Frozen(new SolidColorBrush(Theme.ButtonBgAlt)),
                 BorderThickness = new Thickness(1), CornerRadius = new CornerRadius(4),
