@@ -1282,48 +1282,14 @@ public sealed class InspectorPanel : ContentControl
         // La salida por cue y la audición van en la columna de información
         panel = infoCol;
 
-        // ── Sección SOLO AUDIO: salida por cue + audición ───────────────
-        var audioOnly = new StackPanel();
-        panel.Children.Add(audioOnly);
-        _conditional.Add((audioOnly, c => c.Type == CueType.Audio));
-
-        Header(audioOnly, Loc.T("SALIDA DE ESTE CUE", "THIS CUE'S OUTPUT"));
-        var outCombo = new ComboBox
-        {
-            MinWidth = 170, MaxWidth = 220,
-            HorizontalAlignment = HorizontalAlignment.Left,
-            Margin = new Thickness(0, 2, 0, 2),
-        };
-        outCombo.SelectionChanged += (_, _) =>
-        {
-            if ((outCombo.SelectedItem as ComboBoxItem)?.Tag is string dev)
-                Commit("audio_output", dev);
-        };
-        audioOnly.Children.Add(outCombo);
-        _loaders["audio_output"] = c =>
-        {
-            outCombo.Items.Clear();
-            outCombo.Items.Add(new ComboBoxItem
-            // Escrito a mano EN ESPAÑOL: se colaba en la interfaz inglesa, con
-            // la cabecera en inglés y la opción en español. Va por Loc, como en
-            // Ajustes, que ya lo tenía bien.
-            { Content = Loc.T("(salida principal)", "(main output)"), Tag = "" });
-            try
-            {
-                foreach (var dev in WinCue.Audio.AudioEngine.ListDevices())
-                    outCombo.Items.Add(new ComboBoxItem { Content = dev.Name, Tag = dev.Name });
-                foreach (string asio in WinCue.Audio.AudioEngine.ListAsioDrivers())
-                    outCombo.Items.Add(new ComboBoxItem { Content = $"[ASIO] {asio}", Tag = asio });
-            }
-            catch (Exception) { }
-            foreach (ComboBoxItem item in outCombo.Items)
-                if ((string)item.Tag == c.AudioOutput)
-                {
-                    outCombo.SelectedItem = item;
-                    return;
-                }
-            outCombo.SelectedIndex = 0;
-        };
+        // AQUÍ IBA «SALIDA DE ESTE CUE», un desplegable por cue para elegir
+        // dispositivo. Fuera: el enrutado de salida se toca en UN solo sitio,
+        // Ajustes → Audio. Tenerlo también aquí repartía la misma decisión
+        // entre dos pantallas, y en directo eso significa no saber cuál manda.
+        //
+        // NO se ha tocado el campo del modelo (Cue.AudioOutput): un show
+        // guardado con salida por cue sigue sonando por donde decía. Lo que
+        // desaparece es la forma de cambiarlo desde aquí.
 
         // AQUÍ IBA el botón «Audición (cascos)». Lo hace el botón CUE del strip,
         // que es el mismo bus: dos botones para lo mismo, en la misma pestaña,

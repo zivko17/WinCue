@@ -554,11 +554,20 @@ public class MainController
             return false;
         }
         bool ok = _audio.SetPfl(audioId, device);
-        _view.FlashStatus(ok
-            ? Loc.T("🎧 CUE — escuchando la señal en vivo", "🎧 CUE — listening to the live signal")
-            : Loc.T("CUE: ese cue no suena por el rack de audio",
-                    "CUE: that cue's audio does not go through the audio rack"));
-        return ok;
+        if (ok)
+        {
+            _view.FlashStatus(Loc.T("🎧 CUE — escuchando la señal en vivo",
+                                    "🎧 CUE — listening to the live signal"));
+            return true;
+        }
+        // Dos motivos posibles, y conviene distinguirlos: o el cue no está
+        // sonando por el rack, o el dispositivo de cascos ya no está.
+        _view.FlashStatus(_running.ContainsKey(cueId)
+            ? Loc.T($"CUE: el dispositivo de audición «{device}» no está disponible",
+                    $"CUE: audition device “{device}” is not available")
+            : Loc.T("CUE: ese cue no está sonando (no hay señal que pinchar)",
+                    "CUE: that cue is not playing (no live signal to tap)"));
+        return false;
     }
 
     /// <summary>Audición local: reproduce el cue de la fila por el dispositivo

@@ -436,6 +436,15 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         if (string.IsNullOrEmpty(auditionDevice))
             return false;
 
+        // Y el dispositivo tiene que EXISTIR de verdad. CreateOutput, cuando no
+        // encuentra el nombre, cae a la salida por defecto — que es la sala. Es
+        // el comportamiento correcto para un cue del show (mejor que se oiga por
+        // algún sitio a que no se oiga), pero para la PREESCUCHA es el mismo
+        // desastre de antes por otra puerta: la réplica saldría por los
+        // altavoces. Aquí se comprueba antes de abrir nada.
+        if (!DeviceExists(auditionDevice))
+            return false;
+
         if (!_active.TryGetValue(cueId, out var target))
             return false;
 
@@ -461,6 +470,21 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         tap.Armed = true;
         _pflCueId = cueId;
         return true;
+    }
+
+    /// <summary>¿Existe ese dispositivo de salida (WASAPI o driver ASIO)?</summary>
+    private static bool DeviceExists(string name)
+    {
+        try
+        {
+            if (ListDevices().Any(d => d.Name == name))
+                return true;
+            return ListAsioDrivers().Contains(name);
+        }
+        catch (Exception)
+        {
+            return false;   // sin poder comprobarlo, NO se pincha
+        }
     }
 
     /// <summary>Suelta la preescucha.</summary>
