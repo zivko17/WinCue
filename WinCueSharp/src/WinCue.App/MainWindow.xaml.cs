@@ -138,6 +138,19 @@ public partial class MainWindow : Window, IShowView
         Inspector.MuteSoloChanged = () => Mixer.RefreshStripButtons();
         Mixer.StripsRepainted = () => Inspector.RefreshMuteSoloButtons();
 
+        // CUE (preescucha) desde los dos sitios, al MISMO bus: el de audición.
+        // AuditionToggle va por FILA, no por id.
+        void PedirCue(int cueId)
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                _controller.AuditionToggle(row);
+        }
+        Mixer.CueRequested = PedirCue;
+        Inspector.CueRequested = PedirCue;
+        Mixer.AuditionSourceId = () => _controller.AuditionSourceCueId;
+        Inspector.AuditionSourceId = () => _controller.AuditionSourceCueId;
+
         Mixer.SetMasterFader(_settings.Get("master_volume", 100));
         Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
         UpdateMixerDeviceInfo();

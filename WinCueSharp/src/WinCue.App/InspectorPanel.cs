@@ -54,6 +54,12 @@ public sealed class InspectorPanel : ContentControl
     /// desde aquí.</summary>
     public Action? MuteSoloChanged;
 
+    /// <summary>Botón CUE: preescuchar ese cue por los cascos.</summary>
+    public Action<int>? CueRequested;
+
+    /// <summary>Qué cue suena por los cascos ahora mismo (−1 = ninguno).</summary>
+    public Func<int>? AuditionSourceId;
+
     private Button _muteBtn = null!;
     private Button _soloBtn = null!;
 
@@ -76,10 +82,13 @@ public sealed class InspectorPanel : ContentControl
     {
         bool live = _cue is not null && MuteSolo?.Knows(_cue.Id) == true;
         _muteBtn.IsEnabled = live;
-        _soloBtn.IsEnabled = live;
+        // CUE no necesita que el cue esté SONANDO: preescuchar un cue parado es
+        // justo para lo que sirve — oírlo antes de lanzarlo. Solo pide que sea
+        // un cue de AUDIO con archivo, que es lo que sabe audicionar.
+        _soloBtn.IsEnabled = _cue is { Type: CueType.Audio } ac && ac.FilePath.Length > 0;
 
         bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
-        bool soloed = live && MuteSolo!.IsSoloed(_cue!.Id);
+        bool soloed = _cue is not null && AuditionSourceId?.Invoke() == _cue.Id;
         _muteBtn.Background = muted ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
         _muteBtn.Foreground = muted ? Brushes.Black : Theme.TextPrimaryBrush;
         _soloBtn.Background = soloed ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
@@ -1188,7 +1197,12 @@ public sealed class InspectorPanel : ContentControl
             Margin = new Thickness(0, 8, 0, 0),
         };
         _muteBtn = LevelButton("MUTE", Loc.T("Silenciar este cue", "Mute this cue"));
-        _soloBtn = LevelButton("SOLO", Loc.T("Escuchar solo este cue", "Solo this cue"));
+        // CUE, no solo: manda el cue a los CASCOS sin tocar la sala. El
+        // solo-in-place enmudecía la sala para dejar oír uno, que en directo es
+        // una trampa.
+        _soloBtn = LevelButton("CUE", Loc.T(
+            "Escuchar este cue por los cascos (no toca la sala)",
+            "Listen to this cue on headphones (does not touch the room)"));
         btnRow.Children.Add(_muteBtn);
         btnRow.Children.Add(_soloBtn);
         faderCol.Children.Add(btnRow);
@@ -1203,7 +1217,7 @@ public sealed class InspectorPanel : ContentControl
         _soloBtn.Click += (_, _) =>
         {
             if (_cue is null) return;
-            MuteSolo?.SetSolo(_cue.Id, !(MuteSolo?.IsSoloed(_cue.Id) ?? false));
+            CueRequested?.Invoke(_cue.Id);
             MuteSoloChanged?.Invoke();
             RefreshMuteSolo();
         };

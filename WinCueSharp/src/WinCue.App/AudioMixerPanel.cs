@@ -45,6 +45,12 @@ public sealed class AudioMixerPanel : ContentControl
     /// <summary>Clic en el título de un strip de cue → abrir su edición
     /// (la ventana selecciona el cue y muestra Inspector → 🔊 Audio).</summary>
     public Action<int>? CueStripActivated;
+
+    /// <summary>Botón CUE de un strip: preescuchar ese cue por los cascos.</summary>
+    public Action<int>? CueRequested;
+
+    /// <summary>Qué cue suena por los cascos ahora mismo (−1 = ninguno).</summary>
+    public Func<int>? AuditionSourceId;
     /// <summary>GR del limitador del bus master (dB ≥ 0), para el medidor.</summary>
     public Func<float>? MasterGainReductionProvider;
 
@@ -110,7 +116,10 @@ public sealed class AudioMixerPanel : ContentControl
         // abajo solo servía para descuadrar los strips entre sí.
         _master.Root.ToolTip = "";
 
-        _audition = Strip.Build($"{Icons.Headphones} {Loc.T("AUDICIÓN", "AUDITION")}", AccentPvw, withVu: true);
+        // Se llama CUE porque es el MASTER del bus de preescucha: el mismo al
+        // que mandan los botones CUE de los strips. Llamarlo «audición» y a los
+        // botones «cue» sería ponerle dos nombres a la misma cosa.
+        _audition = Strip.Build($"{Icons.Headphones} CUE", AccentPvw, withVu: true);
         _audition.VuTooltip(Loc.T("VU de la preescucha (PVW).", "Audition (PVW) VU."));
         _audition.Root.ToolTip = Loc.T("Trim × volumen del cue", "Trim × cue volume");
 
@@ -267,6 +276,8 @@ public sealed class AudioMixerPanel : ContentControl
         s.Key = row.Id;
         s.Board = _board;
         s.RepaintAll = RepaintAllStrips;
+        s.AuditionSource = () => AuditionSourceId?.Invoke() ?? -1;
+        s.CueRequested = id => CueRequested?.Invoke(id);
         // El solo solo existe entre cues: aquí sí hay algo contra lo que solear.
         s.EnableSolo();
         // El alta reparte el solo sola: si hay uno puesto, este nace mudo.
@@ -374,8 +385,12 @@ public sealed class AudioMixerPanel : ContentControl
         public MuteSoloBoard? Board;
 
         /// <summary>Repinta la mesa ENTERA. Lo pone el panel: una pulsación en
-        /// un strip cambia el aspecto de los demás (el solo enmudece vecinos).</summary>
+        /// un strip puede cambiar el aspecto de los demás.</summary>
         public Action? RepaintAll;
+
+        /// <summary>Pedir CUE (preescucha) de este strip. Es un toggle: pulsar
+        /// el que ya suena por los cascos lo apaga.</summary>
+        public Action<int>? CueRequested;
 
         protected VuMeterControl? VuL, VuR;
         protected StackPanel MeterZone = null!;
@@ -540,7 +555,14 @@ public sealed class AudioMixerPanel : ContentControl
             // encogen a «M» al llamar a EnableSolo(), que es cuando aparece un
             // segundo botón con el que repartirse el sitio.
             MuteButton = MuteButtonWide();
-            SoloButton = SmallButton("SOLO", Loc.T("Escuchar solo este cue", "Solo this cue"));
+            // CUE (preescucha), NO solo. El solo-in-place enmudece la SALA para
+            // dejar oír uno: en un teatro es una trampa —un toque y el público
+            // se queda sin media función—. CUE manda ese cue a los CASCOS y no
+            // toca la sala, que es lo que de verdad se necesita en directo. El
+            // bus ya existía: es el de audición.
+            SoloButton = SmallButton("CUE", Loc.T(
+                "Escuchar este cue por los cascos (no toca la sala)",
+                "Listen to this cue on headphones (does not touch the room)"));
             SoloButton.Visibility = Visibility.Collapsed;
             var buttons = new StackPanel
             {
@@ -689,8 +711,12 @@ public sealed class AudioMixerPanel : ContentControl
             Foreground = Theme.Solid(Theme.Pgm),
         };
 
-        /// <summary>Da de alta el botón S. Solo lo llaman los strips de cue:
-        /// en MASTER y AUDICIÓN no hay nada contra lo que solear.</summary>
+        /// <summary>Qué cue suena por los cascos (−1 = ninguno). Enciende el
+        /// botón CUE del strip que corresponda.</summary>
+        public Func<int>? AuditionSource;
+
+        /// <summary>Da de alta el botón CUE. Solo lo llaman los strips de cue:
+        /// el MASTER no se preescucha, y el strip CUE ES el bus de preescucha.</summary>
         public void EnableSolo()
         {
             // Entra un segundo botón: el mute deja el ancho entero y vuelve a
@@ -705,8 +731,7 @@ public sealed class AudioMixerPanel : ContentControl
             SoloButton.Visibility = Visibility.Visible;
             SoloButton.Click += (_, _) =>
             {
-                Board?.SetSolo(Key, !Board.IsSoloed(Key));
-                // Un solo cambia el aspecto de TODOS los strips, no del suyo.
+                CueRequested?.Invoke(Key);
                 RepaintAll?.Invoke();
             };
             PaintButtons();
@@ -718,7 +743,8 @@ public sealed class AudioMixerPanel : ContentControl
         public void PaintButtons()
         {
             bool muted = Board?.IsMuted(Key) ?? false;
-            bool soloed = Board?.IsSoloed(Key) ?? false;
+            // CUE encendido = ESTE cue es el que suena por los cascos.
+            bool soloed = AuditionSource?.Invoke() == Key;
             MuteButton.Background = muted
                 ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
             // En reposo, el botón ANCHO lleva la palabra en rojo: dice a qué

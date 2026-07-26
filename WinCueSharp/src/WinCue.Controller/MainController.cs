@@ -509,6 +509,11 @@ public class MainController
     /// <summary>Cue que suena por la audición local (para EQ/RTA en vivo).</summary>
     private int _auditionSourceCueId = -1;
 
+    /// <summary>Id del cue que está SONANDO POR LOS CASCOS ahora mismo, o −1.
+    /// Lo usan los botones CUE de la mesa y del inspector para encenderse.</summary>
+    public int AuditionSourceCueId =>
+        _audio.IsPlaying(AuditionCueId) ? _auditionSourceCueId : -1;
+
     /// <summary>Audición local: reproduce el cue de la fila por el dispositivo
     /// de audición (cascos) SIN pasar por el flujo del show. Toggle.</summary>
     public void AuditionToggle(int row)

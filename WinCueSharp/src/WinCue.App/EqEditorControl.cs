@@ -50,6 +50,7 @@ public sealed class EqEditorControl : ContentControl
     private readonly CompCurveCanvas _compCanvas = new();
     private readonly Slider _gain;
     private readonly TextBlock _gainLabel;
+    private readonly Border _gainFrame;   // marco de la lectura, encima del fader
     private readonly CheckBox _eqOn, _hpfOn, _lpfOn;
     private readonly TextBox _hpfFreq, _lpfFreq;
     private CheckBox _compOn = null!;
@@ -115,6 +116,19 @@ public sealed class EqEditorControl : ContentControl
             HorizontalAlignment = HorizontalAlignment.Center,
         };
         gainPanel.Children.Add(gainTitle);
+        // La lectura va ARRIBA, bajo el rótulo, como en los strips de la mesa y
+        // en el VOL de al lado: el mismo dato en el mismo sitio en los tres.
+        _gainFrame = new Border
+        {
+            Background = Theme.Solid(Theme.SunkenBg),
+            BorderBrush = Theme.Solid(Theme.Divider),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 4, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Center,
+        };
+        gainPanel.Children.Add(_gainFrame);
         _gainLabel = new TextBlock
         {
             Text = "0.0 dB",
@@ -157,18 +171,7 @@ public sealed class EqEditorControl : ContentControl
             e.Handled = true;
         };
         gainPanel.Children.Add(_gain);
-        // La lectura, DEBAJO del fader y enmarcada igual que las demás.
-        gainPanel.Children.Add(new Border
-        {
-            Background = Theme.Solid(Theme.SunkenBg),
-            BorderBrush = Theme.Solid(Theme.Divider),
-            BorderThickness = new Thickness(1),
-            CornerRadius = new CornerRadius(4),
-            Padding = new Thickness(4, 2, 4, 2),
-            Margin = new Thickness(0, 6, 0, 0),
-            HorizontalAlignment = HorizontalAlignment.Center,
-            Child = _gainLabel,
-        });
+        _gainFrame.Child = _gainLabel;   // el marco ya está colocado arriba
         Grid.SetColumn(gainPanel, 0);
         Grid.SetRowSpan(gainPanel, 2);
         _root.Children.Add(gainPanel);
