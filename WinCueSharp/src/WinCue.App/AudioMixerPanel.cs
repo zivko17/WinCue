@@ -75,10 +75,11 @@ public sealed class AudioMixerPanel : ContentControl
     private readonly TextBlock _emptyHint;
     private readonly Dictionary<int, CueStrip> _cueStrips = new();
 
-    /// <summary>Canales que el operador abrió A MANO estando parados. Sin
-    /// recordarlo, la siguiente vuelta de sincronía volvería a plegar el que
-    /// acaba de abrir.</summary>
-    private readonly HashSet<int> _abiertosAMano = new();
+    /// <summary>Decisión EXPLÍCITA del operador sobre un canal (true = plegado).
+    /// Manda sobre el automatismo: sin recordarla, la siguiente vuelta de
+    /// sincronía deshacía lo que acababa de hacer con el ratón — abrir un canal
+    /// parado o plegar uno que suena y no quiere mirar.</summary>
+    private readonly Dictionary<int, bool> _plegadoAMano = new();
 
     /// <summary>Claves reservadas del board para los dos strips fijos. Van en
     /// negativo: los ids de cue reales nunca lo son.</summary>
@@ -314,12 +315,15 @@ public sealed class AudioMixerPanel : ContentControl
             // único en solo, sin esto los demás se quedan mudos para siempre
             // por un solo que ya no existe.
             _board.Remove(id);
-            _abiertosAMano.Remove(id);
+            _plegadoAMano.Remove(id);
         }
 
-        // PLEGADO: abierto si suena, o si el operador lo abrió a mano.
+        // PLEGADO: manda lo que haya dicho el operador; si no ha dicho nada,
+        // abierto el que suena y plegado el resto.
         foreach (var (id, strip) in _cueStrips)
-            strip.SetCollapsed(!sonando.ContainsKey(id) && !_abiertosAMano.Contains(id));
+            strip.SetCollapsed(_plegadoAMano.TryGetValue(id, out bool quiere)
+                ? quiere
+                : !sonando.ContainsKey(id));
 
         _emptyHint.Visibility = _cueStrips.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         // Entrar o salir de la lista de activos habilita o deshabilita los
@@ -346,14 +350,11 @@ public sealed class AudioMixerPanel : ContentControl
         s.EnableCollapse($"{row.Number} · {row.Name}", Theme.Solid(Theme.TextSecondary));
         s.CollapseToggled = st =>
         {
-            // Abrir a mano es una decisión del operador y se RESPETA hasta que
-            // la deshaga: sin recordarla, la siguiente vuelta de sincronía
-            // volvería a plegar el canal que acaba de abrir.
-            if (st.IsCollapsed)
-                _abiertosAMano.Add(st.Key);
-            else
-                _abiertosAMano.Remove(st.Key);
-            st.SetCollapsed(!st.IsCollapsed);
+            // La decisión se RECUERDA: sin esto, la siguiente vuelta de
+            // sincronía deshacía el clic que acaba de dar.
+            bool quiere = !st.IsCollapsed;
+            _plegadoAMano[st.Key] = quiere;
+            st.SetCollapsed(quiere);
         };
         // El alta reparte el solo sola: si hay uno puesto, este nace mudo.
         _board.Add(row.Id, (int)Math.Round((resolveCue(row.Id)?.Volume ?? 1.0) * 100.0));
@@ -497,6 +498,9 @@ public sealed class AudioMixerPanel : ContentControl
         /// <summary>El operador pidió plegar o desplegar este strip.</summary>
         public Action<Strip>? CollapseToggled;
 
+        /// <summary>Tirador de plegado, en la fila del rótulo.</summary>
+        public Button CollapseBtn = null!;
+
         /// <summary>Da de alta la vista PLEGADA: una tira con el nombre de pie.
         /// Un cue parado no tiene nivel ni VU que enseñar, así que plegado no se
         /// pierde información — se gana sitio para los que sí suenan.</summary>
@@ -526,6 +530,12 @@ public sealed class AudioMixerPanel : ContentControl
             };
             _collapsed.MouseLeftButtonUp += (_, _) => CollapseToggled?.Invoke(this);
             ContentHost.Children.Add(_collapsed);
+
+            // El tirador aparece SOLO en los strips que se pliegan (los de cue):
+            // el MASTER y el CUE no se pliegan y no deben enseñar un botón que
+            // no hace nada.
+            CollapseBtn.Visibility = Visibility.Visible;
+            CollapseBtn.Click += (_, _) => CollapseToggled?.Invoke(this);
         }
 
         /// <summary>Pliega o despliega. Sin EnableCollapse no hace nada: el
@@ -535,6 +545,10 @@ public sealed class AudioMixerPanel : ContentControl
             if (_collapsed is null || collapsed == IsCollapsed)
                 return;
             IsCollapsed = collapsed;
+            CollapseBtn.Content = collapsed ? "▶" : "◀";
+            CollapseBtn.ToolTip = collapsed
+                ? Loc.T("Desplegar este canal", "Expand this channel")
+                : Loc.T("Plegar este canal", "Collapse this channel");
             FullContent.Visibility = collapsed ? Visibility.Collapsed : Visibility.Visible;
             _collapsed.Visibility = collapsed ? Visibility.Visible : Visibility.Collapsed;
             Root.Width = collapsed ? UiMetrics.StripCollapsedWidth : UiMetrics.StripWidth;
@@ -583,7 +597,27 @@ public sealed class AudioMixerPanel : ContentControl
                 LineHeight = UiMetrics.StripTitleLineHeight,
                 LineStackingStrategy = LineStackingStrategy.BlockLineHeight,
             };
-            grid.Children.Add(TitleText);
+            // El rótulo va CENTRADO y el tirador de plegado a su derecha, en la
+            // misma fila: el clic en el nombre sigue llevando a los ajustes de
+            // audio del cue (que es lo que se espera de un nombre) y plegar
+            // tiene su propio botón, sin que un mismo clic haga dos cosas.
+            var titleRow = new Grid();
+            titleRow.Children.Add(TitleText);
+            CollapseBtn = new Button
+            {
+                Width = 16, Height = 16, Padding = new Thickness(0),
+                FontSize = 9, FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Right,
+                VerticalAlignment = VerticalAlignment.Top,
+                Background = Theme.ButtonBgBrush,
+                Foreground = Theme.TextDimBrush,
+                BorderThickness = new Thickness(0),
+                Visibility = Visibility.Collapsed,   // solo los strips de cue
+                Content = "◀",
+                ToolTip = Loc.T("Plegar este canal", "Collapse this channel"),
+            };
+            titleRow.Children.Add(CollapseBtn);
+            grid.Children.Add(titleRow);
 
             // LECTURA EN dB ARRIBA, justo bajo el rótulo: es el dato que se
             // consulta de un vistazo antes de tocar el fader, y abajo competía

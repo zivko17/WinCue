@@ -184,6 +184,7 @@ public sealed class LiveMonitorControl : Border
         _currentPath = "";
         _lastElapsed = -1;
         _cachedDuration = 0.0;
+        _durationAsked = false;
         _pauseState = null;
         try { _player?.Command("stop"); } catch (Exception) { }
     }
@@ -203,6 +204,8 @@ public sealed class LiveMonitorControl : Border
             _currentPath = path;
             _lastElapsed = -1;
             _cachedDuration = 0.0;
+            _durationAsked = false;
+        _durationAsked = false;
             _pauseState = null;
             try
             {
@@ -243,6 +246,8 @@ public sealed class LiveMonitorControl : Border
         {
             _currentPath = path;
             _cachedDuration = 0.0;
+            _durationAsked = false;
+        _durationAsked = false;
             _pauseState = null;
             try
             {
@@ -311,36 +316,53 @@ public sealed class LiveMonitorControl : Border
         catch (Exception) { }
     }
 
-    /// <summary>true si el visor está pausado (o no hay nada cargado).</summary>
-    public bool PreviewIsPaused => _pauseState ?? true;
+    /// <summary>true si el visor está pausado (o no hay nada cargado).
+    /// Propiedad OBSERVADA: no consulta al core.</summary>
+    public bool PreviewIsPaused =>
+        _player is null || _currentPath.Length == 0 || (_pauseState ?? true);
 
-    /// <summary>Segundo por el que va el visor, o 0 si no hay nada.</summary>
+    /// <summary>Segundo por el que va el visor, o 0 si no hay nada.
+    ///
+    /// OBSERVADA (push de mpv) + extrapolada con reloj de pared, NUNCA
+    /// consultada al core. La primera versión de esto preguntaba «time-pos» de
+    /// forma síncrona ocho veces por segundo DESDE EL HILO DE UI: con el core
+    /// ocupado la llamada se atasca y bloquea la interfaz — la app llegaba a
+    /// arrancar sin pintar la ventana. Está avisado dos métodos más abajo, en
+    /// SyncClock, y aun así caí.</summary>
     public double PreviewPosition
     {
         get
         {
             if (_player is null || _currentPath.Length == 0)
                 return 0.0;
-            try { return _player.GetPropertyDouble("time-pos") ?? 0.0; }
-            catch (Exception) { return 0.0; }
+            return _player.ObservedTimePosSmooth() ?? 0.0;
         }
     }
 
-    /// <summary>Duración del archivo cargado (0 = aún no se sabe).</summary>
+    /// <summary>Duración del archivo cargado (0 = aún no se sabe).
+    ///
+    /// Se cachea POR ARCHIVO y se pide UNA vez, no en cada tic: es el único
+    /// dato que no llega por push, y consultarlo en bucle era la otra mitad del
+    /// bloqueo.</summary>
     public double PreviewDuration
     {
         get
         {
             if (_player is null || _currentPath.Length == 0)
                 return 0.0;
-            if (_cachedDuration <= 0.0)
+            if (_cachedDuration <= 0.0 && !_durationAsked)
             {
+                _durationAsked = true;   // una sola vez por archivo
                 try { _cachedDuration = _player.GetPropertyDouble("duration") ?? 0.0; }
                 catch (Exception) { return 0.0; }
             }
             return _cachedDuration;
         }
     }
+
+    /// <summary>Ya se preguntó la duración de ESTE archivo (se pregunta una vez;
+    /// se rearma al cargar otro).</summary>
+    private bool _durationAsked;
 
     /// <summary>Salta a un segundo SIN pausar: es el arrastre de la barra de
     /// progreso, que tiene que poder usarse con el visor en marcha. Scrub()

@@ -727,22 +727,22 @@ public partial class MainWindow : Window, IShowView
         var row = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
         DockPanel.SetDock(vu, Dock.Right);
         row.Children.Add(vu);
-        if (transport is not null)
-        {
-            // La barra va abajo del TODO, por debajo del VU: si se metiera
-            // dentro del bloque monitor+VU, el VU se estiraría también sobre
-            // ella y dejaría de medir el alto del vídeo.
-            DockPanel.SetDock(transport, Dock.Bottom);
-            var stack = new DockPanel();
-            stack.Children.Add(row);
-            DockPanel.SetDock(row, Dock.Top);
-            stack.Children.Add(transport);
-            var outer = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
-            outer.Children.Add(stack);
-            row.Margin = new Thickness(0);
-            return outer;
-        }
-        return row;
+        row.Children.Add(monitor);
+        if (transport is null)
+            return row;
+
+        // La barra va POR DEBAJO del bloque monitor+VU: metida dentro, el VU se
+        // estiraría también sobre ella y dejaría de medir el alto del vídeo.
+        //
+        // OJO al orden: el monitor se añade a `row` ARRIBA, antes de esta rama.
+        // La primera versión hacía el return aquí dentro sin haberlo añadido, y
+        // el PVW se quedaba fuera del árbol visual — invisible y sin cargar.
+        row.Margin = new Thickness(0);
+        var outer = new DockPanel { Margin = new Thickness(0, 0, 0, 6) };
+        DockPanel.SetDock(transport, Dock.Bottom);
+        outer.Children.Add(transport);
+        outer.Children.Add(row);
+        return outer;
     }
 
     public void UpdateVuMeter(float left, float right)
