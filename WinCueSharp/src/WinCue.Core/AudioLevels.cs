@@ -125,4 +125,41 @@ public static class AudioLevels
     /// <summary>Texto de una ganancia en dB, con el −∞ del silencio.</summary>
     public static string DbLabel(double gain) =>
         gain <= 0.0001 ? "−∞ dB" : $"{ToDb(gain):+0.0;-0.0} dB";
+
+    /// <summary>Lee unos dB ESCRITOS A MANO y los devuelve como ganancia.
+    ///
+    /// Se traga lo que de verdad teclea una persona con prisa: con «dB» o sin
+    /// él, con coma o con punto (da igual la configuración regional), con signo
+    /// o sin él, y «-inf» / «-∞» para el silencio. Devuelve null si no hay
+    /// manera — quien llama deja el valor como estaba en vez de inventarse uno.
+    /// El resultado viene ya recortado al rango del fader.</summary>
+    public static double? ParseDb(string? text)
+    {
+        if (string.IsNullOrWhiteSpace(text))
+            return null;
+        string s = text.Trim();
+        // Se descarta lo que vaya entre paréntesis: el inspector muestra
+        // «+0,0 dB (100%)» y tiene que poder releer su PROPIO texto sin que el
+        // valor cambie solo por entrar y salir del campo.
+        int par = s.IndexOf('(', StringComparison.Ordinal);
+        if (par >= 0)
+            s = s[..par];
+        s = s.Replace("dB", "", StringComparison.OrdinalIgnoreCase).Trim();
+        if (s.Length == 0)
+            return null;
+        // Silencio, escrito de las formas en que se escribe
+        if (s is "-∞" or "−∞" or "-inf" or "-Inf" or "-INF" or "∞" or "inf")
+            return 0.0;
+        // La coma y el punto valen los dos: se normaliza a punto y se lee con
+        // cultura invariante, para que no dependa del Windows de cada uno.
+        s = s.Replace(',', '.').Replace("−", "-", StringComparison.Ordinal);
+        if (!double.TryParse(s, System.Globalization.NumberStyles.Float,
+                             System.Globalization.CultureInfo.InvariantCulture, out double db))
+            return null;
+        if (double.IsNaN(db) || double.IsInfinity(db))
+            return db < 0 ? 0.0 : MaxGain;
+        if (db <= MinGainDb)
+            return 0.0;
+        return FromDb(Math.Min(db, MaxGainDb));
+    }
 }

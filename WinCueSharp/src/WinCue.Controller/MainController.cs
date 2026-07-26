@@ -530,21 +530,24 @@ public class MainController
         _audio.Play(AuditionCueId, cue.FilePath, new AudioPlayParams(
             Volume: cue.Volume * AuditionTrim, TrimStart: cue.TrimStart, TrimEnd: cue.TrimEnd,
             OutputDevice: _settings.Get("audition_device_name", ""),
-            Eq: EqFor(cue)));
+            Eq: EqFor(cue),
+            // FUERA DEL MASTER: la preescucha es del técnico, no de la sala.
+            // Sin esto, bajar el master bajaba también los cascos.
+            BypassMaster: true));
         _view.FlashStatus(Loc.T($"🎧 Audición: {cue.Name}", $"🎧 Audition: {cue.Name}"));
     }
 
     /// <summary>Trim del fader de audición (0..1) del panel Audio: se aplica
     /// SOBRE el volumen del cue auditado (efectivo = cue × trim).</summary>
     private double AuditionTrim =>
-        Math.Clamp(_settings.Get("audition_volume", 100) / 100.0, 0.0, 1.0);
+        Math.Clamp(_settings.Get("audition_volume", 100) / 100.0, 0.0, AudioLevels.MaxGain);
 
     /// <summary>Fader de audición del panel Audio (0-100). Se aplica EN VIVO
     /// si hay una audición sonando; persist=true además guarda en settings
     /// (el panel lo pide con debounce al final del arrastre).</summary>
     public void OnAuditionVolume(int value, bool persist = true)
     {
-        value = Math.Clamp(value, 0, 100);
+        value = Math.Clamp(value, 0, (int)Math.Round(AudioLevels.MaxGain * 100.0));
         if (persist)
             _settings.Set("audition_volume", value);
         if (!_audio.IsPlaying(AuditionCueId))
@@ -689,10 +692,12 @@ public class MainController
         }
     }
 
-    /// <summary>Volumen master global (0-100) desde el slider del top bar.</summary>
+    /// <summary>Volumen master global en GANANCIA POR CIENTO (100 = 0 dB, hasta
+    /// +10 dB). El tope estaba en la unidad y recortaba en silencio todo lo que
+    /// el fader dejaba subir por encima de 0 dB.</summary>
     public void OnMasterVolume(int value)
     {
-        double m = Math.Clamp(value / 100.0, 0.0, 1.0);
+        double m = Math.Clamp(value / 100.0, 0.0, AudioLevels.MaxGain);
         _audio.SetMasterVolume(m);
         _video.SetMasterVolume(m);
     }

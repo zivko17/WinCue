@@ -16,6 +16,7 @@ using System.Windows;
 using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
+using WinCue.Controller;
 using WinCue.Core;
 
 namespace WinCue.App;
@@ -43,6 +44,50 @@ public sealed class InspectorPanel : ContentControl
     public Func<int, double?>? CrossfadeHeadroomProvider;
 
     private readonly EqEditorControl _eqEditor = new();
+
+    /// <summary>El MISMO estado de silencio/solo que la mesa (lo inyecta
+    /// MainWindow desde AudioMixerPanel.Board). Los botones de las dos pestañas
+    /// son los mismos botones, no dos copias que mantener de acuerdo.</summary>
+    public MuteSoloBoard? MuteSolo;
+
+    /// <summary>Avisa a la mesa de que repinte sus strips tras tocar un botón
+    /// desde aquí.</summary>
+    public Action? MuteSoloChanged;
+
+    private Button _muteBtn = null!;
+    private Button _soloBtn = null!;
+
+    /// <summary>Botón de la botonera de niveles, con la palabra entera.</summary>
+    private static Button LevelButton(string text, string tip) => new()
+    {
+        Content = text,
+        Width = UiMetrics.StripButtonWidth, Height = UiMetrics.StripButtonHeight,
+        ToolTip = tip,
+        FontSize = 11, FontWeight = FontWeights.Bold,
+        Margin = new Thickness(2, 0, 2, 0),
+        Background = Theme.ButtonBgBrush,
+        Foreground = Theme.TextPrimaryBrush,
+    };
+
+    /// <summary>Pone los botones al día con lo que dice el board. Deshabilitados
+    /// si el cue no está sonando: sin strip vivo no hay nada que silenciar, y un
+    /// botón que se deja pulsar sin efecto es peor que uno apagado.</summary>
+    private void RefreshMuteSolo()
+    {
+        bool live = _cue is not null && MuteSolo?.Knows(_cue.Id) == true;
+        _muteBtn.IsEnabled = live;
+        _soloBtn.IsEnabled = live;
+
+        bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
+        bool soloed = live && MuteSolo!.IsSoloed(_cue!.Id);
+        _muteBtn.Background = muted ? Theme.Solid(Theme.Pgm) : Theme.ButtonBgBrush;
+        _muteBtn.Foreground = muted ? Brushes.Black : Theme.TextPrimaryBrush;
+        _soloBtn.Background = soloed ? Theme.Solid(Theme.Standby) : Theme.ButtonBgBrush;
+        _soloBtn.Foreground = soloed ? Brushes.Black : Theme.TextPrimaryBrush;
+    }
+
+    /// <summary>La mesa cambió de estado (o entró/salió un cue): repintar.</summary>
+    public void RefreshMuteSoloButtons() => RefreshMuteSolo();
 
     private readonly TabControl _tabs = new()
     {
@@ -983,22 +1028,68 @@ public sealed class InspectorPanel : ContentControl
             HorizontalAlignment = HorizontalAlignment.Center,
             Margin = new Thickness(0, 4, 0, 0),
         };
-        faderCol.Children.Add(slider);
+        // ESCALA + FADER, como en la mesa. Un fader con escala en el mixer y el
+        // mismo volumen sin ella aquí se lee como si midieran cosas distintas.
+        var faderRow = new StackPanel
+        { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        faderRow.Children.Add(new FaderScaleControl
+        { Width = UiMetrics.FaderScaleWidth, Height = UiMetrics.FaderHeight, Margin = new Thickness(0, 4, 0, 0) });
+        faderRow.Children.Add(slider);
+        faderCol.Children.Add(faderRow);
 
         // La lectura va DEBAJO del fader, como en el mixer y en el GAIN del EQ.
         // Antes vivía en la columna de la derecha: el mismo dato en tres sitios
         // distintos según la pestaña obliga a buscarlo cada vez.
-        var label = new TextBlock
+        // EDITABLE: se teclean los dB, igual que en la mesa. Sin fondo ni borde
+        // propios —el marco lo pone el Border de fuera—, así que se ve igual que
+        // cuando era una etiqueta.
+        var label = new TextBox
         {
             FontFamily = new FontFamily("Consolas"),
             FontSize = 12,
             Foreground = Theme.GoBrush,
+            Background = Brushes.Transparent,
+            BorderThickness = new Thickness(0),
+            CaretBrush = Theme.GoBrush,
+            Padding = new Thickness(0),
+            ToolTip = Loc.T("Escribe los dB y pulsa Intro",
+                            "Type the dB value and press Enter"),
             // Ancho FIJO: era esto lo que movía medio panel al subir el volumen
             // — el texto crecía («+0,0 dB (100%)» → «+12,0 dB (400%)») y
             // empujaba a todo lo que tenía al lado.
             Width = UiMetrics.DbReadoutWideWidth,
             TextAlignment = TextAlignment.Center,
         };
+        void CommitTypedVolume()
+        {
+            if (AudioLevels.ParseDb(label.Text) is not double gain)
+            {
+                // Ilegible: se repone lo que había. Un texto que no se entiende
+                // no puede acabar en silencio, que es el peor sitio al que caer.
+                label.Text = VolumeLabel(
+                    AudioLevels.PositionToGain(slider.Value / posSteps));
+                return;
+            }
+            slider.Value = AudioLevels.GainToPosition(gain) * posSteps;
+        }
+        label.KeyDown += (_, e) =>
+        {
+            if (e.Key == Key.Enter)
+            {
+                CommitTypedVolume();
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+            else if (e.Key == Key.Escape)
+            {
+                label.Text = VolumeLabel(
+                    AudioLevels.PositionToGain(slider.Value / posSteps));
+                Keyboard.ClearFocus();
+                e.Handled = true;
+            }
+        };
+        label.LostFocus += (_, _) => CommitTypedVolume();
+        label.GotKeyboardFocus += (_, _) => label.SelectAll();
         faderCol.Children.Add(new Border
         {
             Background = Theme.Solid(Theme.SunkenBg),
@@ -1010,6 +1101,39 @@ public sealed class InspectorPanel : ContentControl
             HorizontalAlignment = HorizontalAlignment.Center,
             Child = label,
         });
+
+        // BOTONERA, la misma que en la mesa y sobre el MISMO estado: no son dos
+        // juegos de botones que haya que mantener de acuerdo, es el mismo board.
+        // Solo valen con el cue SONANDO —es cuando existe su strip—, así que
+        // fuera de eso van deshabilitados en vez de mentir.
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        _muteBtn = LevelButton("MUTE", Loc.T("Silenciar este cue", "Mute this cue"));
+        _soloBtn = LevelButton("SOLO", Loc.T("Escuchar solo este cue", "Solo this cue"));
+        btnRow.Children.Add(_muteBtn);
+        btnRow.Children.Add(_soloBtn);
+        faderCol.Children.Add(btnRow);
+
+        _muteBtn.Click += (_, _) =>
+        {
+            if (_cue is null) return;
+            MuteSolo?.ToggleMute(_cue.Id);
+            MuteSoloChanged?.Invoke();
+            RefreshMuteSolo();
+        };
+        _soloBtn.Click += (_, _) =>
+        {
+            if (_cue is null) return;
+            MuteSolo?.SetSolo(_cue.Id, !(MuteSolo?.IsSoloed(_cue.Id) ?? false));
+            MuteSoloChanged?.Invoke();
+            RefreshMuteSolo();
+        };
+        _loaders["__mute_solo"] = _ => RefreshMuteSolo();
+
         mixer.Children.Add(faderCol);
 
         var vuCol = new StackPanel { Margin = new Thickness(12, 0, 0, 0) };
@@ -1021,7 +1145,10 @@ public sealed class InspectorPanel : ContentControl
             Foreground = Theme.TextDimBrush,
             HorizontalAlignment = HorizontalAlignment.Center,
         });
+        // Mismo alto que el fader, como en la mesa: dos medidores de la misma
+        // señal con escalas de distinto largo se leen como una avería.
         _levelVu.Margin = new Thickness(0, 4, 0, 0);
+        _levelVu.Height = UiMetrics.FaderHeight;
         vuCol.Children.Add(_levelVu);
         mixer.Children.Add(vuCol);
 
@@ -1031,8 +1158,9 @@ public sealed class InspectorPanel : ContentControl
         var infoCol = new StackPanel { Margin = new Thickness(12, 4, 0, 0) };
         mixer.Children.Add(infoCol);
 
-        slider.ToolTip = Loc.T("Volumen del cue: en vivo si está sonando.",
-                               "Cue volume: live if it is playing.");
+        slider.ToolTip = Loc.T(
+            "Volumen del cue: en vivo si está sonando.\nDoble clic: volver a 0 dB.",
+            "Cue volume: live if it is playing.\nDouble-click: back to 0 dB.");
         _levelVu.ToolTip = Loc.T(
             "VU real de ESTE cue (cues de AUDIO y vídeos con AUDIO ESPEJO por el rack nativo).",
             "THIS cue's real VU (AUDIO cues and videos whose MIRRORED AUDIO goes through the native rack).");
@@ -1042,6 +1170,14 @@ public sealed class InspectorPanel : ContentControl
             double v = AudioLevels.PositionToGain(e.NewValue / posSteps);
             label.Text = VolumeLabel(v);
             Commit("volume", v);   // en vivo: el controlador lo aplica al motor
+        };
+        // DOBLE CLIC → 0 dB, igual que en los faders del mixer. Es el mismo
+        // volumen con la misma ley: que el gesto funcionara solo en un sitio
+        // sería peor que no tenerlo, porque enseña a no fiarse de él.
+        slider.MouseDoubleClick += (_, e) =>
+        {
+            slider.Value = AudioLevels.GainToPosition(1.0) * posSteps;
+            e.Handled = true;
         };
         _loaders["volume"] = c =>
         {

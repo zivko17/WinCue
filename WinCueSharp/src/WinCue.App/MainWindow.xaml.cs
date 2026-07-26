@@ -123,6 +123,14 @@ public partial class MainWindow : Window, IShowView
             BottomTabs.SelectedIndex = 1;     // pestaña del inspector
             Inspector.ShowAudioTab();
         };
+        // MISMO estado de silencio/solo en la mesa y en el inspector: los
+        // botones de las dos pestañas son los mismos botones. Cada lado avisa
+        // al otro para repintar, porque un solo cambia el aspecto de strips que
+        // no son el pulsado.
+        Inspector.MuteSolo = Mixer.Board;
+        Inspector.MuteSoloChanged = () => Mixer.RefreshStripButtons();
+        Mixer.StripsRepainted = () => Inspector.RefreshMuteSoloButtons();
+
         Mixer.SetMasterFader(_settings.Get("master_volume", 100));
         Mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
         UpdateMixerDeviceInfo();

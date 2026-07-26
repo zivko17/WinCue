@@ -797,7 +797,11 @@ public sealed class AudioEngine : IAudioEngine, IDisposable
         var provider = new CueSampleProvider(
             cueId, source,
             volume: p.Volume, fadeIn: p.FadeIn, fadeOut: p.FadeOut,
-            loop: p.Loop, playCount: p.PlayCount, eq: p.Eq);
+            loop: p.Loop, playCount: p.PlayCount, eq: p.Eq)
+        {
+            // La preescucha no pasa por el master (ver AudioPlayParams).
+            BypassMaster = p.BypassMaster,
+        };
 #pragma warning restore CA2000
         provider.SetMaster(_master);
         provider.LatencyMeasured += ms => Post(() => LatencyReport?.Invoke(cueId, ms));

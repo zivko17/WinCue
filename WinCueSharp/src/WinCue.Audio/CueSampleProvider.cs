@@ -62,6 +62,10 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
     /// <summary>Multiplicador master global (lo fija el AudioEngine).</summary>
     private volatile float _master = 1.0f;
 
+    /// <summary>Este flujo NO pasa por el fader master: es la PREESCUCHA, que
+    /// va a los cascos del técnico y no a la sala. Se fija al crearlo.</summary>
+    public bool BypassMaster { get; init; }
+
     // ── EQ paramétrica por clip + analizador (RTA) ─────────────────────
     private readonly EqChain _eq;
     private const int FftSize = 2048;
@@ -215,8 +219,17 @@ public sealed class CueSampleProvider : ISampleProvider, IDisposable
     public bool IsPaused => _paused;
 
     /// <summary>Volumen master global (multiplicador aplicado en el hilo RT).</summary>
-    public void SetMaster(float master) =>
+    /// <summary>Ganancia del MASTER. En un flujo marcado BypassMaster —la
+    /// PREESCUCHA— no hace nada: ese bus es del técnico, no de la sala, y el
+    /// fader master no puede tocarlo. El motor sigue llamando a esto para todos
+    /// los flujos; es aquí donde se ignora, así que no hay ninguna lista de
+    /// excepciones que mantener al día en el resto del motor.</summary>
+    public void SetMaster(float master)
+    {
+        if (BypassMaster)
+            return;
         _master = Math.Clamp(master, 0.0f, (float)AudioLevels.MaxGain);
+    }
 
     /// <summary>Reconfigura la EQ del clip en vivo (main thread).</summary>
     public void SetEq(WinCue.Core.AudioEqParams? eq) => _eq.Configure(eq);

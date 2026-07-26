@@ -79,7 +79,10 @@ public sealed class EqEditorControl : ContentControl
         // gráficas quedan a altura completa. Fader de clip al principio.
         //   [GANANCIA] [params EQ][gráfica EQ] [params COMP][gráfica COMP]
         _root = new Grid { Margin = new Thickness(10, 6, 10, 8) };
-        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(74) });
+        // 96 y no 74: la lectura en dB va enmarcada y con ancho fijo
+        // (DbReadoutWidth = 74) más su marco y su margen. En 74 se salía de la
+        // columna y quedaba recortada contra la gráfica de la EQ.
+        _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
         _root.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
@@ -87,25 +90,37 @@ public sealed class EqEditorControl : ContentControl
         _root.RowDefinitions.Add(new RowDefinition());
 
         // ── Fader de ganancia del clip (dB) ────────────────────────────
-        var gainPanel = new DockPanel { Margin = new Thickness(0, 0, 10, 0) };
+        // Columna con el MISMO reparto que la de VOL del inspector, que está
+        // justo al lado: rótulo, fader, lectura DEBAJO. Antes era un DockPanel
+        // con la lectura anclada abajo y ocupando las dos filas del grid, así
+        // que la cifra se iba al fondo del panel —bien por debajo del final del
+        // fader— y no cuadraba con la de VOL, a dos dedos de distancia.
+        var gainPanel = new StackPanel
+        {
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
         var gainTitle = new TextBlock
         {
             Text = Loc.T("GANANCIA", "GAIN"),
-            FontSize = 9,
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
             Foreground = new SolidColorBrush(Theme.TextDim),
             HorizontalAlignment = HorizontalAlignment.Center,
         };
-        DockPanel.SetDock(gainTitle, Dock.Top);
         gainPanel.Children.Add(gainTitle);
         _gainLabel = new TextBlock
         {
             Text = "0.0 dB",
             FontFamily = new FontFamily("Consolas"),
+            FontSize = 12,
             Foreground = new SolidColorBrush(Theme.Standby),
-            HorizontalAlignment = HorizontalAlignment.Center,
+            // Ancho FIJO y centrado, como todas las lecturas de la consola: la
+            // cifra cambia de ancho al mover el fader y sin reservarlo arrastra
+            // la columna.
+            Width = UiMetrics.DbReadoutWidth,
+            TextAlignment = TextAlignment.Center,
         };
-        DockPanel.SetDock(_gainLabel, Dock.Bottom);
-        gainPanel.Children.Add(_gainLabel);
         _gain = new Slider
         {
             Orientation = Orientation.Vertical,
@@ -119,6 +134,9 @@ public sealed class EqEditorControl : ContentControl
             Height = UiMetrics.FaderHeight,
             VerticalAlignment = VerticalAlignment.Top,
             HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 0),
+            ToolTip = Loc.T("Doble clic: volver a 0 dB",
+                            "Double-click: back to 0 dB"),
         };
         _gain.ValueChanged += (_, _) =>
         {
@@ -127,8 +145,24 @@ public sealed class EqEditorControl : ContentControl
                 Commit?.Invoke("gain_db", Math.Round(_gain.Value, 1));
             _canvas.InvalidateVisual();
         };
-        _gain.MouseDoubleClick += (_, _) => _gain.Value = 0.0;   // reset rápido
+        _gain.MouseDoubleClick += (_, e) =>
+        {
+            _gain.Value = 0.0;   // reset rápido, como los faders de volumen
+            e.Handled = true;
+        };
         gainPanel.Children.Add(_gain);
+        // La lectura, DEBAJO del fader y enmarcada igual que las demás.
+        gainPanel.Children.Add(new Border
+        {
+            Background = Theme.Solid(Theme.SunkenBg),
+            BorderBrush = Theme.Solid(Theme.Divider),
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 6, 0, 0),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Child = _gainLabel,
+        });
         Grid.SetColumn(gainPanel, 0);
         Grid.SetRowSpan(gainPanel, 2);
         _root.Children.Add(gainPanel);

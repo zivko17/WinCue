@@ -46,6 +46,19 @@ public static class UiMetrics
     /// <summary>Ancho de la columna de la escala en dB, al costado del fader.</summary>
     public const double FaderScaleWidth = 30;
 
+    /// <summary>Botón MUTE de los strips SIN solo (MASTER y AUDICIÓN). Ocupa
+    /// casi el ancho del strip y lleva la palabra entera: sin un segundo botón
+    /// con el que repartirse la fila, no hay motivo para encogerlo, y un mute
+    /// grande es más difícil de fallar con la mano en directo.</summary>
+    public const double WideMuteWidth = 104;
+    public const double WideMuteHeight = 26;
+
+    /// <summary>Botones MUTE/SOLO de un strip de CUE, que se reparten el ancho.
+    /// Llevan la palabra entera, no la inicial: una «M» de 11 px en un botón de
+    /// 26 no se lee, y un botón que hay que adivinar no se pulsa en directo.</summary>
+    public const double StripButtonWidth = 54;
+    public const double StripButtonHeight = 24;
+
     /// <summary>Ancho de un strip del mixer: escala + fader + dos VU + aire.</summary>
     public const double StripWidth = 140;
 

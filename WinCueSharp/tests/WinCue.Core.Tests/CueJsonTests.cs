@@ -360,4 +360,72 @@ public class CueJsonTests
         Assert.Equal(0.0, AudioLevels.PositionToGain(0.0));          // abajo = silencio
         Assert.Equal(AudioLevels.MaxGain, AudioLevels.PositionToGain(1.0), 4);
     }
+
+    [Theory]
+    // Lo que de verdad teclea una persona con prisa
+    [InlineData("0", 1.0)]
+    [InlineData("0 dB", 1.0)]
+    [InlineData("+6", 1.9952623)]
+    [InlineData("-6", 0.5011872)]
+    [InlineData("-6,0 dB", 0.5011872)]      // coma decimal
+    [InlineData("-6.0 dB", 0.5011872)]      // punto decimal
+    [InlineData("  -6 db  ", 0.5011872)]    // espacios y minúsculas
+    [InlineData("−6", 0.5011872)]           // el menos tipográfico de la propia lectura
+    [InlineData("-inf", 0.0)]
+    [InlineData("−∞", 0.0)]
+    [InlineData("-90", 0.0)]                // por debajo del suelo: silencio
+    [InlineData("+0,0 dB (100%)", 1.0)]     // el propio formato del inspector
+    public void DbEscritosAMano_SeLeenComoLosEscribeUnaPersona(string texto, double esperado)
+    {
+        double? g = AudioLevels.ParseDb(texto);
+        Assert.NotNull(g);
+        Assert.Equal(esperado, g!.Value, 5);
+    }
+
+    [Theory]
+    [InlineData("")]
+    [InlineData("   ")]
+    [InlineData("dB")]
+    [InlineData("hola")]
+    [InlineData("--3")]
+    [InlineData(null)]
+    public void DbIlegibles_DevuelvenNull_ParaDejarElValorComoEstaba(string? texto)
+    {
+        // Null y no 0: un texto que no se entiende NO puede convertirse en
+        // silencio, que es el peor valor posible al que caer por error.
+        Assert.Null(AudioLevels.ParseDb(texto));
+    }
+
+    [Fact]
+    public void DbEscritosPorEncimaDelTecho_SeRecortanAlTecho()
+    {
+        Assert.Equal(AudioLevels.MaxGain, AudioLevels.ParseDb("+40")!.Value, 5);
+    }
+
+    [Fact]
+    public void LoQueSeEscribe_EsLoQueSeLee_IdaYVuelta()
+    {
+        // La caja muestra DbLabel y acepta ParseDb: si no fueran inversas, el
+        // valor cambiaría solo con entrar y salir del campo sin tocar nada.
+        foreach (double db in new[] { 0.0, -5.0, -12.3, 6.0, 10.0 })
+        {
+            string texto = AudioLevels.DbLabel(AudioLevels.FromDb(db));
+            double? vuelta = AudioLevels.ParseDb(texto);
+            Assert.NotNull(vuelta);
+            Assert.Equal(db, AudioLevels.ToDb(vuelta!.Value), 3);
+        }
+    }
+
+    [Fact]
+    public void LaUnidad_CaeDondeElDobleClicLaBusca()
+    {
+        // Contrato del DOBLE CLIC del fader: llevarlo a esta posición tiene que
+        // dar 0 dB EXACTOS. Si la ley se retoca y la unidad deja de caer en un
+        // punto de la tabla, el gesto dejaría el fader «casi» en 0 dB — que en
+        // una mesa es lo mismo que dejarlo mal.
+        double pos = AudioLevels.GainToPosition(1.0);
+        Assert.Equal(0.0, AudioLevels.ToDb(AudioLevels.PositionToGain(pos)), 9);
+        // Y a tres cuartos de la subida, que es donde la busca la mano
+        Assert.Equal(0.75, pos, 3);
+    }
 }

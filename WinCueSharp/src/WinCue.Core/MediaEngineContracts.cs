@@ -56,7 +56,12 @@ public sealed record AudioPlayParams(
     string OutputDevice = "",
     AudioEqParams? Eq = null,
     double Rate = 1.0,
-    bool Streaming = false);
+    bool Streaming = false,
+    // FUERA DEL MASTER. La PREESCUCHA no va por detrás del fader master: es un
+    // bus aparte, para el técnico y no para la sala. Sin esto el master
+    // multiplicaba también la audición y los dos faders se pisaban — bajar la
+    // sala te bajaba los cascos, que es justo lo que no puede pasar.
+    bool BypassMaster = false);
 
 /// <summary>Display &amp; Geometry aplicable en vivo (subset factible sin compositor).</summary>
 public sealed record VideoGeometry(

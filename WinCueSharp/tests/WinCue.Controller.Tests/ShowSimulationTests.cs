@@ -392,6 +392,36 @@ public class ShowSimulationTests : ControllerTestBase
     }
 
     [Fact]
+    public void LaPreescucha_SaleFueraDelMaster()
+    {
+        var cues = BuildShow();
+        Controller.OnSetPlayhead(0);
+        Controller.AuditionToggle(0);
+
+        var play = Assert.Single(Audio.Plays.Where(p => p.CueId == MainController.AuditionCueId));
+        // El bus de preescucha es del técnico, no de la sala: bajar el master
+        // no puede bajarle los cascos. Sin esta marca, el motor le aplicaba la
+        // ganancia del master como a un cue cualquiera.
+        Assert.True(play.P.BypassMaster,
+            "la audición está pasando por el fader master");
+
+        // Y al revés: el fader de audición no toca el master.
+        double masterAntes = Audio.Master;
+        Controller.OnAuditionVolume(40);
+        Assert.Equal(masterAntes, Audio.Master);
+        Assert.Equal(cues.Count, Model.Count);
+    }
+
+    [Fact]
+    public void ElMaster_AceptaElRefuerzoPorEncimaDeLaUnidad()
+    {
+        // El tope estaba clavado en 1,0 y recortaba en silencio todo lo que el
+        // fader deja subir ahora por encima de 0 dB.
+        Controller.OnMasterVolume(200);
+        Assert.Equal(2.0, Audio.Master, 4);
+    }
+
+    [Fact]
     public void VolumenAlAire_LlegaAlMotorConElValorReforzado()
     {
         var cues = BuildShow();
