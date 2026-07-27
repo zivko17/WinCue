@@ -536,6 +536,30 @@ public class TransportAndChainTests : ControllerTestBase
     }
 
     [Fact]
+    public void GetProgramVideo_SigueViendoElVideoMientrasSeFunde()
+    {
+        // REGRESIÓN (Andrés, 27-jul): con FADE ALL la sala fundía bien pero el
+        // monitor PGM se iba a NEGRO en el primer fotograma. EndCue saca el cue
+        // de _running al programar el fundido, así que el monitor creía que ya
+        // no había nada en pantalla. Mientras dure la rampa, el vídeo SIGUE en
+        // pantalla y el PGM tiene que poder espejarlo.
+        var v = AddCue(CueType.Video, "clip");
+        Controller.OnGoPressed();
+        Assert.NotNull(Controller.GetProgramVideo());
+
+        Settings.Set("fade_all_seconds", 4.0);
+        Controller.OnFadeAll();
+
+        var during = Controller.GetProgramVideo();
+        Assert.NotNull(during);
+        Assert.Equal(v.Id, during!.Value.CueId);
+
+        // Y al vencer el fundido, ahí sí: negro.
+        Clock.Advance(4_100);
+        Assert.Null(Controller.GetProgramVideo());
+    }
+
+    [Fact]
     public void GetProgramVideo_ReportaLaSalidaDelCue()
     {
         // Un cue en la Salida 3 (video_output = 2): el monitor debe espejar

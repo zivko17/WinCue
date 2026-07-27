@@ -2131,11 +2131,18 @@ public class MainController
     {
         Cue? top = null;
         var topSlot = (Screen: int.MaxValue, Layer: int.MaxValue);
-        foreach (var (cid, r) in _running)
+        // Los que se están FUNDIENDO siguen EN PANTALLA aunque EndCue ya los
+        // sacara de _running: sin esto el monitor PGM se iba a negro en el
+        // primer fotograma de un FADE ALL mientras la sala aún veía la rampa
+        // entera. Mismo criterio que RefreshVideoTally.
+        foreach (int cid in _running.Keys.Concat(_videoFadingOut.Keys).Distinct())
         {
-            if (r.Kind != CueType.Video || _model.GetById(cid) is not Cue c)
+            bool fading = IsVideoFadingOut(cid);
+            if (!fading && (!_running.TryGetValue(cid, out var r) || r.Kind != CueType.Video))
                 continue;
-            if (requirePlaying && !_video.IsPlaying(cid))
+            if (_model.GetById(cid) is not Cue c || c.Type != CueType.Video)
+                continue;
+            if (requirePlaying && !fading && !_video.IsPlaying(cid))
                 continue;
             var slot = (Screen: ScreenOf(c), Layer: VideoLayerOf(c));
             if (slot.Screen < topSlot.Screen
