@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- =========================================================================
+       ProResLab — laboratorio de ProRes para el motor de vídeo propio (PASO 1).
+       A diferencia de hap-lab, aquí el DECODIFICADOR es de FFmpeg (LGPL, en
+       proceso, enlace DINÁMICO): ProRes es DCT + codificación entrópica y
+       escribirlo desde cero está descartado. Nuestro sigue siendo el motor:
+       demuxer, ring de frames, reloj, pacer y presentación GPU.
+       Proyecto paralelo: NO forma parte de la solución principal WinCueSharp.
+       ========================================================================= -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>prores-lab</AssemblyName>
+    <RootNamespace>ProResLab</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- FFmpeg.AutoGen expone punteros crudos: toda la interop es unsafe -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Los proyectos de tests y de GPU viven en subcarpetas: fuera del glob -->
+    <Compile Remove="ProResLab.Tests/**/*.cs" />
+    <Compile Remove="ProResLab.Gpu/**/*.cs" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- FFmpeg.AutoGen 8.1.0 (LGPL-3.0, wrapper GENERADO: no contiene código
+         nativo). Empareja con la ABI de FFmpeg 8.1 = las DLL LGPL que baja
+         obtener-ffmpeg-lgpl.ps1 (avcodec-62 / avutil-60 / avformat-62).
+         Se usa el modo DynamicallyLoaded: nosotros decidimos DE DÓNDE se
+         cargan las DLL (requisito del enlace dinámico LGPL). -->
+    <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <!-- Los tests ejercitan helpers internos del demuxer y del decodificador -->
+    <InternalsVisibleTo Include="ProResLab.Tests" />
+  </ItemGroup>
+
+</Project>

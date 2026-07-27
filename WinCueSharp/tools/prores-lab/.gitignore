@@ -1,0 +1,12 @@
+# Binarios nativos de FFmpeg: NO se versionan (se obtienen con
+# obtener-ffmpeg-lgpl.ps1). Lo que SÍ se versiona es la procedencia.
+ffmpeg-lgpl/bin/
+ffmpeg-lgpl/LICENSE.txt
+ffmpeg-lgpl/_extract/
+!ffmpeg-lgpl/ffmpeg-BUILD.txt
+
+# Media de benchmark: la genera generar-media.ps1 (ffmpeg del PATH)
+media/
+
+# Volcados de verificación de imagen (PSNR)
+artifacts/

@@ -1,0 +1,23 @@
+FFmpeg LGPL (shared) para el laboratorio de ProRes de WinCue
+============================================================
+
+Origen      : https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip
+Rama        : n8.1
+Descargado  : 2026-07-27 22:12:40 +02:00
+SHA256 zip  : AA7F5816B8326A6F135AB66496E0EF6AF5313308C01AA4C3CB80DFBAED781C85
+Receta CI   : https://github.com/BtbN/FFmpeg-Builds (variante 'lgpl-shared')
+
+OBLIGACIÓN LGPL: al distribuir estas DLL hay que ofrecer el fuente exacto
+de ESTA build (tarball + scripts de BtbN/FFmpeg-Builds del mismo commit) y
+permitir que el usuario las sustituya (enlace dinámico, sin firmar/sellar
+la carpeta). Verificación de que NO es GPL:
+    dotnet run --project ProResLab.csproj -c Release -- --licencia
+
+DLL incluidas:
+  avcodec-62.dll             70.875.136 bytes  840C71A812427A1DCABD71990D4DCFBE042B2137457D022CF06557A6F311A5B2
+  avdevice-62.dll             3.699.712 bytes  141A9D13269EA5BB7F6DB61357967FD7662E30FC8621A3C88BEC86555B1872BC
+  avfilter-11.dll            29.816.320 bytes  8C8B0DE891861AA138394E89350B7568B75F033FC78497331ED08888805C79B3
+  avformat-62.dll            22.070.784 bytes  233960E25AE220FF3480D798AF3FD9443EE58C41852F60905D39DA5E8D880BAA
+  avutil-60.dll               2.937.856 bytes  96B458A2F911B5C82B4E040BB790B9E4463569758E99D7CAD70BA7F40CC78F63
+  swresample-6.dll              723.968 bytes  9F73B88C36753F8A79EB8E7DB53B8F68CE07034620FB509EF605AD05E25FECC3
+  swscale-9.dll              12.570.624 bytes  5CA733581268C3EF7A365B155BFAFABE4CD205426DB78EDA91881EFAF60781C5
