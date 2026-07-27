@@ -1786,7 +1786,13 @@ public class MainController
         // pool de superficies del compositor sin slots (auditoría 05).
         _video.ReleaseFrozenSurfaces();
 
+        // Parar TODO deshace también la pausa: y con ella hay que descongelar
+        // el reloj del show. Si el flag se limpiara sin descongelar el reloj,
+        // un STOP ALL estando en pausa dejaría el tiempo de show parado para
+        // siempre y todas las cuentas del resto de la función se quedarían
+        // clavadas.
         _paused = false;
+        Clock.Resume();
         _view.UpdateTransport(false);
         _view.UpdateCountdown(null);
         _view.UpdateActiveCues(Array.Empty<ActiveCueInfo>());

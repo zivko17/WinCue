@@ -280,6 +280,29 @@ public class DerivaDelTemporizadoTests : ControllerTestBase
         }
     }
 
+    /// <summary>STOP ALL estando en pausa deshace la pausa: y con ella tiene
+    /// que descongelar el reloj. Si no, el tiempo de show se quedaría clavado
+    /// para el resto de la función.</summary>
+    [Fact]
+    public void StopAll_EnPausa_DescongelaElRelojDelShow()
+    {
+        AddCue(CueType.Audio, duration: 30.0);
+        AddCue(CueType.Audio, duration: 30.0);
+
+        Controller.OnGoPressed();
+        Controller.OnPauseToggle();
+        Assert.True(Controller.Clock.IsFrozen);
+
+        Controller.OnStopPressed();
+        Assert.False(Controller.IsPaused);
+        Assert.False(Controller.Clock.IsFrozen);
+
+        // Y el show vuelve a contar de verdad
+        Controller.OnGoPressed();
+        Clock.Advance(2_000);
+        Assert.Equal(2.0, Elapsed(), 2);
+    }
+
     /// <summary>El antirrebote del GO cuenta en tiempo de PARED: es un gesto
     /// de mano. Con el show en pausa el reloj de show se congela, y si el
     /// antirrebote leyera de ahí, un GO tras la pausa quedaría bloqueado.</summary>
