@@ -28,18 +28,35 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
 
     public string TypeText => _cue.Type.ToString().ToUpperInvariant();
 
-    /// <summary>Icono + tipo, coloreado (escaneable de reojo).</summary>
-    public string TypeLabel => _cue.Type switch
+    /// <summary>Icono del tipo. Va en su PROPIA celda de ancho fijo: pegado al
+    /// nombre en una sola cadena, el glifo se comía el hueco cuando la etiqueta
+    /// era larga y las etiquetas de tipo no alineaban entre filas.</summary>
+    public string TypeIcon => _cue.Type switch
     {
-        CueType.Audio => $"{Icons.Audio} AUDIO",
-        CueType.Video => $"{Icons.Video} {Loc.T("VÍDEO", "VIDEO")}",
-        CueType.Wait => $"{Icons.Wait} {Loc.T("ESPERA", "WAIT")}",
-        CueType.Fade => $"{Icons.Fade} {Loc.T("FUNDIDO", "FADE")}",
-        CueType.Start => $"{Icons.Start} {Loc.T("INICIAR", "START")}",
-        CueType.Stop => $"{Icons.Stop} {Loc.T("PARAR", "STOP")}",
-        CueType.Script => $"{Icons.Script} SCRIPT",
-        CueType.Memo => $"{Icons.Memo} {Loc.T("NOTA", "MEMO")}",
-        CueType.Group => $"{Icons.Group} GRUPO",
+        CueType.Audio => Icons.Audio,
+        CueType.Video => Icons.Video,
+        CueType.Wait => Icons.Wait,
+        CueType.Fade => Icons.Fade,
+        CueType.Start => Icons.Start,
+        CueType.Stop => Icons.Stop,
+        CueType.Script => Icons.Script,
+        CueType.Memo => Icons.Memo,
+        CueType.Group => Icons.Group,
+        _ => "",
+    };
+
+    /// <summary>Nombre del tipo, sin icono (escaneable de reojo).</summary>
+    public string TypeName => _cue.Type switch
+    {
+        CueType.Audio => "AUDIO",
+        CueType.Video => Loc.T("VÍDEO", "VIDEO"),
+        CueType.Wait => Loc.T("ESPERA", "WAIT"),
+        CueType.Fade => Loc.T("FUNDIDO", "FADE"),
+        CueType.Start => Loc.T("INICIAR", "START"),
+        CueType.Stop => Loc.T("PARAR", "STOP"),
+        CueType.Script => "SCRIPT",
+        CueType.Memo => Loc.T("NOTA", "MEMO"),
+        CueType.Group => Loc.T("GRUPO", "GROUP"),
         _ => TypeText,
     };
 
@@ -71,43 +88,87 @@ public sealed class CueRowViewModel : INotifyPropertyChanged
         ? $"{(_cue.Collapsed ? Icons.Collapsed : Icons.Expanded)} {_cue.Name}"
         : _cue.Name;
 
-    /// <summary>Sangría por profundidad de anidamiento en grupos (+8 px de
-    /// canalón fijo donde vive la banda del grupo).</summary>
-    public System.Windows.Thickness NameIndent => new(_model.Depth(_cue) * 18 + 8, 0, 0, 0);
+    /// <summary>Sangría de los cues que van dentro de un grupo.</summary>
+    public System.Windows.Thickness NameIndent =>
+        new(_model.Depth(_cue) * 18 + 4, 0, 0, 0);
 
-    // ── Recuadro del grupo: banda vertical continua (cabecera + hijos) ──
+    // ══════════════════════════════════════════════════════════════════
+    // RECUADRO DEL GRUPO (contorno que abraza cabecera + hijos)
+    // ══════════════════════════════════════════════════════════════════
+    // Mismo lenguaje que el timeline (TimelinePanel.SpanGeometry): color del
+    // grupo, relleno tenue debajo y marco encima. Aquí no se puede pintar de
+    // una vez —cada fila es un control aparte y la tabla está virtualizada—,
+    // así que cada fila aporta SU TRAMO del marco: la cabecera pone el lado de
+    // arriba, el último hijo el de abajo y todas ponen los laterales. Sale un
+    // rectángulo continuo que viaja con el scroll, y al plegar el grupo la
+    // cabecera se queda sola y cierra la caja entera.
+    //
+    // El marco se pinta en una CAPA SUPERPUESTA (ver MainWindow.xaml), no como
+    // borde de la fila: si ocupara sitio, las filas de grupo desplazarían sus
+    // celdas 2 px y las columnas dejarían de alinear con las filas normales.
 
-    /// <summary>El GROUP cuyo "recuadro" pinta esta fila: el propio cue si es
-    /// un grupo, o su grupo padre directo si está dentro de uno.</summary>
-    private Cue? BandGroup() => _cue.Type == CueType.Group
+    /// <summary>El GROUP al que pertenece esta fila: el propio cue si lo es, o
+    /// su grupo padre. null en filas sueltas.</summary>
+    private Cue? OwnerGroup() => _cue.Type == CueType.Group
         ? _cue
-        : _cue.ParentId is int pid ? _model.GetById(pid) : null;
+        : _cue.ParentId is int pid && _model.GetById(pid) is { Type: CueType.Group } g
+            ? g
+            : null;
 
-    /// <summary>Color de la banda: el color del grupo (si tiene) o el ámbar
-    /// de GRUPO. Transparente en filas de nivel superior sin grupo.</summary>
-    public Brush GroupBandBrush
+    /// <summary>Color del grupo: el elegido por el operador (misma paleta que
+    /// el resto de cues) o el ámbar de GRUPO si no eligió ninguno.</summary>
+    private static Color ColorOf(Cue group) =>
+        group.Color.Length > 0
+        && CueConstants.CueColors.TryGetValue(group.Color, out var hex) && hex.Length > 0
+            ? (Color)ColorConverter.ConvertFromString(hex)
+            : Theme.TypeGroup;
+
+    /// <summary>Marco del recuadro. Transparente fuera de todo grupo.</summary>
+    public Brush GroupBorderBrush =>
+        OwnerGroup() is Cue g ? Theme.Solid(Theme.Alpha(ColorOf(g), 215)) : Brushes.Transparent;
+
+    /// <summary>Relleno del recuadro: un velo del color del grupo. La cabecera
+    /// va más marcada que los hijos para que el bloque se lea de un vistazo.</summary>
+    public Brush GroupFillBrush =>
+        OwnerGroup() is Cue g
+            ? Theme.Solid(Theme.Alpha(ColorOf(g), _cue.Type == CueType.Group ? (byte)56 : (byte)24))
+            : Brushes.Transparent;
+
+    /// <summary>Tramo del marco que le toca a esta fila.</summary>
+    public System.Windows.Thickness GroupBorderThickness
     {
         get
         {
-            var g = BandGroup();
+            var g = OwnerGroup();
             if (g is null)
-                return Brushes.Transparent;
-            return g.Color.Length > 0
-                && CueConstants.CueColors.TryGetValue(g.Color, out var h) && h.Length > 0
-                ? BrushFrom(h) : Theme.StandbyBrush;
+                return default;
+            bool header = _cue.Type == CueType.Group;
+            bool last = header ? g.Collapsed : IsLastOf(g);
+            return new(GroupEdge, header ? GroupEdge : 0, GroupEdge, last ? GroupEdge : 0);
         }
     }
 
-    /// <summary>La banda se alinea con la sangría del GRUPO (la cabecera y
-    /// todos sus descendientes comparten X → corchete continuo).</summary>
-    public System.Windows.Thickness GroupBandMargin
+    /// <summary>Esquinas redondeadas arriba en la cabecera y abajo en el cierre
+    /// (mismo radio que los recuadros del timeline).</summary>
+    public System.Windows.CornerRadius GroupCornerRadius
     {
         get
         {
-            var g = BandGroup();
-            return new(g is null ? 0 : _model.Depth(g) * 18, 0, 0, 0);
+            var g = OwnerGroup();
+            if (g is null)
+                return default;
+            bool header = _cue.Type == CueType.Group;
+            bool last = header ? g.Collapsed : IsLastOf(g);
+            return new(header ? 4 : 0, header ? 4 : 0, last ? 4 : 0, last ? 4 : 0);
         }
     }
+
+    /// <summary>Grosor del marco: 2 px. En una sala a oscuras 1 px se pierde.</summary>
+    private const double GroupEdge = 2.0;
+
+    /// <summary>True si este cue es el ÚLTIMO del grupo (el que cierra la caja).</summary>
+    private bool IsLastOf(Cue group) =>
+        _model.Descendants(group.Id).LastOrDefault()?.Id == _cue.Id;
 
     /// <summary>En reposo: duración fija. Sonando: cuenta atrás (verde). En
     /// pre_wait: cuenta atrás de la espera (ámbar). El color lo da DurationBrush.</summary>

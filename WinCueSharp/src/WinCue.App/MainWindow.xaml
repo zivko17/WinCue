@@ -351,6 +351,36 @@
                     <!-- Transparente para que se vea el fondo oscuro del grid
                          (sin esto, DataGridRow cae al blanco por defecto) -->
                     <Setter Property="Background" Value="Transparent"/>
+                    <!-- Plantilla propia SOLO para el RECUADRO DEL GRUPO: la de
+                         WPF no tiene dónde colgarlo. Cada fila aporta su tramo
+                         del marco (arriba la cabecera, abajo el último hijo,
+                         laterales todas) y entre todas sale un rectángulo que
+                         abraza el grupo entero, se cierra al plegarlo y viaja
+                         con el scroll.
+                         El marco va SUPERPUESTO, no como borde de la fila: si
+                         ocupara sitio, las filas de grupo desplazarían sus
+                         celdas 2 px y las columnas dejarían de alinear. -->
+                    <Setter Property="Template">
+                        <Setter.Value>
+                            <ControlTemplate TargetType="DataGridRow">
+                                <Border Background="{TemplateBinding Background}"
+                                        SnapsToDevicePixels="True">
+                                    <Grid>
+                                        <!-- Velo del color del grupo, DEBAJO de las celdas -->
+                                        <Border Background="{Binding GroupFillBrush}"/>
+                                        <DataGridCellsPresenter
+                                            ItemsPanel="{TemplateBinding ItemsPanel}"
+                                            SnapsToDevicePixels="{TemplateBinding SnapsToDevicePixels}"/>
+                                        <!-- Marco, ENCIMA y sin robar clics -->
+                                        <Border BorderBrush="{Binding GroupBorderBrush}"
+                                                BorderThickness="{Binding GroupBorderThickness}"
+                                                CornerRadius="{Binding GroupCornerRadius}"
+                                                IsHitTestVisible="False"/>
+                                    </Grid>
+                                </Border>
+                            </ControlTemplate>
+                        </Setter.Value>
+                    </Setter>
                     <Style.Triggers>
                         <DataTrigger Binding="{Binding IsPlayhead}" Value="True">
                             <Setter Property="Background" Value="{DynamicResource PlayheadRow}"/>
@@ -391,40 +421,59 @@
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="Nº" Width="52">
+                <!-- Nº: la etiqueta de color es una PASTILLA que se ajusta al
+                     número, no un fondo que llena la celda. Antes se estiraba
+                     hasta el borde y con números de 3+ cifras se metía debajo
+                     del icono de tipo. ClipToBounds remata: nada sale de aquí,
+                     y el canalón derecho deja aire hasta la columna Tipo. -->
+                <DataGridTemplateColumn Header="Nº" Width="68">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <Border Background="{Binding LabelBrush}" CornerRadius="3"
-                                    Padding="4,1" VerticalAlignment="Center">
-                                <TextBlock Text="{Binding Number}" Foreground="{DynamicResource TextPrimary}"
-                                           VerticalAlignment="Center"/>
-                            </Border>
+                            <Grid ClipToBounds="True" Margin="0,0,8,0">
+                                <Border Background="{Binding LabelBrush}" CornerRadius="3"
+                                        Padding="5,1" HorizontalAlignment="Left"
+                                        VerticalAlignment="Center">
+                                    <TextBlock Text="{Binding Number}" Foreground="{DynamicResource TextPrimary}"
+                                               VerticalAlignment="Center"
+                                               TextTrimming="CharacterEllipsis"/>
+                                </Border>
+                            </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
-                <DataGridTemplateColumn Header="{local:Loc Es=Tipo, En=Type}" Width="88">
+                <!-- Tipo: icono en su propia casilla de ancho fijo y etiqueta
+                     detrás, así los nombres de tipo alinean entre filas y el
+                     glifo nunca se come el texto -->
+                <DataGridTemplateColumn Header="{local:Loc Es=Tipo, En=Type}" Width="92">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <TextBlock Text="{Binding TypeLabel}"
-                                       Foreground="{Binding TypeBrush}"
-                                       FontWeight="SemiBold"
-                                       VerticalAlignment="Center"/>
+                            <Grid ClipToBounds="True">
+                                <Grid.ColumnDefinitions>
+                                    <ColumnDefinition Width="18"/>
+                                    <ColumnDefinition Width="*"/>
+                                </Grid.ColumnDefinitions>
+                                <TextBlock Grid.Column="0" Text="{Binding TypeIcon}"
+                                           Foreground="{Binding TypeBrush}"
+                                           HorizontalAlignment="Center"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Grid.Column="1" Text="{Binding TypeName}"
+                                           Foreground="{Binding TypeBrush}"
+                                           FontWeight="SemiBold" Margin="3,0,0,0"
+                                           VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </Grid>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
                 <DataGridTemplateColumn Header="{local:Loc Es=Nombre, En=Name}" Width="*">
                     <DataGridTemplateColumn.CellTemplate>
                         <DataTemplate>
-                            <!-- Banda del grupo (recuadro): la cabecera del
-                                 GROUP y sus hijos comparten X → línea continua -->
-                            <Grid>
-                                <Border Width="3" HorizontalAlignment="Left"
-                                        VerticalAlignment="Stretch"
-                                        Margin="{Binding GroupBandMargin}"
-                                        Background="{Binding GroupBandBrush}"/>
-                                <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
-                                           Foreground="{DynamicResource TextPrimary}" VerticalAlignment="Center"/>
-                            </Grid>
+                            <!-- El recuadro del grupo lo pinta la FILA entera
+                                 (DataGrid.RowStyle); aquí solo la sangría -->
+                            <TextBlock Text="{Binding Name}" Margin="{Binding NameIndent}"
+                                       Foreground="{DynamicResource TextPrimary}"
+                                       VerticalAlignment="Center"
+                                       TextTrimming="CharacterEllipsis"/>
                         </DataTemplate>
                     </DataGridTemplateColumn.CellTemplate>
                 </DataGridTemplateColumn>
