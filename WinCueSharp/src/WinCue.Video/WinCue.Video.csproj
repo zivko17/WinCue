@@ -17,6 +17,18 @@
     <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
     <PackageReference Include="Vortice.Direct3D9" Version="3.6.2" />
     <PackageReference Include="Vortice.D3DCompiler" Version="3.6.2" />
+
+    <!-- Motor ProRes propio (WinCue.Video.ProRes):
+         · FFmpeg.AutoGen (MIT desde 8.x — comprobado leyendo el LICENSE.txt
+           del propio paquete, no la etiqueta de la web) — bindings generados
+           sobre las cabeceras de FFmpeg 8.1. El paquete NO trae código nativo:
+           solo el ensamblado gestionado. Las DLL nativas se cargan por ENLACE
+           DINÁMICO EXPLÍCITO desde ffmpeg-lgpl\bin (ver FFmpegLoader), que es
+           requisito de la LGPL y además impide enlazar por accidente el ffmpeg
+           GPL que suele haber en el PATH.
+           La ABI del binding debe coincidir con la de las DLL: AutoGen 8.1.x
+           ↔ avcodec-62 / avutil-60 / swresample-6. No subir uno sin el otro. -->
+    <PackageReference Include="FFmpeg.AutoGen" Version="8.1.0" />
   </ItemGroup>
 
   <ItemGroup>
