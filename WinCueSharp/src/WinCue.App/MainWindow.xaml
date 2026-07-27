@@ -69,6 +69,22 @@
                 </Setter.Value>
             </Setter>
         </Style>
+        <!-- Desplegable de flecha pegado a «Abrir» y «Guardar». Antes era un
+             botón normal de 26 px: el Padding 10,4 del estilo general dejaba
+             4 px de hueco útil y del caret solo se veía una rayita, así que
+             parecía un trozo muerto del botón principal. Aquí: sin padding,
+             fondo hundido propio, borde y un pelo de aire para que se lean
+             como DOS controles. -->
+        <Style x:Key="SplitArrow" TargetType="Button"
+               BasedOn="{StaticResource {x:Type Button}}">
+            <Setter Property="Padding" Value="0"/>
+            <Setter Property="Width" Value="24"/>
+            <Setter Property="Margin" Value="2,0,6,0"/>
+            <Setter Property="FontSize" Value="14"/>
+            <Setter Property="Background" Value="{DynamicResource SplitArrowBg}"/>
+            <Setter Property="Foreground" Value="{DynamicResource Standby}"/>
+            <Setter Property="BorderBrush" Value="{DynamicResource Border}"/>
+        </Style>
         <Style TargetType="TextBlock">
             <Setter Property="Foreground" Value="{DynamicResource TextPrimary}"/>
         </Style>
@@ -175,11 +191,15 @@
         <!-- ═══════════ TOOLBAR: lista ═══════════ -->
         <Border x:Name="ToolbarBar" DockPanel.Dock="Top" Background="{DynamicResource ToolbarBg}" Padding="8,4">
             <StackPanel Orientation="Horizontal">
-                <Button Click="OnOpenShow" Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"/>
-                <Button Click="OnRecentShows" Content="{x:Static local:Icons.Expanded}" Width="26" Margin="-2,0,3,0"
+                <Button Click="OnOpenShow" Margin="3,0,0,0"
+                        Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"/>
+                <Button Click="OnRecentShows" Style="{StaticResource SplitArrow}"
+                        Content="{x:Static local:Icons.Expanded}"
                         ToolTip="{local:Loc Es=Shows recientes, En=Recent shows}"/>
-                <Button Click="OnSaveShow" Content="{local:Loc Icon=Save, Es=Guardar, En=Save}"/>
-                <Button Click="OnSaveMenu" Content="{x:Static local:Icons.Expanded}" Width="26" Margin="-2,0,3,0"
+                <Button Click="OnSaveShow" Margin="3,0,0,0"
+                        Content="{local:Loc Icon=Save, Es=Guardar, En=Save}"/>
+                <Button Click="OnSaveMenu" Style="{StaticResource SplitArrow}"
+                        Content="{x:Static local:Icons.Expanded}"
                         ToolTip="{local:Loc Es=Más opciones de guardado, En=More save options}"/>
                 <Button x:Name="RelocateButton" Click="OnRelocateMedia"
                         Content="{local:Loc Icon=Relocate, Es=Relocalizar, En=Relocate}"
@@ -282,12 +302,24 @@
                                     </ContextMenu>
                                 </Border.ContextMenu>
                                 <DockPanel>
-                                    <Button DockPanel.Dock="Right" Content="{x:Static local:Icons.Stop}"
-                                            Width="26" Height="26" Margin="6,0,0,0"
-                                            Background="{DynamicResource StopSmallBg}" Foreground="{DynamicResource TextPrimary}"
+                                    <!-- STOP explícito: rojo con un CUADRADO
+                                         blanco dentro (símbolo universal de
+                                         parada). Antes iba el glifo de la
+                                         fuente, y el Padding 10,4 del estilo
+                                         general lo recortaba a una esquirla
+                                         que no se entendía. El cuadrado es
+                                         una figura, no un glifo: no depende
+                                         del hueco que deje el padding. -->
+                                    <Button DockPanel.Dock="Right"
+                                            Width="30" Height="30" Padding="0" Margin="8,0,0,0"
+                                            Background="{DynamicResource StopSmallBg}"
                                             BorderBrush="{DynamicResource StopSmallBorder}"
                                             ToolTip="{local:Loc Es=Detener este cue, En=Stop this cue}"
-                                            Tag="{Binding Id}" Click="OnActiveStopClick"/>
+                                            Tag="{Binding Id}" Click="OnActiveStopClick">
+                                        <Rectangle Width="11" Height="11"
+                                                   RadiusX="1.5" RadiusY="1.5"
+                                                   Fill="{DynamicResource TextBright}"/>
+                                    </Button>
                                     <StackPanel>
                                         <TextBlock Text="{Binding Title}" FontWeight="Bold"
                                                    TextTrimming="CharacterEllipsis"/>
