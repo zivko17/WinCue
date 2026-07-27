@@ -21,3 +21,6 @@ node_modules/
 
 # Worktrees de sesiones de Claude (repos embebidos)
 **/.claude/worktrees/
+
+# ZIP del paquete beta: va a GitHub Releases, no al repo (142 MB)
+WinCueSharp/WinCue-beta-*.zip
