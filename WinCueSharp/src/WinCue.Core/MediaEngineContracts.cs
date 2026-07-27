@@ -277,7 +277,12 @@ public interface IVideoEngine
     bool IsPlaying(int cueId);
     double GetDuration(int cueId);
     double GetElapsed(int cueId);
-    void ApplyGeometry(int cueId, VideoGeometry geo);
+    /// <summary>Aplica en VIVO la geometría del cue. <paramref name="scalePercent"/>
+    /// es la «Escala (%)» del modo FULL (zoom sobre el ajuste a la salida): no
+    /// vive en VideoGeometry sino en VideoPlayParams.Scale, y sin pasarla aquí
+    /// el motor seguiría usando la del GO — el fader movía el previo del
+    /// inspector pero NO la salida. null = no tocarla.</summary>
+    void ApplyGeometry(int cueId, VideoGeometry geo, double? scalePercent = null);
     void SetWindowHandleProvider(Func<nint> getWindowHandle);
 
     /// <summary>Proveedor de superficie POR (SALIDA, PISTA). Si se fija, cada

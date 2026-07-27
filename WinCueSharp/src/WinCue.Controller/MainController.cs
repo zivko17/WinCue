@@ -1185,6 +1185,10 @@ public class MainController
 
             case CueType.Video:
                 ModelState(idx, CueState.Playing);
+                // Vuelve al aire: si le quedaba un fundido de salida en curso
+                // (FADE ALL / PANIC), ese fundido ya no manda — quien pinta su
+                // superficie ahora es este GO.
+                ClearVideoFadingOut(cue.Id);
                 // La imagen de respaldo del PANIC se retira al volver el vídeo
                 _view.HideBackupSlate();
                 // Fade de entrada pendiente (con offset, lo que quede): además
@@ -1710,6 +1714,58 @@ public class MainController
     // FIN DE CUE / STOP GLOBAL
     // ==================================================================
 
+    /// <summary>Vídeos que YA salieron de <c>_running</c> pero cuya IMAGEN
+    /// sigue en pantalla FUNDIÉNDOSE (FADE ALL, PANIC con fundido, STOP con
+    /// fundido). Mientras dura ese fundido el cue está BLINDADO: nadie puede
+    /// tocar su superficie del compositor.
+    ///
+    /// FALLO REPORTADO EN DIRECTO: «el fade all no funciona, se corta la imagen
+    /// pero el audio sí hace el fade». La rampa de opacidad se programaba bien
+    /// en EndCue, pero el RETROCESO del playhead que hace StopEverything acaba
+    /// en SetPlayhead → PrepareVideoStandby del cue que acababa de salir del
+    /// aire; como EndCue ya lo había sacado de _running, la guarda
+    /// «!_running.ContainsKey» dejaba pasar la precarga, que fija la opacidad a
+    /// 0 SIN fundido — y un SetVideoCueOpacity sin fundido hace
+    /// BeginAnimation(null): mata la rampa recién nacida en el primer fotograma.
+    /// El audio, que funde en el AudioEngine por su cuenta, seguía bajando: de
+    /// ahí el «la imagen se corta y el audio sí funde».</summary>
+    private readonly Dictionary<int, IDisposable> _videoFadingOut = new();
+
+    /// <summary>true si la imagen del cue sigue en pantalla fundiéndose.</summary>
+    private bool IsVideoFadingOut(int cueId) => _videoFadingOut.ContainsKey(cueId);
+
+    /// <summary>Blinda la superficie del cue durante los segundos del fundido.
+    /// Al vencer, el cue vuelve a ser precargable: si el playhead se quedó
+    /// encima (el retroceso de STOP ALL/PANIC/FADE ALL lo deja ahí), se le
+    /// prepara el standby entonces — el GO siguiente sigue siendo instantáneo,
+    /// solo que sin robarle la superficie a un fundido en curso.</summary>
+    private void MarkVideoFadingOut(int cueId, double fade)
+    {
+        ClearVideoFadingOut(cueId);
+        _videoFadingOut[cueId] = _scheduler.Schedule(
+            (int)(Math.Max(0.0, fade) * 1000.0), () =>
+            {
+                if (!_videoFadingOut.Remove(cueId))
+                    return;
+                if (_model.GetCue(_playhead) is { Type: CueType.Video } cur
+                    && cur.Id == cueId && cur.FilePath.Length > 0)
+                    PrepareVideoStandby(cur);
+            });
+    }
+
+    private void ClearVideoFadingOut(int cueId)
+    {
+        if (_videoFadingOut.Remove(cueId, out var handle))
+            handle.Dispose();
+    }
+
+    private void ClearAllVideoFadingOut()
+    {
+        foreach (var handle in _videoFadingOut.Values)
+            handle.Dispose();
+        _videoFadingOut.Clear();
+    }
+
     /// <summary>Retira un cue de la ejecución: cancela timers y para su motor.</summary>
     private void EndCue(int cueId, bool markStopped, double fade = 0.0)
     {
@@ -1738,12 +1794,16 @@ public class MainController
                 // Fundido VISUAL a la par que el de audio (compositor)
                 if (_model.GetById(cueId) is Cue vc)
                     SetCueLayerOpacity(vc, 0.0, fade);
+                // El cue ya no está en _running pero su IMAGEN sigue en
+                // pantalla: queda BLINDADO hasta que acabe el fundido.
+                MarkVideoFadingOut(cueId, fade);
             }
             else
             {
                 _video.Stop(cueId);
                 if (hap)
                     _audio.Stop(VideoAudioId(cueId), 0.0);
+                ClearVideoFadingOut(cueId);
             }
         }
 
@@ -1781,6 +1841,9 @@ public class MainController
             // Parada inmediata: barrido de seguridad de ambos motores.
             _audio.StopAll(0.0);
             _video.StopAll();
+            // Y con él se van los fundidos que quedaran a medias: ya no hay
+            // ninguna imagen que blindar (StopAll las corta todas).
+            ClearAllVideoFadingOut();
         }
         else
         {
@@ -2096,9 +2159,17 @@ public class MainController
         var canvasScreens = canvasMode
             ? _canvas.CanvasViews().Select(v => v.Screen).ToHashSet()
             : null;
-        foreach (var (cid, r) in _running)
-            if (r.Kind == CueType.Video && _video.IsPlaying(cid)
-                && _model.GetById(cid) is Cue c)
+        // Un vídeo que se está FUNDIENDO ya no está en _running, pero su imagen
+        // SIGUE en pantalla: su pista tiene que seguir visible o la ruta
+        // CLÁSICA (HWND, sin opacidad por cue) cortaría la imagen en el primer
+        // fotograma del FADE ALL en vez de sostenerla hasta el final.
+        var onScreen = _running
+            .Where(kv => kv.Value.Kind == CueType.Video && _video.IsPlaying(kv.Key))
+            .Select(kv => kv.Key)
+            .Concat(_videoFadingOut.Keys)
+            .Distinct();
+        foreach (int cid in onScreen)
+            if (_model.GetById(cid) is Cue c)
             {
                 int layer = VideoLayerOf(c);
                 // Canvas: el vídeo vive en TODAS las salidas habilitadas
@@ -2149,6 +2220,12 @@ public class MainController
     /// precarga nunca debe ABRIR ventanas sola.</summary>
     private void PrepareVideoStandby(Cue cue)
     {
+        // SU IMAGEN SIGUE EN PANTALLA, fundiéndose. Precargarlo ahora le fija
+        // la opacidad a 0 de golpe (corte seco del FADE ALL) y, en la ruta del
+        // compositor, el standby le ROBA la superficie del pool: AssignCue
+        // reinicia opacidad y z. Se reintenta al acabar el fundido.
+        if (IsVideoFadingOut(cue.Id))
+            return;
         // HAP (u otro códec sin soporte en el compositor mpv): solo
         // verificación clásica — el standby GPU con HAP era EL crash nativo
         // original. Si irá por el motor HAP propio, se PRECALIENTA además el
@@ -2340,9 +2417,15 @@ public class MainController
             _view.SetPlayhead(_playhead);
     }
 
+    /// <summary>Campos del inspector que rehacen la geometría del vídeo en
+    /// vivo. OJO con las DOS escalas: «scale» es el % del modo FULL (zoom
+    /// sobre el ajuste a la salida, vive en VideoPlayParams.Scale) y
+    /// «scale_x» el multiplicador del modo CUSTOM (vive en VideoGeometry).
+    /// «scale» faltaba aquí: el fader movía el previo del inspector y NO la
+    /// salida — el mismo control diciendo dos cosas distintas.</summary>
     private static readonly HashSet<string> GeoKeys = new()
     {
-        "geo_mode", "preserve_aspect", "translate_x", "translate_y",
+        "geo_mode", "preserve_aspect", "scale", "translate_x", "translate_y",
         "scale_x", "scale_y", "rotate_z",
     };
 
@@ -2385,7 +2468,7 @@ public class MainController
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
             && fields.Keys.Any(GeoKeys.Contains))
         {
-            _video.ApplyGeometry(cue.Id, _canvas.GeoFor(cue));
+            _video.ApplyGeometry(cue.Id, _canvas.GeoFor(cue), cue.Scale);
         }
         // Opacidad de la pista en vivo (compositor GPU)
         if (cue.Type == CueType.Video && _video.IsPlaying(cue.Id)
@@ -2456,6 +2539,7 @@ public class MainController
         _chainTimers.Clear();
         foreach (int cueId in _running.Keys.ToList())
             EndCue(cueId, markStopped: false);
+        ClearAllVideoFadingOut();   // ningún timer sobrevive al cierre
         _audio.Cleanup();
         _video.Cleanup();
     }
