@@ -240,9 +240,23 @@ public partial class MainWindow : Window, IShowView
 
         // Reloj del show (medio segundo de resolución visual)
         _clockTimer = new DispatcherTimer { Interval = TimeSpan.FromMilliseconds(500) };
-        _clockTimer.Tick += (_, _) => UpdateShowClock();
+        _clockTimer.Tick += (_, _) =>
+        {
+            UpdateShowClock();
+            // La mesa EN REPOSO. Antes esto colgaba de UpdateActiveCues, que el
+            // controlador solo llama cuando HAY algo sonando: era circular, y
+            // por eso los canales no salían hasta el primer GO. Aquí se
+            // sincroniza siempre, que es lo que hace falta al PREPARAR el show
+            // (los cambios de lista ya refrescan al momento vía SyncMixer).
+            if (_controller.RunningCueIds.Count == 0)
+            {
+                _lastActive = Array.Empty<ActiveCueInfo>();
+                SyncMixer();
+            }
+        };
         _clockTimer.Start();
         UpdateShowClock();
+        SyncMixer();   // los canales del show cargado, ya visibles al arrancar
     }
 
     /// <summary>Aplica los settings de vista (columna de latencia, etiqueta
@@ -485,6 +499,10 @@ public partial class MainWindow : Window, IShowView
         UpdateTimelinePanel();
         RebuildHotkeys();
         UpdateRelocateButton();
+        // La lista es la que manda en los canales de la mesa: al volcar medios
+        // aparecen YA (sin esperar al tick ni al primer GO) y al borrar cues
+        // desaparecen con ellos.
+        SyncMixer();
     }
 
     /// <summary>El botón "Relocalizar" solo aparece con medios faltantes.</summary>
@@ -508,7 +526,11 @@ public partial class MainWindow : Window, IShowView
         UpdateRelocateButton();
     }
 
-    public void AppendCueRow(Cue cue) => _rows.Add(new CueRowViewModel(cue, _model));
+    public void AppendCueRow(Cue cue)
+    {
+        _rows.Add(new CueRowViewModel(cue, _model));
+        SyncMixer();   // importar medios ya deja su canal en la mesa
+    }
 
     public void ApplyGroupVisibility()
     {
@@ -716,13 +738,6 @@ public partial class MainWindow : Window, IShowView
         if (CueGrid.SelectedIndex >= 0)
             Inspector.SyncVolumeFromModel(_model.GetCue(CueGrid.SelectedIndex));
 
-        // Y la mesa EN REPOSO: sin esto los canales no salían hasta el primer GO
-        // (el Tick del controlador no empuja nada mientras no suene nada).
-        if (_controller.RunningCueIds.Count == 0)
-        {
-            _lastActive = Array.Empty<ActiveCueInfo>();
-            SyncMixer();
-        }
     }
 
     /// <summary>Monitor + VU estéreo pegado a su derecha (misma altura).</summary>

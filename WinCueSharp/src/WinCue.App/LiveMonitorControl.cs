@@ -205,8 +205,12 @@ public sealed class LiveMonitorControl : Border
             _lastElapsed = -1;
             _cachedDuration = 0.0;
             _durationAsked = false;
-        _durationAsked = false;
-            _pauseState = null;
+            // loadfile arranca REPRODUCIENDO: el estado es "sonando", no
+            // "desconocido". Dejarlo en null hacía que PreviewIsPaused (que
+            // ante la duda dice «pausado») mintiera, y el botón del PVW
+            // enseñaba ▶ con el vídeo corriendo: la primera pulsación solo
+            // corregía la etiqueta en vez de pausar.
+            _pauseState = false;
             try
             {
                 _player!.SetProperty("loop-file", loop ? "inf" : "no");
@@ -247,8 +251,9 @@ public sealed class LiveMonitorControl : Border
             _currentPath = path;
             _cachedDuration = 0.0;
             _durationAsked = false;
-        _durationAsked = false;
-            _pauseState = null;
+            // Este camino carga PAUSADO (el SetProperty de abajo), así que el
+            // estado se conoce: es "pausado".
+            _pauseState = true;
             try
             {
                 _player!.SetProperty("loop-file", "no");
