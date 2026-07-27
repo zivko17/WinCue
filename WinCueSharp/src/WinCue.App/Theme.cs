@@ -280,9 +280,11 @@ public static class Theme
     public static readonly Color StopSmallBorder = Hex(0xe05a4a);
 
     /// <summary>Fondo de los desplegables de flecha pegados a «Abrir» y
-    /// «Guardar»: hundido respecto al botón principal para que se lean como
-    /// dos controles y no como un botón con un pegote al lado.</summary>
-    public static readonly Color SplitArrowBg = Hex(0x232323);
+    /// «Guardar». Es EL MISMO gris del botón principal a propósito: hundirlo
+    /// (estuvo en 0x232323) los separaba, sí, pero cantaba como un parche de
+    /// otro color al lado del botón. Se leen como dos controles por el hueco,
+    /// el borde propio y el caret ámbar — no por ser de otro gris.</summary>
+    public static readonly Color SplitArrowBg = ButtonBg;
 
     // ═════════════════════════ RELIEVE DE LOS BOTONES ═════════════════════════
     // El botón deja de ser un rectángulo plano y pasa a leerse como una tecla de
