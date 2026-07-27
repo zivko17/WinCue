@@ -1,0 +1,37 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- =========================================================================
+       ProResLab.Gpu — camino GPU de 10/12 bits (la parte NUEVA de verdad).
+       Hoy el pipeline del motor propio solo maneja BC1/BC3 de 8 bits; ProRes
+       obliga a subir planos YUV de 10/12 bits (R16_UNORM por plano) y a
+       convertir a RGB en el shader con la matriz correcta.
+       Headless a propósito: la presentación D3D11→D3D9Ex→D3DImage ya quedó
+       validada en tools\hap-lab\HapLab.View y no cambia con ProRes; lo que
+       cambia —y lo que se mide aquí— es la subida y la conversión.
+       ========================================================================= -->
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0-windows</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>prores-lab-gpu</AssemblyName>
+    <RootNamespace>ProResLab.Gpu</RootNamespace>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <ServerGarbageCollection>true</ServerGarbageCollection>
+    <!-- Copia de filas de los planos al puntero mapeado de D3D11 -->
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Vortice (MIT): wrappers finos de D3D11/D3DCompiler. Misma decisión de
+         lab que en hap-lab (ver su INFORME.md). -->
+    <PackageReference Include="Vortice.Direct3D11" Version="3.6.2" />
+    <PackageReference Include="Vortice.D3DCompiler" Version="3.6.2" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\ProResLab.csproj" />
+  </ItemGroup>
+
+</Project>
