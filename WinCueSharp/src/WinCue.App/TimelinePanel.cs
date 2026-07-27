@@ -209,6 +209,14 @@ public sealed class TimelinePanel : Border
 
     public void SetModel(CueModel model) => _canvas.SetModel(model);
 
+    /// <summary>Reloj del show (el del controlador): el cursor extrapola entre
+    /// ticks con la MISMA base de tiempo con la que se disparan los cues.</summary>
+    public IShowClock? Clock
+    {
+        get => _canvas.Clock;
+        set => _canvas.Clock = value;
+    }
+
     /// <summary>Selección de la tabla → resaltar (y hacer visible) el bloque.</summary>
     public void SetSelected(int cueId) => _canvas.SetSelected(cueId);
 
@@ -352,22 +360,34 @@ public sealed class TimelineCanvas : FrameworkElement
 
     // Cues activos (cursor + progreso), del tick real del controlador.
     // El tick llega a 10 Hz → saltos de varios píxeles: entre ticks se
-    // EXTRAPOLA con reloj de pared y se repinta por frame (60 Hz) vía
+    // EXTRAPOLA con el RELOJ DEL SHOW y se repinta por frame (60 Hz) vía
     // CompositionTarget.Rendering, solo mientras hay cues activos.
+    // El reloj es el del controlador (ShowClock), no un Stopwatch propio: el
+    // cursor y el disparo de los cues se miden con la misma vara, y con el
+    // show en pausa el reloj se congela y el cursor deja de deslizar solo.
     private readonly Dictionary<int, double> _activeElapsed = new();
     private readonly Dictionary<int, bool> _activeAdvancing = new();
     private readonly Dictionary<int, double> _smoothElapsed = new();
-    private long _activeStampTicks;
+    private IShowClock? _clock;
+    private double _activeStamp;      // segundos de IShowClock.Now
     private bool _renderHooked;
 
-    /// <summary>Objetivo: raw del tick + extrapolación de pared (cap 350 ms;
-    /// solo si el cue avanzaba — un cue pausado no debe deslizar y volver).</summary>
+    /// <summary>Reloj del show (el del controlador). Sin él, el cursor no
+    /// extrapola entre ticks: se dibuja el valor crudo, nunca uno inventado.</summary>
+    public IShowClock? Clock
+    {
+        get => _clock;
+        set => _clock = value;
+    }
+
+    /// <summary>Objetivo: raw del tick + extrapolación con el reloj del show
+    /// (cap 350 ms; solo si el cue avanzaba — un cue pausado no debe deslizar
+    /// y volver).</summary>
     private double LiveElapsed(int cueId, double raw)
     {
-        if (!_activeAdvancing.GetValueOrDefault(cueId))
+        if (_clock is null || !_activeAdvancing.GetValueOrDefault(cueId))
             return raw;
-        double extra = System.Diagnostics.Stopwatch
-            .GetElapsedTime(_activeStampTicks).TotalSeconds;
+        double extra = _clock.Now - _activeStamp;
         return raw + Math.Min(Math.Max(0.0, extra), 0.35);
     }
 
@@ -458,7 +478,7 @@ public sealed class TimelineCanvas : FrameworkElement
                 _activeAdvancing[r.Id] =
                     !_activeElapsed.TryGetValue(r.Id, out double prev)
                     || r.Elapsed > prev + 0.001;
-        _activeStampTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        _activeStamp = _clock?.Now ?? 0.0;
         _activeElapsed.Clear();
         foreach (var r in rows)
         {

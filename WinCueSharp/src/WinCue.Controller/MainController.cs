@@ -16,9 +16,20 @@
 // HILOS
 //   Diseñado para un solo hilo (el de UI). Los motores y el scheduler remiten
 //   sus callbacks por su dispatcher; el controlador nunca bloquea.
+//
+// RELOJ
+//   Todo el tiempo de SHOW —plazos, elapsed, remaining, cuentas atrás— sale de
+//   un único IShowClock, el del scheduler (ver ShowClock.cs). Ya no hay
+//   Stopwatch suelto aquí. Los plazos de SECUENCIA (pre_wait, post_wait,
+//   cadenas, WAIT/FADE) son ABSOLUTOS: se anclan al instante IDEAL, no al
+//   disparo real, para que un timer que llega tarde no herede su retraso al
+//   siguiente. Los plazos de MEDIA (fin de un audio o un vídeo) siguen
+//   anclados al arranque REAL de la reproducción y corregidos contra la
+//   posición del motor: el reloj del show no manda sobre el cristal de la
+//   tarjeta de sonido.
 // =============================================================================
 
-using System.Diagnostics;
+using System.Diagnostics;   // Process, para los cues de SCRIPT (ya no para medir)
 using WinCue.Core;
 
 namespace WinCue.Controller;
@@ -46,7 +57,24 @@ public class MainController
         public required string Name;
         public required string Number;
         public required string Color;
-        public long TStartTicks = Stopwatch.GetTimestamp();
+
+        // ── Tiempos (todos en segundos del IShowClock del scheduler) ──────
+        /// <summary>Instante REAL en que arrancó lo que se está midiendo
+        /// (disparo, y luego la acción). En tiempo de SHOW (Now): se congela
+        /// solo con la pausa global, así el elapsed no salta al reanudar.</summary>
+        public double TStart;
+        /// <summary>Instante IDEAL del disparo (NowRaw). Ancla de los plazos
+        /// de secuencia de este cue: no hereda el retraso del timer que lo
+        /// trajo, así una cadena larga no acumula deriva.</summary>
+        public double Anchor;
+        /// <summary>Instante IDEAL del arranque de la acción (= Anchor +
+        /// pre_wait). Ancla del fin de los cues que NO son media.</summary>
+        public double ActionAnchor;
+        /// <summary>Fin IDEAL cuando lo marca el RELOJ y no un motor (WAIT,
+        /// FADE, cues instantáneos). null en media: su fin lo dicta el motor,
+        /// y encadenar desde el ideal cortaría lo que aún está sonando.</summary>
+        public double? SequenceEnd;
+
         public double Duration;              // 0 = indeterminado (fin natural)
         public readonly List<IDisposable> Timers = new();
         public bool ManualStop;
@@ -84,15 +112,16 @@ public class MainController
 
     private int _playhead;
     private bool _paused;
-    private long _pauseT0Ticks;
     private bool _lastHadRunning;
 
     private readonly Dictionary<int, RunningCue> _running = new();
     private readonly Dictionary<int, HashSet<int>> _rrState = new();   // RANDOM round-robin
     private readonly List<IDisposable> _chainTimers = new();
 
-    // Anti doble-GO: instante del último GO aceptado
-    private long _lastGoTicks;
+    // Anti doble-GO: instante del último GO aceptado, en tiempo de PARED
+    // (NowRaw): es un gesto de mano, no debe congelarse con la pausa.
+    // -infinito = todavía no ha habido ninguno.
+    private double _lastGo = double.NegativeInfinity;
 
     // PUNTO DEL SHOW: el cue que salió al aire con el último GO, y dónde quedó
     // el playhead justo después. GoCue dispara y LUEGO avanza, así que mientras
@@ -105,6 +134,12 @@ public class MainController
     public int Playhead => _playhead;
     public bool IsPaused => _paused;
     public IReadOnlyCollection<int> RunningCueIds => _running.Keys;
+
+    /// <summary>EL reloj del show (ver ShowClock.cs). Lo aporta el scheduler
+    /// para que la secuencia y la medición no puedan discrepar. La vista lee
+    /// de aquí el reloj grande y el cursor del timeline, y así lo que se ve en
+    /// pantalla y lo que hace el secuenciador son el mismo tiempo.</summary>
+    public IShowClock Clock => _scheduler.Clock;
 
     // ------------------------------------------------------------------
     // Construcción
@@ -225,10 +260,10 @@ public class MainController
     public void OnGoPressed()
     {
         int minMs = _settings.Get("go_min_interval_ms", 200);
-        if (minMs > 0 && _lastGoTicks != 0 &&
-            Stopwatch.GetElapsedTime(_lastGoTicks).TotalMilliseconds < minMs)
+        double now = Clock.NowRaw;
+        if (minMs > 0 && (now - _lastGo) * 1000.0 < minMs)
             return;   // doble-tap: ignorar
-        _lastGoTicks = Stopwatch.GetTimestamp();
+        _lastGo = now;
 
         var cue = _model.GetCue(_playhead);
         if (cue is null)
@@ -246,7 +281,8 @@ public class MainController
         _view.FlashStatus(Loc.T("■ STOP ALL — todos los cues detenidos", "■ STOP ALL — all cues stopped"));
     }
 
-    private long _lastPanicTicks;
+    // Igual que el anti doble-GO: gesto de mano, en tiempo de PARED (NowRaw).
+    private double _lastPanic = double.NegativeInfinity;
 
     /// <summary>Panic: fundido de salida global (panic_fade, 1,5 s por defecto)
     /// y parada de todo. Con panic_action = "image", muestra la imagen de
@@ -257,10 +293,10 @@ public class MainController
         double fade = Math.Clamp(_settings.Get("panic_fade", PanicFade), 0.0, 10.0);
         bool showImage = _settings.Get("panic_action", "black") == "image";
 
+        double nowRaw = Clock.NowRaw;
         bool doublePress = _settings.Get("panic_double_hard", true) &&
-            _lastPanicTicks != 0 &&
-            Stopwatch.GetElapsedTime(_lastPanicTicks).TotalSeconds < 2.0;
-        _lastPanicTicks = Stopwatch.GetTimestamp();
+            nowRaw - _lastPanic < 2.0;
+        _lastPanic = nowRaw;
 
         if (doublePress)
         {
@@ -801,17 +837,19 @@ public class MainController
         {
             _audio.ResumeAll();
             _video.ResumeAll();
-            // reajustar TStart para que el countdown no salte
-            long dt = Stopwatch.GetTimestamp() - _pauseT0Ticks;
-            foreach (var r in _running.Values)
-                r.TStartTicks += dt;
+            // El countdown no salta porque el TIEMPO DE SHOW se reanuda donde
+            // se quedó: antes había que corregir la marca de cada cue hacia
+            // adelante (TStartTicks += dt) y el que hubiera arrancado DURANTE
+            // la pausa se iba al futuro (elapsed negativo). Ahora es el reloj
+            // el que se congela, y todos los elapsed con él.
+            Clock.Resume();
             _paused = false;
         }
         else
         {
             _audio.PauseAll();
             _video.PauseAll();
-            _pauseT0Ticks = Stopwatch.GetTimestamp();
+            Clock.Freeze();
             _paused = true;
         }
         _view.UpdateTransport(_paused);
@@ -875,7 +913,11 @@ public class MainController
     // NÚCLEO DE DISPARO
     // ==================================================================
 
-    private void GoCue(int idx)
+    /// <param name="anchor">Instante IDEAL de este disparo (NowRaw). null = un
+    /// GO de mano, que ocurre cuando ocurre. Con valor viene de una CADENA: es
+    /// el plazo teórico del eslabón, no el momento en que el timer despertó —
+    /// así el retraso de un eslabón no se hereda al siguiente.</param>
+    private void GoCue(int idx, double? anchor = null)
     {
         var cue = _model.GetCue(idx);
         if (cue is null)
@@ -883,7 +925,7 @@ public class MainController
 
         if (cue.Type == CueType.Group)
         {
-            GoGroup(idx, cue);
+            GoGroup(idx, cue, anchor);
             return;
         }
 
@@ -894,7 +936,7 @@ public class MainController
         // medido en los cortes secos). Con el orden correcto el cue sale al
         // aire con su primer fotograma ya puesto, y el playhead avanza
         // después, a tiempo de precargar el siguiente.
-        Trigger(idx, advanceChain: true);
+        Trigger(idx, advanceChain: true, anchor);
         SetPlayhead(idx + 1);
         MarkShowPoint(cue);
     }
@@ -907,7 +949,7 @@ public class MainController
         _playheadAfterGo = _playhead;
     }
 
-    private void GoGroup(int idx, Cue cue)
+    private void GoGroup(int idx, Cue cue, double? anchor = null)
     {
         int extent = _model.GroupExtent(idx);
 
@@ -916,7 +958,7 @@ public class MainController
             // Grupo transparente: dispara el primer hijo como un GO normal
             var childIndices = _model.DirectChildIndices(cue.Id);
             if (childIndices.Count > 0)
-                GoCue(childIndices[0]);
+                GoCue(childIndices[0], anchor);
             else
                 SetPlayhead(extent);
             return;
@@ -924,11 +966,13 @@ public class MainController
 
         // TIMELINE / GO_NEXT / RANDOM: el playhead salta tras el grupo
         SetPlayhead(extent);
-        Trigger(idx, advanceChain: true);
+        Trigger(idx, advanceChain: true, anchor);
         MarkShowPoint(cue);
     }
 
-    private void FireGroupChildren(int idx)
+    /// <param name="anchor">Instante IDEAL en que el grupo abrió: los hijos
+    /// cuelgan de él, no del momento real en que despertó el timer del grupo.</param>
+    private void FireGroupChildren(int idx, double? anchor = null)
     {
         var group = _model.GetCue(idx);
         if (group is null)
@@ -939,20 +983,20 @@ public class MainController
         {
             case GroupMode.Timeline:
                 foreach (int ci in childIndices)
-                    Trigger(ci, advanceChain: false);
+                    Trigger(ci, advanceChain: false, anchor);
                 break;
             case GroupMode.GoNext:
                 if (childIndices.Count > 0)
-                    Trigger(childIndices[0], advanceChain: false);
+                    Trigger(childIndices[0], advanceChain: false, anchor);
                 break;
             case GroupMode.Random:
-                FireRandomChild(group, childIndices);
+                FireRandomChild(group, childIndices, anchor);
                 break;
             // ENTER no llega aquí (grupo transparente en GoGroup)
         }
     }
 
-    private void FireRandomChild(Cue group, List<int> childIndices)
+    private void FireRandomChild(Cue group, List<int> childIndices, double? anchor = null)
     {
         var fired = _rrState.TryGetValue(group.Id, out var f)
             ? f : _rrState[group.Id] = new HashSet<int>();
@@ -984,12 +1028,14 @@ public class MainController
         var cue = _model.GetCue(chosen);
         if (cue is not null)
             fired.Add(cue.Id);
-        Trigger(chosen, advanceChain: false);
+        Trigger(chosen, advanceChain: false, anchor);
     }
 
     /// <summary>Dispara el cue en idx: pre_wait, acción y encadenado.
     /// advanceChain=false → sub-secuencia (START/grupo) que no mueve el playhead.</summary>
-    private void Trigger(int idx, bool advanceChain)
+    /// <param name="anchor">Instante IDEAL del disparo (NowRaw); null = ahora
+    /// (GO de mano). De él cuelgan pre_wait y la cadena AUTO_CONTINUE.</param>
+    private void Trigger(int idx, bool advanceChain, double? anchor = null)
     {
         var cue = _model.GetCue(idx);
         if (cue is null)
@@ -1013,6 +1059,11 @@ public class MainController
             }
         }
 
+        // Plazo IDEAL de este disparo. Si viene de una cadena, es el instante
+        // teórico del eslabón (aunque el timer haya despertado tarde); si es
+        // un GO de mano, es ahora mismo.
+        double t0 = anchor ?? Clock.NowRaw;
+
         var run = new RunningCue
         {
             CueId = cue.Id,
@@ -1022,6 +1073,11 @@ public class MainController
             Number = cue.DisplayNumber,
             Color = cue.Color,
             AdvanceChain = advanceChain,
+            Anchor = t0,
+            ActionAnchor = t0 + cue.PreWait,
+            // El elapsed que se VE mide tiempo real: si el disparo llegó
+            // tarde, la cuenta lo refleja en vez de fingir el ideal.
+            TStart = Clock.Now,
         };
         // Retrigger HARD_RESTART: cancelar la instancia previa del mismo cue
         if (_running.ContainsKey(cue.Id))
@@ -1029,16 +1085,18 @@ public class MainController
         _running[cue.Id] = run;
 
         // AUTO_CONTINUE: timer de cadena INDEPENDIENTE del ciclo de vida del cue
-        // (debe disparar aunque la acción termine antes del post_wait)
+        // (debe disparar aunque la acción termine antes del post_wait).
+        // Plazo ABSOLUTO: el eslabón siguiente cuelga del ideal de este, así
+        // cien cues encadenados suman sus tiempos nominales y no los retrasos.
         if (cue.ContinueMode == ContinueMode.AutoContinue)
         {
-            int delay = (int)((cue.PreWait + cue.PostWait) * 1000);
-            ScheduleChain(delay, () => ContinueNext(idx, advanceChain));
+            double due = t0 + cue.PreWait + cue.PostWait;
+            ScheduleChainAt(due, () => ContinueNext(idx, advanceChain, due));
         }
 
-        // Acción: inmediata o tras pre_wait
+        // Acción: inmediata o tras pre_wait (también con plazo absoluto)
         if (cue.PreWait > 0.0)
-            Schedule(run, (int)(cue.PreWait * 1000), () => StartAction(idx));
+            ScheduleAt(run, run.ActionAnchor, () => StartAction(idx));
         else
             StartAction(idx);
     }
@@ -1057,11 +1115,16 @@ public class MainController
             offset = Math.Min(offset, Math.Max(0.0, ActionDuration(cue) - 0.05));
         run.Offset = offset;
         run.ActionStarted = true;
-        run.TStartTicks = Stopwatch.GetTimestamp();
+        // La MEDICIÓN arranca AHORA (tiempo real, no el ideal): si el pre_wait
+        // despertó tarde, elapsed/remaining lo enseñan.
+        run.TStart = Clock.Now;
 
         if (!cue.Armed)
         {
-            // Cue desarmado: sin acción, pero respeta el encadenado.
+            // Cue desarmado: sin acción, pero respeta el encadenado. Termina
+            // en su instante IDEAL: una fila desarmada en medio de una cadena
+            // no debe meter el retraso de su timer en el resto del show.
+            run.SequenceEnd = run.ActionAnchor;
             OnActionEnd(cue.Id);
             return;
         }
@@ -1086,6 +1149,11 @@ public class MainController
                     PlayCount: cue.PlayCount, OutputDevice: cue.AudioOutput,
                     Eq: EqFor(cue), Rate: cue.Rate));
                 run.Duration = ActionDuration(cue);
+                // FRONTERA CON EL RELOJ DE MEDIA: el fin de un audio se cuenta
+                // desde su arranque REAL, no desde el ideal de la secuencia.
+                // Anclarlo al ideal recortaría el final de lo que está
+                // sonando cuando el arranque llegó tarde — el cristal de la
+                // tarjeta manda en cuánto dura lo que suena.
                 if (run.Duration > 0.0 && !cue.Loop)
                     Schedule(run,
                         (int)(Math.Max(0.0, run.Duration - offset) / RateOf(cue) * 1000),
@@ -1211,43 +1279,55 @@ public class MainController
                 }
                 break;
 
+            // WAIT y FADE son SECUENCIA pura: su fin lo marca el reloj, no un
+            // motor. Plazo ABSOLUTO desde el ideal de arranque — así una
+            // cadena de esperas no acumula el retraso de cada timer (que es
+            // justo donde más se nota en un PC cargado). El mínimo de 50 ms se
+            // conserva: un WAIT de 0 no debe reentrar en el mismo tic.
             case CueType.Wait:
                 ModelState(idx, CueState.Playing);
                 run.Duration = Math.Max(0.0, cue.Duration);
-                Schedule(run,
-                    Math.Max(50, (int)(Math.Max(0.0, cue.Duration - offset) * 1000)),
-                    () => OnActionEnd(cue.Id));
+                run.SequenceEnd = run.ActionAnchor
+                    + Math.Max(0.05, Math.Max(0.0, cue.Duration - offset));
+                ScheduleAt(run, run.SequenceEnd.Value, () => OnActionEnd(cue.Id));
                 break;
 
             case CueType.Fade:
                 ModelState(idx, CueState.Playing);
                 run.Duration = Math.Max(0.0, cue.Duration);
                 ExecFade(cue);
-                Schedule(run, Math.Max(50, (int)(cue.Duration * 1000)),
-                    () => OnActionEnd(cue.Id));
+                run.SequenceEnd = run.ActionAnchor + Math.Max(0.05, cue.Duration);
+                ScheduleAt(run, run.SequenceEnd.Value, () => OnActionEnd(cue.Id));
                 break;
 
+            // Cues INSTANTÁNEOS: terminan en su propio instante ideal, que es
+            // el que hereda el siguiente eslabón de la cadena.
             case CueType.Start:
+                run.SequenceEnd = run.ActionAnchor;
                 ExecStart(cue);
                 OnActionEnd(cue.Id);
                 break;
 
             case CueType.Stop:
+                run.SequenceEnd = run.ActionAnchor;
                 ExecStop(cue);
                 OnActionEnd(cue.Id);
                 break;
 
             case CueType.Script:
+                run.SequenceEnd = run.ActionAnchor;
                 ExecScript(cue);
                 OnActionEnd(cue.Id);
                 break;
 
             case CueType.Group:
-                FireGroupChildren(idx);
+                run.SequenceEnd = run.ActionAnchor;
+                FireGroupChildren(idx, run.ActionAnchor);
                 OnActionEnd(cue.Id);
                 break;
 
             default:   // MEMO u otros: sin acción
+                run.SequenceEnd = run.ActionAnchor;
                 OnActionEnd(cue.Id);
                 break;
         }
@@ -1349,6 +1429,9 @@ public class MainController
     {
         StopEverything(fade: 0.0);
         int fired = 0;
+        // Origen COMÚN del segmento: las esperas de todos los bloques cuelgan
+        // del mismo instante, no cada una del momento en que le tocó el bucle.
+        double t0 = Clock.NowRaw;
         foreach (var item in items)
         {
             int idx = _model.IndexOfId(item.CueId);
@@ -1366,13 +1449,16 @@ public class MainController
                 AdvanceChain = false,
                 SuppressChain = true,
                 PreWaitOverride = item.Delay > 0.001 ? item.Delay : null,
+                Anchor = t0,
+                ActionAnchor = t0 + Math.Max(0.0, item.Delay),
+                TStart = Clock.Now,
             };
             // Reemplaza cualquier instancia previa (StopEverything ya limpió)
             _running[cue.Id] = run;
             if (item.Delay > 0.001)
             {
                 int i = idx;
-                Schedule(run, (int)(item.Delay * 1000), () => StartAction(i));
+                ScheduleAt(run, run.ActionAnchor, () => StartAction(i));
             }
             else
             {
@@ -1394,15 +1480,18 @@ public class MainController
             Trigger(idx, advanceChain: false);
     }
 
-    private void ContinueNext(int idx, bool advanceChain)
+    /// <param name="anchor">Instante IDEAL en que tocaba encadenar. Se pasa al
+    /// eslabón siguiente para que la cadena mida siempre contra el reloj y no
+    /// contra el disparo (posiblemente tardío) del anterior.</param>
+    private void ContinueNext(int idx, bool advanceChain, double? anchor = null)
     {
         int nxt = idx + 1;
         if (nxt >= _model.Count)
             return;
         if (advanceChain)
-            GoCue(nxt);
+            GoCue(nxt, anchor);
         else
-            Trigger(nxt, advanceChain: false);
+            Trigger(nxt, advanceChain: false, anchor);
     }
 
     /// <summary>La acción del cue terminó. Encadena AUTO_FOLLOW y retira el cue.</summary>
@@ -1417,7 +1506,11 @@ public class MainController
         // todos los bloques del segmento programados — encadenar duplicaría.
         if (cue is not null && cue.ContinueMode == ContinueMode.AutoFollow
             && !run.SuppressChain)
-            ContinueNext(idx, run.AdvanceChain);
+            // AUTO_FOLLOW hereda el fin IDEAL cuando lo marcó el reloj (WAIT,
+            // FADE, cue instantáneo). En media el fin lo marca el MOTOR: ahí
+            // el ancla es el ahora real, porque el ideal no sabe cuánto tardó
+            // de verdad en sonar el archivo.
+            ContinueNext(idx, run.AdvanceChain, run.SequenceEnd ?? Clock.NowRaw);
 
         EndCue(cueId, markStopped: true, fade: fade);
     }
@@ -1844,9 +1937,11 @@ public class MainController
             // — SOLO con la acción ya arrancada: en pre_wait el elapsed del
             // motor pertenece a otra instancia (standby/player rezagado) y
             // congelaría la cuenta visible mientras el timer real sí corre
-            double wallElapsed = _paused
-                ? Stopwatch.GetElapsedTime(run.TStartTicks, _pauseT0Ticks).TotalSeconds
-                : Stopwatch.GetElapsedTime(run.TStartTicks).TotalSeconds;
+            // TIEMPO DE SHOW: el reloj ya está congelado si hay pausa global,
+            // así que no hay que descontar nada a mano. Y como TStart se pone
+            // en el arranque REAL, un disparo que llegó tarde se ve tal cual
+            // en la cuenta (auto-corrección visible), no como el ideal.
+            double wallElapsed = Math.Max(0.0, Clock.Now - run.TStart);
             double elapsed = wallElapsed;
             if (run.ActionStarted && run.Kind == CueType.Audio)
             {
@@ -2067,16 +2162,25 @@ public class MainController
         }
     }
 
-    /// <summary>Timer asociado a un cue en curso: se cancela al terminar/parar.</summary>
+    /// <summary>Timer asociado a un cue en curso: se cancela al terminar/parar.
+    /// RELATIVO: para lo que cuelga de un MOTOR (fin de un media, reintentos
+    /// corregidos contra su posición real), no de la secuencia.</summary>
     private void Schedule(RunningCue run, int ms, Action fn) =>
         run.Timers.Add(_scheduler.Schedule(Math.Max(0, ms), fn));
 
+    /// <summary>Igual, pero con plazo ABSOLUTO (segundos de Clock.NowRaw):
+    /// para la SECUENCIA (pre_wait, WAIT, FADE), que no debe heredar el
+    /// retraso del timer que la trajo.</summary>
+    private void ScheduleAt(RunningCue run, double deadline, Action fn) =>
+        run.Timers.Add(_scheduler.ScheduleAt(deadline, fn));
+
     /// <summary>Timer de continuación independiente del ciclo de vida de un cue.
-    /// Solo lo cancela Stop All / Panic. Se auto-retira al dispararse.</summary>
-    private void ScheduleChain(int ms, Action fn)
+    /// Solo lo cancela Stop All / Panic. Se auto-retira al dispararse.
+    /// Plazo ABSOLUTO: es la columna vertebral de las cadenas AUTO_CONTINUE.</summary>
+    private void ScheduleChainAt(double deadline, Action fn)
     {
         IDisposable? handle = null;
-        handle = _scheduler.Schedule(Math.Max(0, ms), () =>
+        handle = _scheduler.ScheduleAt(deadline, () =>
         {
             if (handle is not null)
                 _chainTimers.Remove(handle);

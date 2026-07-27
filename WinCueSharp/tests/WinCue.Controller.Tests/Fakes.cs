@@ -14,10 +14,25 @@ namespace WinCue.Controller.Tests;
 // Scheduler de tiempo virtual
 // ---------------------------------------------------------------------------
 
+/// <summary>Planificador de tiempo VIRTUAL. Lleva dentro el reloj del show
+/// (ManualShowClock) y lo mueve en cada paso: el controlador mide elapsed y
+/// programa plazos contra el MISMO tiempo que avanza Advance(), así los tests
+/// ven exactamente el temporizado que verá el show.
+///
+/// LATENCIA SIMULADA: RetrasoDeDisparo emula un PC cargado — cada timer
+/// despierta N ms DESPUÉS de su vencimiento, que es justo lo que hace
+/// System.Threading.Timer cuando la máquina va justa. Con plazos absolutos ese
+/// retraso no debe acumularse de un eslabón al siguiente.</summary>
 public sealed class VirtualScheduler : IScheduler
 {
     private long _now;
     private readonly List<Entry> _entries = new();
+    private readonly ManualShowClock _clock = new();
+
+    public IShowClock Clock => _clock;
+
+    /// <summary>Milisegundos que cada timer despierta TARDE (PC cargado).</summary>
+    public int RetrasoDeDisparo { get; set; }
 
     private sealed class Entry
     {
@@ -33,7 +48,18 @@ public sealed class VirtualScheduler : IScheduler
 
     public IDisposable Schedule(int ms, Action fn)
     {
-        var e = new Entry { Due = _now + ms, Fn = fn };
+        var e = new Entry { Due = _now + Math.Max(0, ms) + RetrasoDeDisparo, Fn = fn };
+        _entries.Add(e);
+        return new Canceller(e);
+    }
+
+    /// <summary>Plazo ABSOLUTO en segundos del reloj: se guarda tal cual (sin
+    /// convertirlo a un retardo relativo), que es la razón de ser de la API —
+    /// un plazo ya vencido se ejecuta en el siguiente paso del reloj.</summary>
+    public IDisposable ScheduleAt(double deadline, Action fn)
+    {
+        long due = (long)Math.Round(deadline * 1000.0) + RetrasoDeDisparo;
+        var e = new Entry { Due = Math.Max(_now, due), Fn = fn };
         _entries.Add(e);
         return new Canceller(e);
     }
@@ -51,10 +77,12 @@ public sealed class VirtualScheduler : IScheduler
             if (next is null)
                 break;
             _now = next.Due;
+            _clock.SetRaw(_now / 1000.0);   // el reloj del show va con el timer
             _entries.Remove(next);
             next.Fn();
         }
         _now = target;
+        _clock.SetRaw(_now / 1000.0);
     }
 
     public int PendingCount => _entries.Count(e => !e.Cancelled);

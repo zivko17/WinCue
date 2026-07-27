@@ -157,6 +157,7 @@ public partial class MainWindow : Window, IShowView
 
         // Timeline del show, estilo Watchout (siempre presente, plegable)
         Timeline.SetModel(_model);
+        Timeline.Clock = _controller.Clock;   // cursor y disparo, mismo reloj
         Timeline.CommitField = (cueId, key, value) =>
         {
             int row = _model.IndexOfId(cueId);
@@ -1102,15 +1103,22 @@ public partial class MainWindow : Window, IShowView
     }
 
     // ── Reloj del show (restante ↔ transcurrido, clic para alternar) ────
+    //
+    // LEE EL ShowClock DEL CONTROLADOR, no un Stopwatch propio. El tic de 500 ms
+    // es solo un REFRESCO: en cada pasada vuelve a preguntar la hora en vez de
+    // sumar medio segundo. Si WPF retrasa un tic (los DispatcherTimer son de
+    // prioridad baja: con el PC cargado se retrasan), el reloj SALTA al valor
+    // correcto en lugar de quedarse atrás — y lo que marca es el mismo tiempo
+    // con el que el secuenciador dispara los cues.
     private bool _clockCountdown = true;
-    private long? _showStartTicks;
+    private double? _showStartTime;    // en segundos de IShowClock.Now
     private DispatcherTimer? _clockTimer;
 
     private void OnShowClockClick(object sender, MouseButtonEventArgs e)
     {
         if (e.ClickCount == 2)
         {
-            _showStartTicks = null;   // reiniciar el cronómetro del show
+            _showStartTime = null;   // reiniciar el cronómetro del show
             FlashStatus(Loc.T("Reloj del show reiniciado.", "Show clock reset."));
         }
         else
@@ -1128,12 +1136,15 @@ public partial class MainWindow : Window, IShowView
         // (un cue que termina solo), y el GO tiene que apagarse con él.
         RefreshTransportLights();
 
-        // El show "empieza" cuando arranca el primer cue
-        if (_showStartTicks is null && _controller.RunningCueIds.Count > 0)
-            _showStartTicks = System.Diagnostics.Stopwatch.GetTimestamp();
+        // El show "empieza" cuando arranca el primer cue. Marca y lectura, del
+        // MISMO reloj que el secuenciador: en TIEMPO DE SHOW, así el reloj
+        // grande se congela con la pausa igual que las cuentas de los cues
+        // (antes seguía corriendo y decía una cosa distinta del countdown).
+        if (_showStartTime is null && _controller.RunningCueIds.Count > 0)
+            _showStartTime = _controller.Clock.Now;
 
-        double elapsed = _showStartTicks is long t
-            ? System.Diagnostics.Stopwatch.GetElapsedTime(t).TotalSeconds
+        double elapsed = _showStartTime is double t
+            ? Math.Max(0.0, _controller.Clock.Now - t)
             : 0.0;
 
         if (_clockCountdown)
@@ -1149,7 +1160,7 @@ public partial class MainWindow : Window, IShowView
             // En modo SHOW el reloj va en el verde "armado" de la salida
             // (mismo #1e7e34 aclarado para leerse sobre fondo oscuro);
             // agotado sigue en rojo, y en EDIT queda el ámbar de trabajo.
-            ShowClockText.Foreground = remaining <= 0.0 && _showStartTicks is not null
+            ShowClockText.Foreground = remaining <= 0.0 && _showStartTime is not null
                 ? Theme.PgmBrush
                 : ModeToggle.IsChecked == true
                     ? Theme.GoBrush
