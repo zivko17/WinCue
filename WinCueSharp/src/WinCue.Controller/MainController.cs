@@ -39,6 +39,16 @@ public class MainController
     /// <summary>Duración por defecto del fade global de Panic (segundos).</summary>
     public const double PanicFade = 1.5;
 
+    /// <summary>Cuánto retraso se está dispuesto a RECUPERAR comprimiendo las
+    /// esperas de la cadena. Los plazos absolutos hacen que un disparo tardío
+    /// no arrastre a los siguientes: si un eslabón llega 40 ms tarde, el
+    /// siguiente sigue saliendo a su hora. Pero un parón GRANDE (la máquina se
+    /// va varios segundos) no se recupera: intentarlo vaciaría media lista de
+    /// golpe, que en directo es peor que ir tarde. Pasado este umbral la
+    /// cadena se REANCLA al presente y sigue desde ahí, en sincronía con la
+    /// realidad aunque haya perdido el retraso acumulado.</summary>
+    public const double MaxRecuperacionSegundos = 2.0;
+
     /// <summary>Se emite cuando cambia el playhead.</summary>
     public event Action<int>? ActiveIndexChanged;
 
@@ -1061,8 +1071,11 @@ public class MainController
 
         // Plazo IDEAL de este disparo. Si viene de una cadena, es el instante
         // teórico del eslabón (aunque el timer haya despertado tarde); si es
-        // un GO de mano, es ahora mismo.
-        double t0 = anchor ?? Clock.NowRaw;
+        // un GO de mano, es ahora mismo. Un ideal DEMASIADO viejo (parón
+        // gordo de la máquina) se descarta: ver MaxRecuperacionSegundos.
+        double ahora = Clock.NowRaw;
+        double t0 = anchor is double a && ahora - a <= MaxRecuperacionSegundos
+            ? a : ahora;
 
         var run = new RunningCue
         {
