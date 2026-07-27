@@ -338,6 +338,17 @@ Detalle completo en `docs/legal/checklist-distribucion.md`.
    hace falta, la salida natural es un demuxer propio de MXF OP1a.
 5. **CUSTOM (pan/zoom/rotación) sigue siendo de mpv.** El motor propio solo sabe
    letterbox + escala sobre la superficie FULL.
+6. **El presupuesto de hilos se fija al arrancar el cue y no se reajusta.** Si
+   entra una segunda capa, la primera conserva los hilos que le tocaban cuando
+   estaba sola y el sistema queda sobresuscrito. El laboratorio midió que
+   sobresuscribir **no duele** (el techo agregado se queda igual), así que se
+   acepta a cambio de no tocar el `AVCodecContext` de un cue en marcha — que no
+   es reentrante y se está usando desde su hilo de decode.
+7. **El sondeo del layout decodifica un frame extra en el GO** (1 ms en 1080p,
+   3,6 ms en 4K): el fourcc dice el perfil, pero el formato de píxel real lo
+   decide el decodificador y hace falta para dimensionar las texturas. Efecto
+   colateral bueno: es el ensayo general del decode nativo, y si va a fallar
+   falla ahí, donde todavía se puede caer a mpv.
 
 ---
 

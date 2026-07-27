@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // ProResGpuPipeline.cs — Pipeline GPU PERSISTENTE del motor ProRes propio
 // =============================================================================
 // Gemelo de HapGpuPipeline y con la MISMA salida: render target B8G8R8A8
@@ -225,8 +225,7 @@ internal sealed class ProResGpuPipeline : IProResRenderTarget, IDisposable
     private readonly ID3D11Texture2D _renderTarget;      // COMPARTIDA (tamaño superficie)
     private readonly ID3D11RenderTargetView _rtv;
     private readonly ID3D11VertexShader _vs;
-    private readonly ID3D11PixelShader _psOpaque;
-    private readonly ID3D11PixelShader _psAlpha;
+    private readonly ID3D11PixelShader _ps;
     private readonly ID3D11SamplerState _sampler;
 
     private readonly IDirect3D9Ex _d3d9;
@@ -294,8 +293,16 @@ internal sealed class ProResGpuPipeline : IProResRenderTarget, IDisposable
 
             // --- Shaders + sampler (compilados una vez por pipeline) ------
             _vs = _device.CreateVertexShader(ProResShaders.CompileVertexShader(), null);
-            _psOpaque = _device.CreatePixelShader(ProResShaders.CompilePixelShader(keepAlpha: false), null);
-            _psAlpha = _device.CreatePixelShader(ProResShaders.CompilePixelShader(keepAlpha: true), null);
+            // ALFA FORZADO A 1, incluso en ProRes 4444 con canal alfa. Es la
+            // MISMA decisión que en HAP5 (que también trae alfa y usa el shader
+            // passthrough): la mezcla entre capas la hace el compositor por
+            // OPACIDAD DE SUPERFICIE, y es lo que hace mpv hoy. Honrar el alfa
+            // del medio sería una capacidad nueva —keying por cue— pero
+            // cambiaría lo que el operador ve en los clips que ya usa, que es
+            // justo lo que este paso no debe hacer. El shader que lo conserva
+            // está escrito y probado (ProResShaders.CompilePixelShader(true)):
+            // encenderlo el día que se decida es una línea.
+            _ps = _device.CreatePixelShader(ProResShaders.CompilePixelShader(keepAlpha: false), null);
             // Croma POINT: es lo que hace swscale (y por tanto mpv). Ver
             // ProResShaders — con muestreo lineal la imagen deja de ser
             // comparable con lo que el operador veía hasta hoy.
@@ -374,7 +381,7 @@ internal sealed class ProResGpuPipeline : IProResRenderTarget, IDisposable
             _context.IASetInputLayout(null);
             _context.IASetPrimitiveTopology(PrimitiveTopology.TriangleList);
             _context.VSSetShader(_vs);
-            _context.PSSetShader(session.Layout.HasAlpha ? _psAlpha : _psOpaque);
+            _context.PSSetShader(_ps);
             _context.PSSetConstantBuffer(0, session.Constants);
             for (int p = 0; p < ProResVideoSession.MaxPlanes; p++)
             {
@@ -428,8 +435,7 @@ internal sealed class ProResGpuPipeline : IProResRenderTarget, IDisposable
         _d3d9Device?.Dispose();
         _d3d9?.Dispose();
         _sampler?.Dispose();
-        _psAlpha?.Dispose();
-        _psOpaque?.Dispose();
+        _ps?.Dispose();
         _vs?.Dispose();
         _rtv?.Dispose();
         _renderTarget?.Dispose();

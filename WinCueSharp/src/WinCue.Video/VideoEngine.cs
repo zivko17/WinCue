@@ -681,8 +681,17 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             StopSyncPll(cueId);
         foreach (int cueId in _fadeTimers.Keys.ToList())
             CancelFade(cueId);
-        foreach (int cueId in _players.Keys.ToList())
+        // LOS TRES TIPOS de player, no solo los de mpv: los motores propios
+        // tienen HILOS VIVOS (decode y presentación) que están usando el device
+        // D3D de su slot. Destruir el pipeline con esos hilos dentro es un
+        // acceso a recursos liberados — con ProRes, además, dentro de código
+        // NATIVO. Antes solo se barría _players y los motores propios se
+        // quedaban corriendo hasta que el proceso los arrastraba.
+        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
+                     .Concat(_proresPlayers.Keys).ToList())
+        {
             TerminatePlayer(cueId);
+        }
         foreach (var slot in _gpuPool.ToList())
         {
             slot.Pipeline.Dispose();
