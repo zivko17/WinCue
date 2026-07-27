@@ -237,6 +237,13 @@ public partial class SettingsWindow : Window
         Note(pb, Loc.T("El audio de los vídeos suena por el motor de audio (EQ, compresor, VU por cue) en STREAMING: RAM constante, sin límite de duración (0). Un valor > 0 lo limita (opt-out). Con el streaming desactivado (WINCUE_MIRROR_STREAMING=0) el audio se decodifica entero a RAM (~23 MB/min) y 0 vuelve a significar 20 min.",
                  "Video audio plays through the audio engine (EQ, compressor, per-cue VU) via STREAMING: constant RAM, no duration limit (0). A value > 0 caps it (opt-out). With streaming disabled (WINCUE_MIRROR_STREAMING=0) audio is fully decoded to RAM (~23 MB/min) and 0 falls back to 20 min."));
 
+        // ── MOTOR ProRes PROPIO ─────────────────────────────────────────
+        var pr = Group(root, Loc.T("MOTOR ProRes", "ProRes ENGINE"));
+        Check("video_prores_engine", pr,
+            Loc.T("Motor propio para ProRes (.mov)", "Native engine for ProRes (.mov)"));
+        Note(pr, Loc.T("Los ProRes en .mov se reproducen con el motor de vídeo de WinCue en vez de con mpv: se decodifican UNA sola vez (salida y PGM comparten imagen) y su audio pasa por el rack completo. Desmárcalo si este equipo da problemas: entonces ProRes vuelve a ir por mpv exactamente como antes. En directo también se apaga con la variable WINCUE_PRORES_ENGINE=0.",
+                 "ProRes files in .mov play through WinCue's own video engine instead of mpv: they are decoded ONCE (output and PGM share the image) and their audio goes through the full rack. Uncheck it if this machine misbehaves: ProRes then goes back through mpv exactly as before. During a show it can also be switched off with WINCUE_PRORES_ENGINE=0."));
+
         return root;
     }
 

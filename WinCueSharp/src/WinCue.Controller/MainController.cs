@@ -375,6 +375,34 @@ public class MainController
         && !CanvasMode
         && cue.GeoMode != GeoMode.Custom;
 
+    /// <summary>true si el cue puede ir por el MOTOR ProRes PROPIO: ProRes en
+    /// contenedor .mov, rate 1.0, compositor activo, modo clásico (sin canvas) y
+    /// geometría FULL — exactamente el mismo criterio que HAP, más el
+    /// INTERRUPTOR DE AJUSTES.
+    /// <para>
+    /// Dos apagados, y los dos a propósito:
+    /// </para>
+    /// <list type="bullet">
+    /// <item><description><c>video_prores_engine</c> en Ajustes → Vídeo: lo pidió
+    /// Andrés explícitamente, «por si el PC en el que corra da problemas». A
+    /// diferencia de HAP, aquí el decodificador es NATIVO Y EN PROCESO: si
+    /// revienta se lleva la aplicación, y el operador tiene que poder quitarlo
+    /// de en medio sin tocar variables de entorno.</description></item>
+    /// <item><description><c>WINCUE_PRORES_ENGINE=0</c>: red de seguridad de
+    /// DIRECTO, como la de HAP — se apaga en caliente sin abrir Ajustes.</description></item>
+    /// </list>
+    /// Con cualquiera de los dos apagado, ProRes va por mpv exactamente como
+    /// hasta hoy (y con su audio por el rack si es elegible para el híbrido).</summary>
+    private bool ProResEngineEligible(Cue cue) =>
+        Environment.GetEnvironmentVariable("WINCUE_PRORES_ENGINE") != "0"
+        && _settings.Get("video_prores_engine", true)
+        && MediaImporter.IsProResCodec(cue.FilePath)
+        && string.Equals(Path.GetExtension(cue.FilePath), ".mov", StringComparison.OrdinalIgnoreCase)
+        && Math.Abs(RateOf(cue) - 1.0) < 0.001
+        && _settings.Get("video_compositor", false)
+        && !CanvasMode
+        && cue.GeoMode != GeoMode.Custom;
+
     /// <summary>true si el cue de vídeo NO-HAP (lo reproduce mpv) es elegible
     /// para la RUTA HÍBRIDA (paso 3b): su audio por el AudioEngine (rack
     /// nativo) con mpv MUDO (aid=no) disciplinado por el PLL. Condiciones:
@@ -769,7 +797,7 @@ public class MainController
     private bool WillMirrorAudio(Cue cue) =>
         MediaImporter.IsUnsupportedVideoCodec(cue.FilePath)
             ? HapEngineEligible(cue)
-            : HybridAudioEligible(cue);
+            : ProResEngineEligible(cue) || HybridAudioEligible(cue);
 
     /// <summary>Detiene un cue por id (botón ■ del panel de activos).</summary>
     public void StopCueById(int cueId)
@@ -1228,6 +1256,23 @@ public class MainController
                             $"«{cue.Name}»: HAP → ruta clásica (sin fundidos de opacidad).",
                             $"«{cue.Name}»: HAP → classic path (no opacity fades)."));
                     }
+                }
+                else if (ProResEngineEligible(cue))
+                {
+                    // MOTOR ProRes PROPIO (paso 2 de ProRes). Ojo a la
+                    // diferencia con HAP: mpv SÍ renderiza ProRes, así que aquí
+                    // no se gana "poder verlo" sino (a) no decodificar el mismo
+                    // cue DOS veces —el player de la salida y el mini-monitor
+                    // de PGM— y (b) hacer la conversión de color en el shader
+                    // en lugar de en la CPU con swscale. El audio va por el
+                    // AudioEngine con id espejo y actúa de reloj maestro.
+                    // Si el motor propio no puede, el engine cae a mpv MUDO:
+                    // el audio ya suena por el espejo y no debe sonar doble.
+                    mirrorAudio = true;
+                    vparams = vparams with { UseProResEngine = true, CanvasOutputs = null };
+                    _view.FlashStatus(Loc.T(
+                        $"«{cue.Name}»: ProRes → motor propio (audio por el rack).",
+                        $"«{cue.Name}»: ProRes → native engine (audio through the rack)."));
                 }
                 else if (HybridAudioEligible(cue))
                 {
@@ -2242,6 +2287,19 @@ public class MainController
         {
             _video.PreloadNext(cue.Id, cue.FilePath);
             if (HapEngineEligible(cue) && !_running.ContainsKey(cue.Id))
+                _audio.Preload(VideoAudioId(cue.Id), cue.FilePath,
+                    MirrorPlayParams(cue, 0.0, cue.FadeIn));
+            return;
+        }
+        // MOTOR ProRes PROPIO: igual que HAP — sin standby GPU (el player de
+        // mpv que dejaría preparado NO es el que va a reproducir, y su
+        // superficie del pool le robaría el slot al motor propio). Solo
+        // verificación clásica + PRECALENTADO del audio espejo, que es el reloj
+        // maestro: si arranca frío, el vídeo paga un resync en el GO.
+        if (ProResEngineEligible(cue))
+        {
+            _video.PreloadNext(cue.Id, cue.FilePath);
+            if (!_running.ContainsKey(cue.Id))
                 _audio.Preload(VideoAudioId(cue.Id), cue.FilePath,
                     MirrorPlayParams(cue, 0.0, cue.FadeIn));
             return;

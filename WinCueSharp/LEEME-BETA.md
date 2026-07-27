@@ -41,6 +41,21 @@ mostrará un aviso azul de SmartScreen:
 - Estabilidad en sesiones largas y con archivos grandes.
 - Vídeo HAP: se reproduce por la "ruta clásica" (sin fundidos de opacidad
   entre capas) — cuéntanos si lo usas y cómo va.
+- **Vídeo ProRes en `.mov`**: con el compositor GPU activo lo reproduce el
+  motor de vídeo propio de WinCue, no mpv. Se decodifica una sola vez (la
+  salida y el monitor de programa comparten imagen) y su audio pasa por el
+  rack completo, con su canal en el mixer. Si en tu equipo diera problemas,
+  **puedes desactivarlo** en **Settings → Video → «Motor propio para ProRes»**
+  y los ProRes vuelven a ir por mpv como el resto. Cuéntanoslo si tienes que
+  desactivarlo: es justo lo que necesitamos saber.
+
+## Carpeta `ffmpeg-lgpl`
+
+Junto al ejecutable viaja una carpeta `ffmpeg-lgpl` con tres bibliotecas de
+FFmpeg (LGPL) que usa el motor ProRes. **No la borres ni la muevas**: sin ella
+los ProRes siguen viéndose, pero por mpv. Puedes sustituir esas DLL por otra
+build compatible de FFmpeg si lo prefieres — la licencia LGPL te da ese
+derecho y `ffmpeg-lgpl/ffmpeg-BUILD.txt` dice exactamente de dónde salen.
 
 ## Si algo falla
 

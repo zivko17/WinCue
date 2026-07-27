@@ -1,0 +1,20 @@
+﻿FFmpeg LGPL (shared) — motor ProRes propio de WinCue
+====================================================
+
+Origen      : https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip
+Rama        : n8.1
+Descargado  : 2026-07-27 23:39:47 +02:00
+SHA256 zip  : AA7F5816B8326A6F135AB66496E0EF6AF5313308C01AA4C3CB80DFBAED781C85
+Receta CI   : https://github.com/BtbN/FFmpeg-Builds (variante 'lgpl-shared')
+
+OBLIGACIÓN LGPL: al distribuir estas DLL hay que ofrecer el fuente exacto
+de ESTA build (tarball + scripts de BtbN/FFmpeg-Builds del mismo commit) y
+permitir que el usuario las sustituya (enlace dinámico, sin firmar ni
+sellar la carpeta). Verificación de que NO es GPL:
+    dotnet run --project tools\verificar-ffmpeg\verificar-ffmpeg.csproj
+
+DLL incluidas (solo las que WinCue enlaza; avformat/avfilter/avdevice/
+swscale del zip original NO se distribuyen porque no se usan):
+  avcodec-62.dll             70.875.136 bytes  840C71A812427A1DCABD71990D4DCFBE042B2137457D022CF06557A6F311A5B2
+  avutil-60.dll               2.937.856 bytes  96B458A2F911B5C82B4E040BB790B9E4463569758E99D7CAD70BA7F40CC78F63
+  swresample-6.dll              723.968 bytes  9F73B88C36753F8A79EB8E7DB53B8F68CE07034620FB509EF605AD05E25FECC3

@@ -10,3 +10,14 @@ graphify-out/
 # Media de prueba HAP (generada por tests/hap-test/generar-media.ps1)
 tests/hap-test/*.mov
 tests/hap-test/*.mp4
+
+# Media de prueba ProRes (generada por tests/prores-test/generar-media.ps1)
+tests/prores-test/*.mov
+tests/prores-test/*.mp4
+
+# DLL nativas LGPL de FFmpeg (motor ProRes propio): NO se versionan, se
+# obtienen con tools/ffmpeg-lgpl/obtener-ffmpeg-lgpl.ps1. Lo que SÍ se versiona
+# es la PROCEDENCIA (ffmpeg-BUILD.txt), que la LGPL obliga a poder ofrecer.
+ffmpeg-lgpl/bin/
+ffmpeg-lgpl/LICENSE.txt
+ffmpeg-lgpl/_extract/

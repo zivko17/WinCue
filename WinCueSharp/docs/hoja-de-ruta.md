@@ -82,7 +82,13 @@ Nada de esto es opcional para cobrar. Mucho depende de decisiones de Andrés.*
 ## FASE 4 — Crecimiento / nivel 2 (6-18 meses, según tracción)
 *"Watchout de bolsillo". Solo si el nivel 1 tracciona.*
 
-- ProRes con decode propio (siguiente códec del motor).
+- ~~ProRes con decode propio (siguiente códec del motor).~~ **ADELANTADO Y HECHO**
+  (2026-07-27): el decodificador de FFmpeg va en proceso alimentando nuestra
+  tubería, con interruptor en Ajustes y kill-switch de entorno. Se adelantó
+  porque el laboratorio del paso 1 lo dejó todo medido y la elegibilidad reutiliza
+  la de HAP casi entera. Ver `docs/arquitectura-motor-video.md` y el paso 2 de
+  `tools/prores-lab/INFORME.md`. Lo que sigue pendiente de ProRes: prefetch de
+  disco real, medida en máquina solo-iGPU y publicar en el anillo de L1.
 - NDI, timecode chase robusto, quizá 10-bit.
 - Lo que pidan los usuarios que YA pagan (no lo que imaginemos).
 

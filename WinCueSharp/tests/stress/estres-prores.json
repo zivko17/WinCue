@@ -1,0 +1,159 @@
+{
+  "version": 1,
+  "cues": [
+    {
+      "id": 1,
+      "type": "MEMO",
+      "number": "0",
+      "name": "TORTURA ProRes MIXTA — ProRes + HAP + H.264 en el mismo show; el modo --stress la relanza en bucle",
+      "notes": "Martillea WinCue.Video.ProRes conviviendo con los otros dos motores: los TRES pools de superficies vivos a la vez, crossfades ProRes<->HAP y ProRes<->H.264 en la misma pista, cambios de perfil (422 / 422 HQ / Proxy / 4444 de 12 bits con alfa) que obligan a reconstruir la sesion del pool, cambios de resolucion 720/1080/4K, 30 y 60 fps, cues con y sin audio, trims, un loop parado por STOP y el barrido final. OJO A LA FUGA: un frame 4K 4444 sin liberar son 63 MB, asi que el watchdog (WINCUE_STRESS_WATCH=1) es obligatorio. Requiere: compositor GPU activo (video_compositor=true), las DLL de ffmpeg-lgpl, la media de tests/prores-test (generar-media.ps1) y la de tests/hap-test (generar-tortura.ps1). Una vuelta ~ 52 s.",
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 2,
+      "type": "VIDEO",
+      "number": "1",
+      "name": "ProRes 1080p30 422 HQ con audio (motor propio, reloj = audio espejo)",
+      "file_path": "../prores-test/pr-1080p30-422hq-audio.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_out": 0.5,
+      "post_wait": 3.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 3,
+      "type": "VIDEO",
+      "number": "2",
+      "name": "ProRes 4K30 422 (CAMBIO DE RESOLUCION + crossfade misma pista)",
+      "file_path": "../prores-test/pr-4k30-422-audio.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 3.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 4,
+      "type": "VIDEO",
+      "number": "3",
+      "name": "ProRes 1080p30 4444 CON ALFA (12 bits, 4 planos: RECONSTRUYE la sesion del pool)",
+      "file_path": "../prores-test/pr-1080p30-4444-alfa.mov",
+      "duration": 3.5,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 3.0,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 5,
+      "type": "VIDEO",
+      "number": "4",
+      "name": "HAP 1080p30 encima de ProRes (CROSSFADE ENTRE MOTORES DISTINTOS)",
+      "file_path": "../hap-test/demo-hap-1080p30-audio.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 3.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 6,
+      "type": "VIDEO",
+      "number": "5",
+      "name": "ProRes 1080p30 422 SIN audio (sin reloj maestro: Stopwatch propio)",
+      "file_path": "../prores-test/pr-1080p30-422-noaudio.mov",
+      "duration": 3.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 2.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 7,
+      "type": "VIDEO",
+      "number": "6",
+      "name": "H.264 1080p30 por mpv (crossfade ProRes -> mpv en la misma pista)",
+      "file_path": "../prores-test/h264-1080p30-audio.mp4",
+      "duration": 3.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 2.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 8,
+      "type": "VIDEO",
+      "number": "7",
+      "name": "ProRes 720p30 Proxy + pcm 96k GRANDE + trim_start (espejo ARRANCA TARDE)",
+      "file_path": "../prores-test/pr-720p30-proxy-bigpcm.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "trim_start": 0.5,
+      "post_wait": 3.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 9,
+      "type": "VIDEO",
+      "number": "8",
+      "name": "ProRes 1080p60 422 HQ + trim_end (60 fps, recorte de salida)",
+      "file_path": "../prores-test/pr-1080p60-422hq-audio.mov",
+      "duration": 2.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "trim_end": 2.5,
+      "post_wait": 2.0,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 10,
+      "type": "VIDEO",
+      "number": "9",
+      "name": "ProRes 1080p30 422 HQ RUIDO en LOOP (pista 1, fondo, bitrate REAL; lo para el STOP)",
+      "file_path": "../prores-test/pr-1080p30-422hq-ruido.mov",
+      "timeline_layer": 1,
+      "loop": true,
+      "fade_in": 1.0,
+      "post_wait": 6.0,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 11,
+      "type": "VIDEO",
+      "number": "10",
+      "name": "HAP Q 1080p30 ENCIMA del loop ProRes (dos motores propios a la vez)",
+      "file_path": "../hap-test/demo-hap-q-1080p30.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_in": 0.5,
+      "fade_out": 0.5,
+      "post_wait": 4.0,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 12,
+      "type": "STOP",
+      "number": "11",
+      "name": "STOP ALL con fundido (para el loop y barre; nada queda colgado)",
+      "fade_out": 1.0,
+      "post_wait": 1.5,
+      "continue_mode": "AUTO_CONTINUE"
+    },
+    {
+      "id": 13,
+      "type": "WAIT",
+      "number": "12",
+      "name": "respiro final — aqui el runner detecta la vuelta completa",
+      "duration": 1.0,
+      "continue_mode": "NONE"
+    }
+  ]
+}

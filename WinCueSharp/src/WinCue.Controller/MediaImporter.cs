@@ -51,8 +51,19 @@ public static class MediaImporter
     private static readonly IReadOnlySet<string> HapContainers =
         new HashSet<string>(StringComparer.OrdinalIgnoreCase) { ".mov", ".avi", ".mkv" };
 
+    /// <summary>Códecs que tienen MOTOR PROPIO en WinCue (sin mpv). mpv los
+    /// renderiza perfectamente: lo que gana el motor propio es no decodificar
+    /// el mismo cue DOS veces (salida + mini-monitor de PGM) y recuperar los
+    /// fundidos de opacidad por GPU. El enrutado real lo decide el controlador
+    /// (elegibilidad + interruptor de Ajustes).</summary>
+    private static readonly IReadOnlySet<string> ProResCodecs =
+        new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "prores" };
+
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool>
         _unsupportedVideoCache = new(StringComparer.OrdinalIgnoreCase);
+
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, bool>
+        _proresCache = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>SOLO TESTS: siembra la caché de sondeo para simular un archivo
     /// HAP sin ffprobe ni archivo real (los tests del controlador con motores
@@ -60,11 +71,35 @@ public static class MediaImporter
     internal static void SeedUnsupportedCodecCache(string filePath, bool unsupported) =>
         _unsupportedVideoCache[Path.GetFullPath(filePath)] = unsupported;
 
+    /// <summary>SOLO TESTS: lo mismo para el sondeo de ProRes.</summary>
+    internal static void SeedProResCache(string filePath, bool isProRes) =>
+        _proresCache[Path.GetFullPath(filePath)] = isProRes;
+
     /// <summary>Invalida el sondeo cacheado de una ruta cuyo ARCHIVO cambió
     /// después de sondearse (p. ej. el destino de una conversión a HAP que
-    /// existía a medias). El siguiente IsUnsupportedVideoCodec re-sondea.</summary>
-    public static void InvalidateCodecProbe(string filePath) =>
-        _unsupportedVideoCache.TryRemove(Path.GetFullPath(filePath), out _);
+    /// existía a medias). El siguiente sondeo vuelve a lanzar ffprobe.</summary>
+    public static void InvalidateCodecProbe(string filePath)
+    {
+        string full = Path.GetFullPath(filePath);
+        _unsupportedVideoCache.TryRemove(full, out _);
+        _proresCache.TryRemove(full, out _);
+    }
+
+    /// <summary>true si el vídeo es ProRes (candidato al MOTOR ProRes PROPIO).
+    /// Solo sondea .mov —que es el único contenedor por el que entra el motor
+    /// propio, porque el demuxer es de QuickTime— y cachea por ruta. Si ffprobe
+    /// no está devuelve false: sin poder comprobarlo, ruta de siempre.</summary>
+    public static bool IsProResCodec(string filePath)
+    {
+        if (filePath.Length == 0
+            || !string.Equals(Path.GetExtension(filePath), ".mov", StringComparison.OrdinalIgnoreCase))
+        {
+            return false;
+        }
+
+        return _proresCache.GetOrAdd(Path.GetFullPath(filePath),
+            p => ProResCodecs.Contains(VideoCodec(p)));
+    }
 
     /// <summary>Códec del primer stream de vídeo (minúsculas) vía ffprobe;
     /// "" si no hay vídeo o no se puede leer.</summary>
@@ -151,9 +186,13 @@ public static class MediaImporter
 
         // HAP se acepta: el controlador lo enruta por la ruta clásica (el
         // compositor no lo soporta). Sondearlo AQUÍ calienta la caché para que
-        // el enrutado en caliente nunca lance ffprobe en el hilo de UI.
+        // el enrutado en caliente nunca lance ffprobe en el hilo de UI. Lo
+        // mismo con ProRes, que decide si el cue va por el motor propio.
         if (result.MediaType == "VIDEO")
+        {
             _ = IsUnsupportedVideoCodec(result.FilePath);
+            _ = IsProResCodec(result.FilePath);
+        }
 
         string oldPath = cue.FilePath;
         cue.FilePath = result.FilePath;

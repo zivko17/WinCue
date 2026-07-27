@@ -1,0 +1,23 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+    <AssemblyName>verificar-ffmpeg</AssemblyName>
+    <RootNamespace>WinCue.Tools.VerificarFFmpeg</RootNamespace>
+    <!-- Fuera de WinCueSharp.sln: es una herramienta de empaquetado, no
+         producto. La ejecuta publish.ps1 (y quien quiera comprobar a mano).
+         Misma convención que tools/libmpv-lgpl/verificar-licencia: una
+         utilidad de consola no hereda el análisis estricto del producto (si no,
+         CA1303 exige tabla de recursos para cada línea que imprime). -->
+    <EnableNETAnalyzers>false</EnableNETAnalyzers>
+    <EnforceCodeStyleInBuild>false</EnforceCodeStyleInBuild>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WinCue.Video\WinCue.Video.csproj" />
+  </ItemGroup>
+
+</Project>

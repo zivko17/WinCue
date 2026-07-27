@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // VideoEngine.cs — Motor de Vídeo con libmpv (port de video_engine.py)
 // =============================================================================
 //
@@ -25,7 +25,9 @@
 // =============================================================================
 
 using WinCue.Core;
+using WinCue.Video.Containers;
 using WinCue.Video.Hap;
+using WinCue.Video.ProRes;
 
 namespace WinCue.Video;
 
@@ -123,9 +125,38 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     }
     private readonly List<HapSlot> _hapPool = new();
 
+    /// <summary>MOTOR ProRes PROPIO (paso 2 de ProRes): players sin mpv de los
+    /// cues enrutados con UseProResEngine. Conviven con _players y _hapPlayers
+    /// en los diccionarios de estado; cada uno posee su slot mientras suena.</summary>
+    private readonly Dictionary<int, ProResCuePlayer> _proresPlayers = new();
+
+    /// <summary>Pool de pipelines ProRes persistentes, misma regla que _hapPool
+    /// (auditoría 05). CON UN AÑADIDO: el slot cachea también la SESIÓN (el ring
+    /// de texturas de plano), y la spec de esas texturas depende del FORMATO DE
+    /// PÍXEL además del tamaño — 3 planos con croma a media anchura en 4:2:2 de
+    /// 10 bits frente a 4 planos completos en 4444 de 12. Reutilizarla cuando
+    /// coincide evita crear y destruir hasta 190 MB de texturas por cue (un
+    /// frame 4K 4444 son 63 MB × 3 slots del ring); cuando NO coincide se
+    /// reconstruye, que es lo único correcto.</summary>
+    private sealed class ProResSlot
+    {
+        public required ProResGpuPipeline Pipeline;
+        public required IVideoLayerSurface Sink;
+        public required int Screen;
+        public required int Layer;
+        public required string Spec;   // "WxH" de la SUPERFICIE (clave del pool)
+        public ProResVideoSession? Session;
+        public string SessionSpec = "";   // "WxH|layout" del VÍDEO (clave de la sesión)
+        public int? BusyCueId;
+        /// <summary>CONGELADO (misma semántica que en GpuSlot y HapSlot).</summary>
+        public int? FrozenCueId;
+    }
+    private readonly List<ProResSlot> _proresPool = new();
+
     /// <summary>Reloj inyectado por la App: elapsed del stream de AUDIO del
     /// cue (id de vídeo real), o null si no suena. Se consulta desde el hilo
-    /// de presentación del player → debe ser thread-safe.</summary>
+    /// de presentación del player → debe ser thread-safe. Lo comparten las TRES
+    /// rutas con audio espejo: motor HAP, motor ProRes y el PLL del híbrido.</summary>
     private Func<int, double?>? _hapClock;
 
     /// <summary>GO INSTANTÁNEO: player del cue en STANDBY ya creado y PAUSADO
@@ -357,7 +388,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 
     public void StopAll()
     {
-        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys).ToList())
+        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
+                     .Concat(_proresPlayers.Keys).ToList())
             if (GetState(cueId) == MediaCueState.Playing)
                 Stop(cueId);
         // STOP ALL / PANIC / corte duro: no queda cruce que servir — ninguna
@@ -384,9 +416,19 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// que ningún camino de cierre deja slots reservados).</summary>
     public int FrozenSurfaceCount => _freeze.Count;
 
+    /// <summary>Cues que reproduce ahora mismo el MOTOR HAP propio.</summary>
+    public int HapEnginePlayerCount => _hapPlayers.Count;
+
+    /// <summary>Cues que reproduce ahora mismo el MOTOR ProRes propio. Es la
+    /// única forma de comprobar DESDE FUERA si un cue entró de verdad por el
+    /// motor propio o si cayó a mpv — lo usan los tests del fallback y el
+    /// diagnóstico del soak.</summary>
+    public int ProResEnginePlayerCount => _proresPlayers.Count;
+
     public bool IsPlaying(int cueId) =>
         GetState(cueId) == MediaCueState.Playing &&
-        (_players.ContainsKey(cueId) || _hapPlayers.ContainsKey(cueId));
+        (_players.ContainsKey(cueId) || _hapPlayers.ContainsKey(cueId)
+         || _proresPlayers.ContainsKey(cueId));
 
     public bool AnyPlaying => _states.Values.Any(s => s == MediaCueState.Playing);
 
@@ -394,9 +436,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// la conoce). Coherente con GetElapsed: ambos son relativos al recorte.</summary>
     public double GetDuration(int cueId)
     {
-        // Motor HAP: la duración efectiva (trim aplicado) sale del demuxer
+        // Motores propios: la duración efectiva (trim aplicado) sale del
+        // demuxer, no de mpv — se conoce desde el primer instante del cue
         if (_hapPlayers.TryGetValue(cueId, out var hap))
             return hap.GetDuration();
+        if (_proresPlayers.TryGetValue(cueId, out var pr))
+            return pr.GetDuration();
         if (!_players.TryGetValue(cueId, out var pl))
             return 0.0;
         double d = pl.GetPropertyDouble("duration") ?? 0.0;
@@ -418,6 +463,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // pasada — misma semántica que mpv con loop-file
         if (_hapPlayers.TryGetValue(cueId, out var hap))
             return hap.GetElapsed();
+        if (_proresPlayers.TryGetValue(cueId, out var pr))
+            return pr.GetElapsed();
         if (!_players.TryGetValue(cueId, out var pl))
             return 0.0;
         var p = _playParams.GetValueOrDefault(cueId);
@@ -479,7 +526,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // Motor HAP: el vídeo no lleva audio (va aparte, por el AudioEngine
         // espejo del controlador) — aquí solo se honra el stopAfter; el
         // fundido audible/visual lo hacen el audio espejo y la opacidad.
-        if (_hapPlayers.ContainsKey(cueId))
+        if (_hapPlayers.ContainsKey(cueId) || _proresPlayers.ContainsKey(cueId))
         {
             CancelFade(cueId);
             if (duration <= 0.0)
@@ -554,6 +601,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             try { player.SetProperty("pause", true); } catch (Exception) { }
         foreach (var hap in _hapPlayers.Values)
             hap.SetPaused(true);
+        foreach (var pr in _proresPlayers.Values)
+            pr.SetPaused(true);
     }
 
     /// <summary>Reanuda todos los vídeos pausados.</summary>
@@ -565,6 +614,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         foreach (var (cueId, hap) in _hapPlayers)
             if (GetState(cueId) == MediaCueState.Playing)
                 hap.SetPaused(false);
+        foreach (var (cueId, pr) in _proresPlayers)
+            if (GetState(cueId) == MediaCueState.Playing)
+                pr.SetPaused(false);
     }
 
     /// <summary>Pausa SOLO este vídeo (congela reloj y frame).</summary>
@@ -574,6 +626,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             try { player.SetProperty("pause", true); } catch (Exception) { }
         if (_hapPlayers.TryGetValue(cueId, out var hap))
             hap.SetPaused(true);
+        if (_proresPlayers.TryGetValue(cueId, out var pr))
+            pr.SetPaused(true);
     }
 
     public void ResumeCue(int cueId)
@@ -582,6 +636,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             try { player.SetProperty("pause", false); } catch (Exception) { }
         if (_hapPlayers.TryGetValue(cueId, out var hap))
             hap.SetPaused(false);
+        if (_proresPlayers.TryGetValue(cueId, out var pr))
+            pr.SetPaused(false);
     }
 
     /// <summary>Aplica la geometría a un vídeo EN REPRODUCCIÓN (en vivo).
@@ -599,6 +655,8 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             ApplyGeo(player, geo, BaseZoom(p));
         if (_hapPlayers.TryGetValue(cueId, out var hap))
             hap.ApplyGeometry(geo, p?.Scale ?? scalePercent ?? 100.0);
+        if (_proresPlayers.TryGetValue(cueId, out var pr))
+            pr.ApplyGeometry(geo, p?.Scale ?? scalePercent ?? 100.0);
     }
 
     /// <summary>video-zoom (log2) equivalente al parámetro Scale del cue.</summary>
@@ -623,8 +681,17 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             StopSyncPll(cueId);
         foreach (int cueId in _fadeTimers.Keys.ToList())
             CancelFade(cueId);
-        foreach (int cueId in _players.Keys.ToList())
+        // LOS TRES TIPOS de player, no solo los de mpv: los motores propios
+        // tienen HILOS VIVOS (decode y presentación) que están usando el device
+        // D3D de su slot. Destruir el pipeline con esos hilos dentro es un
+        // acceso a recursos liberados — con ProRes, además, dentro de código
+        // NATIVO. Antes solo se barría _players y los motores propios se
+        // quedaban corriendo hasta que el proceso los arrastraba.
+        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
+                     .Concat(_proresPlayers.Keys).ToList())
+        {
             TerminatePlayer(cueId);
+        }
         foreach (var slot in _gpuPool.ToList())
         {
             slot.Pipeline.Dispose();
@@ -638,6 +705,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             slot.Sink.ClearSurface();
         }
         _hapPool.Clear();
+        foreach (var slot in _proresPool.ToList())
+        {
+            // La sesión (ring de texturas de plano) muere ANTES que su device
+            slot.Session?.Dispose();
+            slot.Pipeline.Dispose();
+            slot.Sink.ClearSurface();
+        }
+        _proresPool.Clear();
     }
 
     public void Dispose()
@@ -788,6 +863,29 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 Volume = 0.0,
                 CanvasOutputs = null,
                 HandoverSeconds = 0.0,
+                ExternalAudio = true,
+            };
+            StartPlayback(cueId);
+            return;
+        }
+
+        // ── MOTOR ProRes PROPIO (paso 2): .mov ProRes con compositor ─────
+        if (p.UseProResEngine)
+        {
+            if (gpu && !canvas && StartProResPlayback(cueId, filePath, p, screen, layer))
+                return;
+            // Fallback de emergencia, idéntico al de HAP: mpv clásico MUDO. El
+            // audio del cue ya suena por el AudioEngine (espejo del
+            // controlador), así que con audio aquí sonaría DOBLE.
+            // ExternalAudio=true: sin pista de audio (aid=no) y con el PLL
+            // híbrido disciplinando el vídeo al reloj del espejo.
+            // OJO: ForceClassicPath NO se activa (a diferencia de HAP) — mpv SÍ
+            // renderiza ProRes por el compositor, así que el cue conserva los
+            // fundidos de opacidad aunque el motor propio no haya podido.
+            _playParams[cueId] = p with
+            {
+                UseProResEngine = false,
+                Volume = 0.0,
                 ExternalAudio = true,
             };
             StartPlayback(cueId);
@@ -1051,6 +1149,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             .Concat(_hapPool
                 .Where(s => s.FrozenCueId is not null && s.Screen == screen && s.Layer == layer)
                 .Select(s => s.FrozenCueId!.Value))
+            .Concat(_proresPool
+                .Where(s => s.FrozenCueId is not null && s.Screen == screen && s.Layer == layer)
+                .Select(s => s.FrozenCueId!.Value))
             .ToList();
         foreach (int id in ids)
             ReleaseFrozenSurfaces(id);
@@ -1085,8 +1186,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // MOTOR HAP: sin precarga en pausa (documentado) — el GO paga solo el
         // demux del moov + el primer frame (~ms: en HAP todo es intra). La
         // verificación clásica deja el archivo cacheado para el Play.
-        if (np.UseHapEngine)
+        if (np.UseHapEngine || np.UseProResEngine)
         {
+            // Motor ProRes: mismo criterio. El GO paga el demux del moov y el
+            // primer frame; ProRes es todo-intra, así que no hay GOP que
+            // rebobinar y el arranque es de milisegundos.
             Load(cueId, filePath);
             return;
         }
@@ -1352,6 +1456,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             Trace($"hap: terminate cue={cueId}");
             hap.Dispose();
             ReleaseHapSlot(cueId, freezeUntil);
+        }
+        // Motor ProRes: igual — el player para sus hilos y suelta los frames
+        // nativos del ring (63 MB cada uno en 4K 4444) antes de tocar el slot
+        if (_proresPlayers.Remove(cueId, out var pr))
+        {
+            Trace($"prores: terminate cue={cueId}");
+            pr.Dispose();
+            ReleaseProResSlot(cueId, freezeUntil);
         }
     }
 
@@ -1639,6 +1751,229 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             return;
         }
         Trace($"hap: release slot cue={cueId}");
+        slot.Sink.ReleaseCue(cueId);
+    }
+
+    // ------------------------------------------------------------------
+    // MOTOR ProRes PROPIO (paso 2): arranque, pool y ciclo de vida
+    // ------------------------------------------------------------------
+
+    /// <summary>Cues que ahora mismo reproduce el motor ProRes. Es el reparto
+    /// del presupuesto de hilos: el laboratorio midió que lo correcto es
+    /// ≈ lógicos/capas, no ProcessorCount por capa (§ 4 del INFORME).</summary>
+    private int ActiveProResLayers => _proresPlayers.Count + 1;
+
+    /// <summary>Arranca un cue por el motor ProRes propio. Devuelve false si el
+    /// demux, las DLL de FFmpeg o el pipeline GPU fallan (el llamante cae a mpv
+    /// clásico MUTEADO). El VÍDEO va por aquí; su AUDIO lo arranca el
+    /// controlador en el AudioEngine (id espejo) y llega como reloj inyectado.</summary>
+    private bool StartProResPlayback(int cueId, string filePath, VideoPlayParams p,
+        int screen, int layer)
+    {
+        MovInfo info;
+        try
+        {
+            if (!FFmpegLoader.IsAvailable)
+            {
+                throw new DllNotFoundException(
+                    "no están las DLL LGPL de FFmpeg junto al ejecutable");
+            }
+
+            info = MovDemuxer.Open(filePath);
+            if (!ProResFormat.IsProRes(info.VideoFourcc))
+                throw new InvalidDataException($"fourcc no es ProRes: {info.VideoFourcc}");
+            if (info.FrameCount == 0 || info.Fps <= 1.0)
+                throw new InvalidDataException("pista de vídeo vacía o sin fps");
+        }
+        catch (Exception exc)
+        {
+            Trace($"prores: demux/carga falló cue={cueId}: {exc.Message}");
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Motor ProRes: {exc.Message}. Fallback a mpv.");
+            return false;
+        }
+
+        // El LAYOUT real (formato de píxel) lo decide el decodificador, no el
+        // fourcc: hay que abrirlo una vez para saber la spec de las texturas.
+        // Es también el ensayo general del decode nativo — si va a reventar,
+        // que reviente AQUÍ, donde todavía se puede caer a mpv.
+        PixelLayout layout;
+        try
+        {
+            layout = ProbeLayout(filePath, info);
+        }
+        catch (Exception exc)
+        {
+            Trace($"prores: sondeo del layout falló cue={cueId}: {exc.Message}");
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Motor ProRes: no se pudo decodificar ({exc.Message}). Fallback a mpv.");
+            return false;
+        }
+
+        TerminateSlotOccupants(cueId, screen, layer,
+            p.HandoverSeconds > 0.0, p.HandoverSeconds);
+        TerminatePlayer(cueId);
+
+        ProResSlot? slot = null;
+        ProResCuePlayer? player = null;
+        long t0 = System.Diagnostics.Stopwatch.GetTimestamp();
+        int threads = ThreadBudget.For(ActiveProResLayers);
+        try
+        {
+            var geo = p.Geometry ?? new VideoGeometry();
+            slot = AcquireProResSlot(cueId, screen, layer, (int)geo.SurfW, (int)geo.SurfH,
+                info.Width, info.Height, layout);
+            // CA2000: la propiedad del player se transfiere a _proresPlayers; el
+            // catch lo libera en toda ruta de error.
+#pragma warning disable CA2000
+            player = new ProResCuePlayer(filePath, info, slot.Pipeline, slot.Session!, p,
+                threads, () => _hapClock?.Invoke(cueId), Trace);
+#pragma warning restore CA2000
+            var thisPlayer = player;
+            player.FirstFrame += () => Post(() =>
+            {
+                LatencyReport?.Invoke(cueId,
+                    System.Diagnostics.Stopwatch.GetElapsedTime(t0).TotalMilliseconds);
+                FrameReady?.Invoke(cueId);
+            });
+            player.Ended += () => Post(() =>
+            {
+                // Fin natural. Misma regla de IDENTIDAD que en HAP: un Ended
+                // póstumo de una instancia sustituida no debe tocar al sucesor.
+                if (_proresPlayers.TryGetValue(cueId, out var cur) &&
+                    ReferenceEquals(cur, thisPlayer))
+                {
+                    if (GetState(cueId) == MediaCueState.Playing)
+                        SetState(cueId, MediaCueState.Stopped);
+                    TerminatePlayer(cueId);
+                }
+            });
+
+            _proresPlayers[cueId] = player;
+            _playerSlots[cueId] = (screen, layer);
+            _volumes[cueId] = p.Volume;
+            player.Start();
+        }
+        catch (Exception exc)
+        {
+            _proresPlayers.Remove(cueId);
+            _playerSlots.Remove(cueId);
+            player?.Dispose();
+            if (slot is not null)
+                ReleaseProResSlot(cueId);
+            Trace($"prores: arranque falló cue={cueId}: {exc.Message}");
+            ErrorOccurred?.Invoke(cueId,
+                $"[AVISO] Motor ProRes no disponible ({exc.Message}). Fallback a mpv.");
+            return false;
+        }
+
+        Trace($"prores: play cue={cueId} {info.Width}x{info.Height} " +
+            $"{info.VideoFourcc} {layout.Name} fps={info.Fps:F2} " +
+            $"frames={info.FrameCount} hilos={threads}");
+        ErrorOccurred?.Invoke(cueId,
+            $"[AVISO] Motor ProRes propio — salida {screen + 1}, pista {layer + 1}, " +
+            $"{layout.Name}, {threads} hilos, reloj: audio del cue.");
+        SetState(cueId, MediaCueState.Playing);
+        return true;
+    }
+
+    /// <summary>Decodifica el primer frame para saber el FORMATO DE PÍXEL real
+    /// (el fourcc solo dice el perfil). Se descarta enseguida: solo interesa el
+    /// layout, que es lo que dimensiona las texturas del ring.</summary>
+    private static PixelLayout ProbeLayout(string filePath, MovInfo info)
+    {
+        using var decoder = new ProResDecoder(info.Width, info.Height, ThreadBudget.Min,
+            ThreadMode.Slice, info.VideoFourcc);
+        using var buffer = new PaddedBuffer(Math.Max(1, info.MaxSampleSize));
+        using FileStream fs = new(filePath, FileMode.Open, FileAccess.Read, FileShare.Read);
+        SampleEntry first = info.Samples[0];
+        _ = buffer.ReadSample(fs, first);
+        decoder.SendPacket(buffer.AsPacket(first.Size));
+        if (!decoder.TryReceiveFrame())
+            throw new InvalidDataException("el decodificador no entregó el primer frame");
+        PixelLayout layout = decoder.Layout;
+        decoder.ReleaseFrame();
+        return layout;
+    }
+
+    /// <summary>Slot LIBRE del pool ProRes para (salida, pista, spec de
+    /// SUPERFICIE) — o crea su pipeline. El sink del compositor se cablea UNA
+    /// vez, igual que en los otros dos pools.
+    /// Además garantiza que el slot tiene una SESIÓN con la spec del VÍDEO
+    /// (tamaño + formato de píxel): si la que tenía no vale, se reconstruye.</summary>
+    private ProResSlot AcquireProResSlot(int cueId, int screen, int layer,
+        int surfW, int surfH, int videoW, int videoH, PixelLayout layout)
+    {
+        SweepExpiredFrozen();
+        string spec = $"{Math.Max(16, surfW)}x{Math.Max(16, surfH)}";
+        var slot = _proresPool.FirstOrDefault(s =>
+            s.BusyCueId is null && s.FrozenCueId is null
+            && s.Screen == screen && s.Layer == layer
+            && s.Spec == spec);
+        if (slot is null)
+        {
+            // CA2000: el pipeline pasa al pool (vive toda la sesión).
+#pragma warning disable CA2000
+            var pipeline = new ProResGpuPipeline(surfW, surfH);
+#pragma warning restore CA2000
+            var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
+            sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+            sink.SetFrameCopier(pipeline.CopyPresent);
+            pipeline.FrameRendered += sink.InvalidateFrame;
+            slot = new ProResSlot
+            {
+                Pipeline = pipeline, Sink = sink,
+                Screen = screen, Layer = layer, Spec = spec,
+            };
+            _proresPool.Add(slot);
+        }
+
+        // La SESIÓN se reutiliza si el vídeo entrante tiene la misma spec
+        // (tamaño Y formato de píxel). En un show real eso es lo habitual —
+        // los clips de una lista suelen compartir formato — y ahorra crear y
+        // destruir hasta 190 MB de texturas en cada GO.
+        string sessionSpec = ProResVideoSession.SpecOf(videoW, videoH, layout);
+        if (slot.Session is null || slot.SessionSpec != sessionSpec)
+        {
+            slot.Session?.Dispose();
+            slot.Session = slot.Pipeline.CreateSession(videoW, videoH, layout);
+            slot.SessionSpec = sessionSpec;
+            Trace($"prores: sesión nueva {sessionSpec} en slot {spec} " +
+                $"(salida {screen}, pista {layer})");
+        }
+
+        slot.BusyCueId = cueId;
+        slot.Sink.AssignCue(cueId);
+        return slot;
+    }
+
+    /// <summary>Suelta el slot ProRes del cue: sink oculto y pipeline LIBRE en
+    /// el pool (jamás se desmonta por cue). La SESIÓN se conserva para el
+    /// siguiente cue de la misma spec. Con <paramref name="freezeUntilMs"/> el
+    /// sink NO se oculta: la superficie de presentación conserva el último
+    /// fotograma dibujado — CONGELADO del saliente del crossfade.</summary>
+    private void ReleaseProResSlot(int cueId, long? freezeUntilMs = null)
+    {
+        var slot = _proresPool.FirstOrDefault(s => s.BusyCueId == cueId);
+        if (slot is null)
+            return;
+        slot.BusyCueId = null;
+        if (freezeUntilMs is long deadline)
+        {
+            Trace($"prores: congelado cue={cueId} (último fotograma en pantalla)");
+            slot.FrozenCueId = cueId;
+            _freeze.Freeze(cueId, deadline, () =>
+            {
+                DisposeThawTimer(cueId);
+                if (slot.FrozenCueId != cueId)
+                    return;
+                slot.FrozenCueId = null;
+                slot.Sink.ReleaseCue(cueId);
+            });
+            ScheduleThaw(cueId, deadline);
+            return;
+        }
+        Trace($"prores: release slot cue={cueId}");
         slot.Sink.ReleaseCue(cueId);
     }
 
