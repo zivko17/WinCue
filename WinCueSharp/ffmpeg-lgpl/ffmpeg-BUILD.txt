@@ -3,7 +3,7 @@
 
 Origen      : https://github.com/BtbN/FFmpeg-Builds/releases/download/latest/ffmpeg-n8.1-latest-win64-lgpl-shared-8.1.zip
 Rama        : n8.1
-Descargado  : 2026-07-27 23:39:47 +02:00
+Descargado  : 2026-07-28 00:55:45 +02:00
 SHA256 zip  : AA7F5816B8326A6F135AB66496E0EF6AF5313308C01AA4C3CB80DFBAED781C85
 Receta CI   : https://github.com/BtbN/FFmpeg-Builds (variante 'lgpl-shared')
 
