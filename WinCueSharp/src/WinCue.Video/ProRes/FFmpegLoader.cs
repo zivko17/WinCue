@@ -56,11 +56,16 @@ public static class FFmpegLoader
 
             try
             {
+                string? forced = Environment.GetEnvironmentVariable(DirEnvVar);
                 string dir = Locate()
                     ?? throw new DllNotFoundException(
-                        $"No se encontró la carpeta de DLL de FFmpeg (se buscó {DirEnvVar}, " +
-                        $"{DefaultSubdir}\\bin junto al ejecutable y en los directorios padre). " +
-                        "Ejecuta tools\\ffmpeg-lgpl\\obtener-ffmpeg-lgpl.ps1.");
+                        string.IsNullOrWhiteSpace(forced)
+                        ? $"No se encontró la carpeta de DLL de FFmpeg ({DefaultSubdir}\\bin " +
+                          "junto al ejecutable ni en los directorios padre). Ejecuta " +
+                          "tools\\ffmpeg-lgpl\\obtener-ffmpeg-lgpl.ps1."
+                        : $"{DirEnvVar} apunta a «{forced}», que no contiene avcodec-*.dll. " +
+                          "No se buscan DLL en ningún otro sitio: corrige la variable o " +
+                          "bórrala para usar la carpeta que acompaña al ejecutable.");
 
                 ffmpeg.RootPath = dir;
 
@@ -121,11 +126,19 @@ public static class FFmpegLoader
     }
 
     /// <summary>Busca la carpeta de DLL sin cargarla. Devuelve null si no la encuentra.</summary>
+    /// <remarks>
+    /// <see cref="DirEnvVar"/> es ESTRICTO: si está definida y esa carpeta no
+    /// tiene <c>avcodec-*.dll</c>, se devuelve null en vez de seguir buscando.
+    /// Quien apunta la variable a una carpeta concreta está diciendo «usa ESTAS
+    /// DLL y no otras» — cargar en silencio unas distintas es justo la sorpresa
+    /// que arruina una auditoría de licencias (y la que dejaría pasar el
+    /// guardián del empaquetado, que verifica una carpeta explícita).
+    /// </remarks>
     public static string? Locate()
     {
         string? env = Environment.GetEnvironmentVariable(DirEnvVar);
-        if (!string.IsNullOrWhiteSpace(env) && HasAvcodec(env))
-            return env;
+        if (!string.IsNullOrWhiteSpace(env))
+            return HasAvcodec(env) ? env : null;
 
         // Junto al ejecutable, y luego subiendo (bin/Debug/net8.0-windows → …)
         string? probe = AppContext.BaseDirectory;

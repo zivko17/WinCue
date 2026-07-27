@@ -39,28 +39,65 @@ esta DLL.**
    buscar en el binario la cadena `-Dgpl=false`/`lgpl`. Si la publican los
    autores con changelog, basta su declaración de licencia.
 
-### FFmpeg / ffprobe — ✅ sin riesgo tal como está hoy
+### FFmpeg — dos usos DISTINTOS, no confundirlos
+
+**(a) `ffmpeg.exe` / `ffprobe.exe` del PATH — ✅ sin riesgo, como siempre**
 
 | Comprobación | Resultado |
 |---|---|
-| ¿Cómo se usa? | **Subproceso** (`Process.Start("ffmpeg"/"ffprobe")`) en `AudioDecoder`, `MediaImporter`, `WaveformControl`. Nunca enlazado. |
-| ¿Se distribuye? | **No** — `publish.ps1` no lo incluye; se exige en el PATH del usuario |
-| Riesgo | Invocar un binario GPL como proceso separado **no contamina** a WinCue (programas separados). Mientras NO se incluya ffmpeg.exe en el paquete, no hay obligación. |
-| ⚠️ Si algún día se empaqueta | usar una build **LGPL compartida** (o cumplir la licencia de la build elegida: aviso + fuente). Decidirlo ANTES de meterlo en el instalador. |
+| ¿Cómo se usa? | **Subproceso** (`Process.Start("ffmpeg"/"ffprobe")`) en `AudioDecoder`, `MediaImporter`, `HapConvertService`, `WaveformControl`. Nunca enlazado. |
+| ¿Se distribuye? | **No** — `publish.ps1` no incluye ejecutables; se exigen en el PATH del usuario |
+| Riesgo | Invocar un binario GPL como proceso separado **no contamina** (programas separados). |
+
+**(b) `avcodec-62.dll` / `avutil-60.dll` / `swresample-6.dll` — 🟢 resuelto (2026-07-27, motor ProRes propio)**
+
+| Comprobación | Resultado |
+|---|---|
+| ¿Dónde se carga? | `src/WinCue.Video/ProRes/FFmpegLoader.cs` — fija `ffmpeg.RootPath` a una carpeta explícita y fuerza la resolución. **NO cae al PATH del sistema** (donde suele haber un ffmpeg GPL). |
+| ¿Qué binario se distribuye? | Build **`lgpl-shared`** de la rama n8.1 de [BtbN/FFmpeg-Builds](https://github.com/BtbN/FFmpeg-Builds), CI pública y receta reproducible. `publish.ps1` la copia a `ffmpeg-lgpl\bin` junto al exe. Solo las **tres** bibliotecas que se enlazan: `avformat`, `avfilter`, `avdevice` y `swscale` (68 MB) no se incluyen porque no se usan. |
+| ¿Enlace dinámico? | **SÍ** ✓ — carga en tiempo de ejecución desde una carpeta abierta y sustituible (`WINCUE_FFMPEG_DIR` permite apuntar a otra). No se firma ni se sella: cumple la sección 4 de la LGPLv3. |
+| ¿Licencia? | **LGPL-3.0-or-later — VERIFICADO** (`--enable-version3`, sin `--enable-gpl` ni `--enable-nonfree`). |
+| ¿Cómo se verifica? | `tools/verificar-ffmpeg` cruza **dos fuentes independientes**: la línea de `configure` (`avcodec_configuration()`) y la licencia declarada por cada biblioteca (`avutil_license()`, `avcodec_license()`). Lo ejecuta **`publish.ps1` sobre las DLL YA COPIADAS AL PAQUETE**, y si el veredicto no es LGPL **borra las DLL y aborta la publicación**. Es el guardián que impide que un error humano meta una build GPL en un instalador. |
+| ¿Procedencia? | `ffmpeg-lgpl/ffmpeg-BUILD.txt` (versionado; los binarios no) con URL, fecha, SHA256 del zip y SHA256 de cada DLL — la LGPL obliga a poder ofrecer el fuente EXACTO de la build distribuida. |
+| Textos de licencia | `licenses/LGPL-3.0.txt` **y** `licenses/GPL-3.0.txt` (la LGPLv3 son permisos adicionales sobre la GPLv3: van los dos). |
+
+**Nota de riesgo NO legal sino operativo:** este decodificador va **en proceso**.
+Un fallo de memoria dentro del código nativo se lleva la aplicación (con
+`ffmpeg.exe` por subproceso, no podía). Mitigaciones: validación del contenedor
+antes de tocar nada nativo (`MovDemuxer.Validate`), lista cerrada de formatos de
+píxel, fallback por cue a mpv, **interruptor en Ajustes → Vídeo** y kill-switch
+`WINCUE_PRORES_ENGINE=0`.
 
 ## 2. Hecho en esta fase (en el repo)
 
 - [x] Inventario NuGet completo con transitivas (`licencias-nuget.md/.json`) — producto 100 % MIT, sin copyleft ni paquetes sin licencia.
-- [x] `THIRD-PARTY-NOTICES.md` con atribuciones (NAudio, .NET runtime, libmpv, FFmpeg como herramienta externa).
+- [x] `THIRD-PARTY-NOTICES.md` con atribuciones (NAudio, Phosphor, .NET runtime, libmpv, FFmpeg como herramienta externa).
 - [x] `publish.ps1` copia THIRD-PARTY-NOTICES.md y `licenses/` junto al exe (avisa si falta el texto LGPL).
 - [x] "Acerca de" en la app (botón ⓘ) que muestra versión y abre el archivo de atribuciones.
+
+### Añadido con el motor ProRes propio (2026-07-27)
+
+- [x] `THIRD-PARTY-NOTICES.md` completado con lo que faltaba y lo nuevo:
+      **Vortice.Windows** (MIT, entró con HAP y no estaba), **Snappier** (MIT,
+      ídem), **FFmpeg.AutoGen** (MIT) y las **bibliotecas de FFmpeg** (LGPLv3)
+      con procedencia, mecanismo de sustitución y oferta de fuente.
+- [x] `licenses/LGPL-3.0.txt` y `licenses/GPL-3.0.txt` descargados de gnu.org.
+- [x] `publish.ps1` copia `ffmpeg-lgpl\bin\*.dll` + `ffmpeg-BUILD.txt` junto al exe.
+- [x] **Verificación de licencia en el smoke de publicación**: `publish.ps1`
+      ejecuta `tools/verificar-ffmpeg` sobre las DLL del paquete y aborta —
+      borrándolas— si no son LGPL. `-SinVerificarLicencias` existe para
+      diagnóstico y avisa a gritos de que ese paquete no se distribuye.
+- [x] `tools/ffmpeg-lgpl/obtener-ffmpeg-lgpl.ps1` reconstruye la carpeta desde
+      cero y deja la procedencia con SHA256 por DLL.
 
 ## 3. Pendiente FUERA del código (lo tuyo)
 
 **Bloqueante:**
 - [ ] **libmpv LGPL** (punto 1 de arriba) — sin esto no hay distribución cerrada legal.
-- [ ] Descargar el texto oficial LGPL-2.1 → `licenses/LGPL-2.1.txt`
-      (https://www.gnu.org/licenses/old-licenses/lgpl-2.1.txt) — el publish avisa si falta.
+      *(Las bibliotecas de FFmpeg del motor ProRes ya están resueltas y
+      verificadas automáticamente; el bloqueante que queda es solo libmpv.)*
+- [x] Textos oficiales de licencia en `licenses/`: LGPL-2.1 (libmpv),
+      LGPL-3.0 + GPL-3.0 (FFmpeg).
 
 **Marca y producto:**
 - [ ] **Colisiones del nombre "WinCue"**: búsqueda en EUIPO/TMview (UE) y USPTO (EE. UU.) por "WinCue" en clases 9/42; búsqueda general (hay al menos software histórico de teleprompter llamado WinCue — verificar si sigue en uso comercial). Decidir: mantener nombre, o renombrar ANTES de crear marca/web.
