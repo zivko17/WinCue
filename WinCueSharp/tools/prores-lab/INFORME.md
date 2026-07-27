@@ -712,3 +712,118 @@ específico de ProRes.
   de memoria dentro de la medición.
 - **La media no se versiona** (3,4 GB) ni las DLL; sí la procedencia de la build
   y los scripts que lo reconstruyen todo.
+
+---
+
+# PASO 2 — Integración en `src/` (hecho)
+
+El laboratorio queda intacto como banco de pruebas. Lo que sigue es lo que
+**de verdad se llevó a producción**, en qué se desvió del plan del § 9 y qué
+queda abierto. La arquitectura, los límites medidos y el riesgo del
+decodificador en proceso están documentados en
+`docs/arquitectura-motor-video.md` (sección «El motor ProRes propio»); aquí solo
+las diferencias respecto a lo previsto.
+
+## Qué se integró
+
+| Pieza | Dónde vive ahora |
+|---|---|
+| Demuxer MOV | `src/WinCue.Video/Containers/MovDemuxer.cs` — **unificado**, ya no hay dos copias |
+| Decodificador, layouts, color, loader, licencia | `src/WinCue.Video/ProRes/` (namespace `WinCue.Video.ProRes`) |
+| Sesión + pipeline GPU | `ProResGpuPipeline.cs` (`ProResVideoSession`, `IProResRenderTarget`) |
+| Ring de decode y player | `ProResFrameSource.cs`, `ProResCuePlayer.cs`, `ProResFrameSlot.cs` |
+| Enrutado | `VideoEngine.StartProResPlayback` + pool `_proresPool` |
+| Elegibilidad e interruptores | `MainController.ProResEngineEligible` |
+| Guardián de licencia | `tools/verificar-ffmpeg`, llamado por `publish.ps1` |
+| Obtención de las DLL | `tools/ffmpeg-lgpl/obtener-ffmpeg-lgpl.ps1` |
+| Media y show de tortura | `tests/prores-test/`, `tests/stress/estres-prores.json` |
+| Soak | `scripts/soak-prores.ps1` |
+
+## Desvíos respecto al plan del § 9
+
+1. **El demuxer no se «amplió»: se MOVIÓ.** El § 9 pedía unificar las dos copias.
+   Se hizo promocionando la versión del laboratorio —superconjunto estricto— a
+   `WinCue.Video.Containers` y retirando la de `Hap/`. El motor HAP gana de
+   rebote el `colr`, el `depth` y `Validate()`. Los 105 tests de vídeo previos
+   siguieron en verde sin tocar ninguna aserción.
+
+2. **La clave del pool NO se amplió; se amplió la de la SESIÓN.** El § 9 decía
+   «el pool necesita una clave más que con HAP». Meter el formato de píxel en la
+   clave del POOL habría creado un device D3D11 completo por cada combinación de
+   tamaño y perfil en la misma pista — diez resoluciones distintas, diez
+   devices. Lo que de verdad depende del formato es el ring de texturas, no el
+   pipeline. Solución: el pool sigue con `(salida, pista, "WxH" de superficie)`,
+   y **cada slot cachea su sesión con clave `{W}x{H}|{layout}`**, reconstruyéndola
+   solo cuando no coincide. Cumple el requisito y además evita crear y destruir
+   hasta 190 MB de texturas en cada GO cuando los clips comparten formato, que es
+   el caso normal de un show.
+
+3. **Los frames no se copian.** El § 9 no lo mencionaba. Con HAP el ring guarda
+   arrays gestionados y el decode escribe directo en el slot; con ProRes el frame
+   sale en memoria de FFmpeg y el decodificador solo retiene UNO. Copiarlo eran
+   63 MB de memcpy por fotograma en 4K 4444. Se resolvió con
+   `av_frame_move_ref`: cada slot posee su `AVFrame` y el decodificador le
+   traspasa la referencia. Coste cero. Contrapartida asumida y documentada: un
+   slot sin liberar es una fuga de 63 MB, así que `ProResFrameSource.Dispose`
+   solo suelta los slots **si el hilo decodificador murió de verdad** (liberar
+   con el hilo vivo sería un use-after-free dentro del código nativo).
+
+4. **El ring de decode es de 3, no de 4.** Con HAP cuatro slots son 32 MB en 4K;
+   aquí serían 253 MB.
+
+5. **`FramePacer` y `HapMediaClock` se reutilizan TAL CUAL**, sin moverlos ni
+   renombrarlos. Son puros y no dependen del códec; conservan el prefijo `Hap`
+   por su origen. Moverlos solo para renombrarlos habría metido churn en el motor
+   HAP, que es justo lo que este paso no debía tocar.
+
+6. **Solo se distribuyen tres DLL.** El § 9 hablaba de copiar `ffmpeg-lgpl\bin\*.dll`.
+   El zip trae siete; `avformat`, `avfilter`, `avdevice` y `swscale` suman 68 MB y
+   **no se usan** (el demuxer es nuestro, no hay filtros y la conversión de color
+   va en el shader). Se distribuyen `avcodec-62`, `avutil-60` y `swresample-6`.
+   Efecto colateral: `LicenseCheck.Inspect()` tuvo que volverse tolerante a una
+   librería ausente — y FFmpeg.AutoGen no lanza `DllNotFoundException` sino
+   `NotSupportedException` cuando la DLL no está.
+
+7. **El fallback NO fuerza la ruta clásica** (a diferencia de HAP). mpv sí sabe
+   renderizar ProRes, así que un cue que cae a mpv conserva sus fundidos de
+   opacidad; solo se le quita el audio (`Volume = 0`, `ExternalAudio = true`)
+   porque el espejo ya está sonando.
+
+8. **Apareció un fallo en el propio guardián de licencias**, y merece contarse
+   porque es del tipo que deja una comprobación pasando en verde sin comprobar
+   nada: `dotnet run` no conoce `--nologo` y **reenvía a la aplicación todo lo
+   que no entiende**, así que el verificador recibía `"--nologo"` como carpeta y,
+   gracias al respaldo de `FFmpegLoader`, acababa inspeccionando el árbol de
+   desarrollo en vez del paquete. Dos arreglos: la carpeta se pasa por
+   `WINCUE_FFMPEG_DIR`, y esa variable pasa a ser **estricta** (si la carpeta no
+   tiene avcodec, se falla en vez de buscar en otro sitio).
+
+## Lo que el § 9 dejaba «por medir» y ahora está medido
+
+- **Tres capas sobre un solo device D3D11 y con presupuesto de hilos repartido**:
+  el show de tortura mantiene hasta tres cues de vídeo vivos (loop de fondo +
+  entrante + saliente congelado) sobre el pool real. Sin drops reportados por el
+  pacer ni anomalías del watchdog.
+- **Soak con el patrón de `soak-hap.ps1`**: hecho, con media mezclada. Ver abajo.
+- **E/S de disco real sostenida** y **máquina solo-iGPU**: siguen sin medir. Son
+  los dos huecos honestos del paso 2.
+
+## Tests traídos del laboratorio
+
+De los 85 del lab se trajeron los que siguen valiendo en producción, adaptados a
+los tipos nuevos: la regresión del `codec_tag` (los 12 bits), el `Reset()` tras
+drenar, ProRes como todo-intra, el mismo frame con 1 hilo y con 8, los formatos
+de píxel por variante, el `colr` leído y no inventado, `Validate()`, la
+matemática de color contra los valores de las recomendaciones, la equivalencia
+entre las constantes del shader y la referencia de CPU, y los siete casos del
+veredicto de licencia (incluida la trampa de que «LGPL» contiene «GPL»).
+
+Se quedaron fuera los que solo tenían sentido en el banco: los benchmarks, el
+fuzzing (600 iteraciones no caben en un `dotnet test`) y las comparaciones PSNR
+contra `ffmpeg.exe`.
+
+Añadidos que el laboratorio no podía tener: el enrutado completo con sus dos
+apagados, el fallback a mpv con mpv real, el presupuesto de hilos, y seis tests
+de reproducción GPU de verdad (422 y 4444 hasta el fin natural, loop cruzando la
+costura, trim + playCount, reloj inyectado mandando sobre el Stopwatch, y ocho
+cues seguidos sobre la misma sesión).

@@ -1,0 +1,54 @@
+{
+  "version": 1,
+  "cues": [
+    {
+      "id": 1,
+      "type": "MEMO",
+      "number": "0",
+      "name": "VERIFICACION MANUAL del motor ProRes — GO cue a cue y mira",
+      "notes": "1) GO en el cue 1: ProRes 422 HQ por el motor propio. La barra de estado debe decir «Motor ProRes propio — salida 1, pista 3, yuv422p10le, N hilos, reloj: audio del cue» y el VU del cue en el mixer debe MOVERSE (el audio pasa por el rack, no por mpv). 2) GO en el 2: crossfade ProRes->HAP en la misma pista; ninguno de los dos debe parpadear ni caer a negro. 3) GO en el 3: ProRes 4444 de 12 bits con alfa. 4) Desmarca Ajustes > Video > «Motor propio para ProRes» y repite el 1: la barra ya no debe anunciar el motor propio y el cue debe seguir viendose (mpv, con el audio por el rack igualmente).",
+      "continue_mode": "NONE"
+    },
+    {
+      "id": 2,
+      "type": "VIDEO",
+      "number": "1",
+      "name": "ProRes 422 HQ 1080p30 con audio (motor propio + VU en el mixer)",
+      "file_path": "pr-1080p30-422hq-audio.mov",
+      "duration": 5.0,
+      "timeline_layer": 2,
+      "volume": 1.0,
+      "continue_mode": "NONE"
+    },
+    {
+      "id": 3,
+      "type": "VIDEO",
+      "number": "2",
+      "name": "HAP encima con fundido de 2 s (CROSSFADE ProRes <-> HAP)",
+      "file_path": "../hap-test/demo-hap-1080p30-audio.mov",
+      "duration": 5.0,
+      "timeline_layer": 2,
+      "fade_in": 2.0,
+      "continue_mode": "NONE"
+    },
+    {
+      "id": 4,
+      "type": "VIDEO",
+      "number": "3",
+      "name": "ProRes 4444 con alfa (12 bits, 4 planos)",
+      "file_path": "pr-1080p30-4444-alfa.mov",
+      "duration": 4.0,
+      "timeline_layer": 2,
+      "fade_in": 1.0,
+      "continue_mode": "NONE"
+    },
+    {
+      "id": 5,
+      "type": "STOP",
+      "number": "4",
+      "name": "STOP ALL con fundido",
+      "fade_out": 1.0,
+      "continue_mode": "NONE"
+    }
+  ]
+}
