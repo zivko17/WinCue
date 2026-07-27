@@ -11,6 +11,8 @@
 // Consume; el decodificador se bloquea con RingSize frames de ventaja.
 // =============================================================================
 
+using WinCue.Video.Containers;
+
 namespace WinCue.Video.Hap;
 
 internal sealed class HapFrameSource : IDisposable

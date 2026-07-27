@@ -1,12 +1,30 @@
 // =============================================================================
-// MovDemuxer.cs — Demuxer QuickTime/MOV propio (promocionado de tools/hap-lab,
-// paso 3 del motor de vídeo propio; el laboratorio queda intacto como banco)
+// MovDemuxer.cs — Demuxer QuickTime/MOV propio, COMPARTIDO por HAP y ProRes
+// =============================================================================
+// El demuxer NO ES DEL CÓDEC, ES DEL CONTENEDOR: las tablas stsz/stsc/stco/stts
+// que reconstruyen (offset, tamaño) de cada frame son idénticas lleve el .mov
+// HAP o ProRes. Por eso vive aquí, en WinCue.Video.Containers, y no bajo Hap/
+// ni bajo ProRes/ (hasta el paso 2 de ProRes había DOS copias: la del motor HAP
+// y la de tools/prores-lab; ésta las unifica).
+//
+// Frente a la versión que tenía el motor HAP añade lo que ProRes sí necesita:
+//   · el átomo `colr` del stsd (matriz y rango de color) y el campo `depth`
+//     (24 = opaco, 32 = ProRes 4444 con alfa);
+//   · Validate(): dimensiones acotadas, tamaños de sample positivos y acotados
+//     y offsets dentro del fichero. Es la PRIMERA LÍNEA de defensa antes de
+//     alimentar a un decodificador NATIVO en proceso, que si revienta se lleva
+//     la aplicación entera (el decode HAP es gestionado y no corría ese riesgo).
+//
+// Deliberadamente NO se usa libavformat: mantiene UNA sola tubería para los dos
+// códecs, no añade la superficie nativa de la parte del stack de FFmpeg que más
+// contacto tiene con ficheros ajenos, y deja el .mxf explícitamente fuera.
+// Razonado en tools/prores-lab/INFORME.md § 3.
 // =============================================================================
 
 using System.Buffers.Binary;
 using System.Text;
 
-namespace WinCue.Video.Hap;
+namespace WinCue.Video.Containers;
 
 /// <summary>Posición y tamaño de un sample (frame de vídeo) dentro del fichero .mov.</summary>
 public readonly record struct SampleEntry(long Offset, int Size);
@@ -28,7 +46,27 @@ public sealed class AudioTrackInfo
     public double SampleRate { get; }
 }
 
-/// <summary>Resultado de demuxar un .mov: pista de vídeo HAP + tabla de samples.</summary>
+/// <summary>
+/// Señalización de color leída del átomo <c>colr</c> del <c>stsd</c>.
+/// </summary>
+/// <remarks>
+/// Los códigos son los de ISO/IEC 23001-8, los mismos que usa
+/// <c>AVColorSpace</c>/<c>AVColorPrimaries</c> de FFmpeg. OJO: en ProRes el
+/// <c>colr</c> NO es la fuente de verdad — ffmpeg no lo escribe salvo con
+/// <c>-movflags +write_colr</c> y el color viaja en la cabecera del propio
+/// frame. Manda el bitstream; esto es el RESPALDO para ficheros de otras
+/// herramientas (las de Apple sí lo escriben).
+/// </remarks>
+public readonly record struct ColrInfo(int Primaries, int Transfer, int Matrix, bool FullRange)
+{
+    /// <summary>Valor cuando el fichero no trae <c>colr</c> (todo "unspecified").</summary>
+    public static ColrInfo Unspecified => new(2, 2, 2, false);
+
+    /// <summary>¿Trae información utilizable de matriz?</summary>
+    public bool HasMatrix => Matrix is not (0 or 2);
+}
+
+/// <summary>Resultado de demuxar un .mov: pista de vídeo + tabla de samples.</summary>
 public sealed class MovInfo
 {
     internal MovInfo(
@@ -38,7 +76,9 @@ public sealed class MovInfo
         double fps,
         double durationSeconds,
         IReadOnlyList<SampleEntry> samples,
-        AudioTrackInfo? audio)
+        AudioTrackInfo? audio,
+        ColrInfo colr,
+        int depth)
     {
         VideoFourcc = videoFourcc;
         Width = width;
@@ -47,9 +87,12 @@ public sealed class MovInfo
         DurationSeconds = durationSeconds;
         Samples = samples;
         Audio = audio;
+        Colr = colr;
+        Depth = depth;
     }
 
-    /// <summary>Fourcc del códec de vídeo: "Hap1", "Hap5" o "HapY".</summary>
+    /// <summary>Fourcc del códec de vídeo tal cual aparece en el <c>stsd</c>
+    /// ("Hap1", "Hap5", "HapY", "apcn", "apch", "ap4h"…).</summary>
     public string VideoFourcc { get; }
 
     public int Width { get; }
@@ -66,26 +109,93 @@ public sealed class MovInfo
 
     public int FrameCount => Samples.Count;
 
-    /// <summary>Pista de audio si existe; HAP-lab la enumera pero no la decodifica.</summary>
+    /// <summary>Pista de audio si existe; el motor la enumera pero no la decodifica
+    /// (el audio del cue lo reproduce el AudioEngine con su id espejo).</summary>
     public AudioTrackInfo? Audio { get; }
+
+    /// <summary>Señalización de color del <c>colr</c> (o "unspecified" si falta).</summary>
+    public ColrInfo Colr { get; }
+
+    /// <summary>Campo <c>depth</c> del sample description (24 = opaco, 32 = con alfa
+    /// en ProRes 4444).</summary>
+    public int Depth { get; }
+
+    /// <summary>Tamaño del sample más grande: cota superior para dimensionar los
+    /// búferes de lectura de una vez, sin realocar por frame.</summary>
+    public int MaxSampleSize
+    {
+        get
+        {
+            int max = 0;
+            foreach (SampleEntry s in Samples)
+            {
+                if (s.Size > max)
+                    max = s.Size;
+            }
+
+            return max;
+        }
+    }
 }
 
 /// <summary>
-/// Demuxer mínimo de contenedor QuickTime/MOV, sin FFmpeg.
+/// Demuxer mínimo de contenedor QuickTime/MOV, SIN libavformat.
 /// Parsea moov → trak → mdia → minf → stbl y reconstruye la tabla de
 /// (offset, tamaño) de cada sample de vídeo a partir de stsz/stsc/stco(co64).
-/// Solo soporta lo que produce ffmpeg al codificar HAP: un trak de vídeo
-/// (más, opcionalmente, un trak de audio PCM que se ignora).
 /// </summary>
 public static class MovDemuxer
 {
-    /// <summary>Abre y demuxa un fichero .mov con vídeo HAP.</summary>
-    /// <exception cref="InvalidDataException">El fichero no es un MOV válido o no tiene pista de vídeo.</exception>
+    /// <summary>Cota superior de dimensiones aceptadas (8K con holgura).</summary>
+    public const int MaxDimension = 16384;
+
+    /// <summary>Cota superior del tamaño de un frame comprimido (256 MB).</summary>
+    public const int MaxSampleBytes = 256 * 1024 * 1024;
+
+    /// <summary>Abre y demuxa un fichero .mov.</summary>
+    /// <exception cref="InvalidDataException">El fichero no es un MOV válido, no
+    /// tiene pista de vídeo o no supera <see cref="Validate"/>.</exception>
     public static MovInfo Open(string path)
     {
         using FileStream fs = new(path, FileMode.Open, FileAccess.Read, FileShare.Read);
         byte[] moov = ReadMoovAtom(fs) ?? throw new InvalidDataException("No se encontró el átomo 'moov' en el fichero.");
-        return ParseMoov(moov);
+        MovInfo info = ParseMoov(moov);
+        Validate(info, fs.Length);
+        return info;
+    }
+
+    /// <summary>
+    /// Comprobaciones de cordura ANTES de alimentar a un decodificador nativo.
+    /// </summary>
+    /// <remarks>
+    /// Un decodificador en proceso (ProRes vía FFmpeg) se lleva la aplicación
+    /// entera por delante si se le da algo imposible. Esta es la primera línea:
+    /// dimensiones acotadas, frames con tamaño positivo y acotado, y offsets que
+    /// caben en el fichero.
+    /// </remarks>
+    /// <exception cref="InvalidDataException">Alguna cota no se cumple.</exception>
+    public static void Validate(MovInfo info, long fileLength)
+    {
+        ArgumentNullException.ThrowIfNull(info);
+
+        if (info.Width is <= 0 or > MaxDimension || info.Height is <= 0 or > MaxDimension)
+        {
+            throw new InvalidDataException($"Dimensiones fuera de rango: {info.Width}x{info.Height}.");
+        }
+
+        for (int i = 0; i < info.Samples.Count; i++)
+        {
+            SampleEntry s = info.Samples[i];
+            if (s.Size <= 0 || s.Size > MaxSampleBytes)
+            {
+                throw new InvalidDataException($"Sample {i} con tamaño imposible ({s.Size} bytes).");
+            }
+
+            if (s.Offset < 0 || s.Offset + s.Size > fileLength)
+            {
+                throw new InvalidDataException(
+                    $"Sample {i} se sale del fichero (offset {s.Offset}, tamaño {s.Size}, fichero {fileLength}).");
+            }
+        }
     }
 
     // ------------------------------------------------------------------
@@ -102,7 +212,7 @@ public static class MovDemuxer
         while (pos + 8 <= fileLength)
         {
             fs.Position = pos;
-            ReadExactly(fs, header[..8]);
+            fs.ReadExactly(header[..8]);
             long atomSize = BinaryPrimitives.ReadUInt32BigEndian(header[..4]);
             string type = Encoding.ASCII.GetString(header.Slice(4, 4));
             long headerSize = 8;
@@ -110,7 +220,7 @@ public static class MovDemuxer
             if (atomSize == 1)
             {
                 // Tamaño extendido de 64 bits a continuación del tipo
-                ReadExactly(fs, header.Slice(8, 8));
+                fs.ReadExactly(header.Slice(8, 8));
                 atomSize = checked((long)BinaryPrimitives.ReadUInt64BigEndian(header.Slice(8, 8)));
                 headerSize = 16;
             }
@@ -128,13 +238,13 @@ public static class MovDemuxer
             if (type == "moov")
             {
                 long payload = atomSize - headerSize;
-                if (payload > int.MaxValue)
+                if (payload is > int.MaxValue or <= 0)
                 {
-                    throw new InvalidDataException("Átomo 'moov' demasiado grande.");
+                    throw new InvalidDataException("Átomo 'moov' con tamaño imposible.");
                 }
 
                 byte[] buffer = new byte[payload];
-                ReadExactly(fs, buffer);
+                fs.ReadExactly(buffer);
                 return buffer;
             }
 
@@ -142,11 +252,6 @@ public static class MovDemuxer
         }
 
         return null;
-    }
-
-    private static void ReadExactly(Stream stream, Span<byte> destination)
-    {
-        stream.ReadExactly(destination);
     }
 
     // ------------------------------------------------------------------
@@ -186,7 +291,8 @@ public static class MovDemuxer
         double durationSeconds = video.TimeScale > 0 ? (double)video.TotalDelta / video.TimeScale : 0;
         double fps = video.TotalDelta > 0 ? (double)video.TimeScale * samples.Count / video.TotalDelta : 0;
 
-        return new MovInfo(video.Fourcc, video.Width, video.Height, fps, durationSeconds, samples, audio);
+        return new MovInfo(
+            video.Fourcc, video.Width, video.Height, fps, durationSeconds, samples, audio, video.Colr, video.Depth);
     }
 
     /// <summary>Tablas crudas de un trak, tal cual salen del stbl.</summary>
@@ -196,6 +302,8 @@ public static class MovDemuxer
         public string Fourcc = "";
         public int Width;
         public int Height;
+        public int Depth;
+        public ColrInfo Colr = ColrInfo.Unspecified;
         public uint TimeScale;
         public long TotalDelta;              // suma de stts (unidades de timescale)
         public uint FixedSampleSize;         // stsz.sample_size (0 = tabla)
@@ -252,13 +360,13 @@ public static class MovDemuxer
         int stblBody = AtomBody(buf, stbl);
         int stblEnd = AtomEnd(buf, stbl);
 
-        foreach ((string type, int atomStart, int _) in Children(buf, stblBody, stblEnd))
+        foreach ((string type, int atomStart, int atomEnd) in Children(buf, stblBody, stblEnd))
         {
             int b = AtomBody(buf, atomStart);
             switch (type)
             {
                 case "stsd":
-                    ParseStsd(buf, b, t);
+                    ParseStsd(buf, b, atomEnd, t);
                     break;
                 case "stts":
                     ParseStts(buf, b, t);
@@ -276,14 +384,14 @@ public static class MovDemuxer
                     ParseStco(buf, b, t, is64: true);
                     break;
                 default:
-                    break; // stss, sdtp, etc.: irrelevantes para HAP (todo keyframes)
+                    break; // stss, sdtp, etc.: irrelevantes (HAP y ProRes son todo intra)
             }
         }
 
         return t;
     }
 
-    private static void ParseStsd(byte[] buf, int b, TrackTables t)
+    private static void ParseStsd(byte[] buf, int b, int stsdEnd, TrackTables t)
     {
         uint entryCount = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(b + 4, 4));
         if (entryCount == 0)
@@ -293,14 +401,26 @@ public static class MovDemuxer
 
         // Primera (y en la práctica única) sample description
         int e = b + 8;
+        long entrySize = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(e, 4));
         t.Fourcc = Encoding.ASCII.GetString(buf, e + 4, 4);
 
         if (t.Handler == "vide")
         {
-            // size(4) fourcc(4) reserved(6) dataRefIdx(2) version(2) revision(2)
-            // vendor(4) temporalQ(4) spatialQ(4) width(2) height(2) ...
+            // Cabecera fija de 86 bytes de VisualSampleEntry (QuickTime):
+            // size(4) fourcc(4) reserved(6) dri(2) version(2) revision(2)
+            // vendor(4) temporalQ(4) spatialQ(4) width(2) height(2)
+            // hres(4) vres(4) dataSize(4) frameCount(2) compressorName(32)
+            // depth(2) colorTableID(2)  → las extensiones empiezan en +86
             t.Width = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(e + 32, 2));
             t.Height = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(e + 34, 2));
+            t.Depth = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(e + 82, 2));
+
+            int extStart = e + 86;
+            int extEnd = (int)Math.Min(stsdEnd, e + entrySize);
+            if (extStart < extEnd)
+            {
+                ParseVideoExtensions(buf, extStart, extEnd, t);
+            }
         }
         else if (t.Handler == "soun")
         {
@@ -310,6 +430,45 @@ public static class MovDemuxer
             int bits = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(e + 26, 2));
             double rate = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(e + 32, 4)) / 65536.0;
             t.AudioInfo = new AudioTrackInfo(t.Fourcc, channels, bits, rate);
+        }
+    }
+
+    /// <summary>Extensiones del sample description de vídeo; solo interesa <c>colr</c>.</summary>
+    private static void ParseVideoExtensions(byte[] buf, int start, int end, TrackTables t)
+    {
+        foreach ((string type, int atomStart, int atomEnd) in Children(buf, start, end))
+        {
+            if (type != "colr")
+            {
+                continue;
+            }
+
+            int b = AtomBody(buf, atomStart);
+            if (b + 4 > atomEnd)
+            {
+                continue;
+            }
+
+            string kind = Encoding.ASCII.GetString(buf, b, 4);
+            if (kind is not ("nclc" or "nclx"))
+            {
+                continue; // 'prof' (perfil ICC) queda fuera
+            }
+
+            if (b + 10 > atomEnd)
+            {
+                continue;
+            }
+
+            int primaries = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(b + 4, 2));
+            int transfer = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(b + 6, 2));
+            int matrix = BinaryPrimitives.ReadUInt16BigEndian(buf.AsSpan(b + 8, 2));
+
+            // 'nclx' añade un byte con el bit de rango completo en el bit alto
+            bool full = kind == "nclx" && b + 11 <= atomEnd && (buf[b + 10] & 0x80) != 0;
+
+            t.Colr = new ColrInfo(primaries, transfer, matrix, full);
+            return;
         }
     }
 
@@ -424,7 +583,8 @@ public static class MovDemuxer
     //  Recorrido de átomos dentro de un buffer
     // ------------------------------------------------------------------
 
-    /// <summary>Enumera los átomos hijos en el rango [start, end) del buffer. Devuelve (tipo, inicioDelÁtomo, finDelÁtomo).</summary>
+    /// <summary>Enumera los átomos hijos en el rango [start, end) del buffer.
+    /// Devuelve (tipo, inicioDelÁtomo, finDelÁtomo).</summary>
     private static IEnumerable<(string Type, int Start, int End)> Children(byte[] buf, int start, int end)
     {
         int pos = start;
@@ -433,6 +593,11 @@ public static class MovDemuxer
             long size = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(pos, 4));
             if (size == 1)
             {
+                if (pos + 16 > end)
+                {
+                    throw new InvalidDataException($"Átomo con cabecera extendida truncada en offset relativo {pos}.");
+                }
+
                 size = checked((long)BinaryPrimitives.ReadUInt64BigEndian(buf.AsSpan(pos + 8, 8)));
             }
             else if (size == 0)
@@ -465,7 +630,7 @@ public static class MovDemuxer
         return -1;
     }
 
-    /// <summary>Offset del primer byte del payload de un átomo (asume cabecera de 8; ffmpeg no usa cabeceras extendidas dentro de moov).</summary>
+    /// <summary>Offset del primer byte del payload de un átomo.</summary>
     private static int AtomBody(byte[] buf, int atomStart)
     {
         long size = BinaryPrimitives.ReadUInt32BigEndian(buf.AsSpan(atomStart, 4));
