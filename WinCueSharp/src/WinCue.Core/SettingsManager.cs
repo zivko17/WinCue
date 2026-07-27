@@ -67,6 +67,12 @@ public class SettingsManager
         // streaming del paso 4 la RAM es constante — solo actúa como opt-out
         // (>0) o como techo clásico de 20 min si WINCUE_MIRROR_STREAMING=0.
         ["video_audio_max_minutes"] = 0,
+        // MOTOR ProRes PROPIO (paso 2 de ProRes). Encendido por defecto, pero
+        // con interruptor porque su decodificador es NATIVO Y EN PROCESO: si
+        // revienta se lleva la aplicación entera (con mpv iba por subproceso y
+        // no podía). Apagado → los ProRes van por mpv exactamente como antes.
+        // Kill-switch de directo equivalente: WINCUE_PRORES_ENGINE=0.
+        ["video_prores_engine"]     = true,
         ["surface_preset"]          = "screen",  // "screen" | "custom" | "WxH"
         ["surface_width"]           = 0,         // tamaño del CANVAS (0 = 1920)
         ["surface_height"]          = 0,         // tamaño del CANVAS (0 = 1080)

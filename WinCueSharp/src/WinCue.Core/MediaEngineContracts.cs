@@ -106,6 +106,7 @@ public sealed record VideoPlayParams(
     double HandoverSeconds = 0.0,
     bool ForceClassicPath = false,
     bool UseHapEngine = false,
+    bool UseProResEngine = false,
     bool ExternalAudio = false);
 // ForceClassicPath = true: el cue NO pasa por el compositor GPU aunque esté
 // activo — va por la ruta clásica (vo=gpu embebido en la ventana de salida).
@@ -123,6 +124,16 @@ public sealed record VideoPlayParams(
 // solo para HAP en .mov con rate 1.0 y compositor activo; si el motor propio
 // no puede (demux/GPU), el engine cae a mpv clásico MUTEADO (el audio ya
 // suena por el espejo del AudioEngine).
+// UseProResEngine = true: el cue va por el MOTOR ProRes PROPIO (paso 2 de
+// ProRes): mismo demuxer .mov que HAP + decodificador de FFmpeg EN PROCESO
+// (LGPL, enlace dinámico) + pipeline D3D11→D3D9 hacia la MISMA superficie del
+// compositor, con el AUDIO del cue por el AudioEngine (reloj maestro del
+// vídeo). Diferencia con HAP: ProRes SÍ lo renderiza mpv, así que aquí no se
+// gana "poder verlo" sino no decodificarlo dos veces (salida + PGM) y recuperar
+// los fundidos de opacidad por GPU. Lo fija el CONTROLADOR solo para ProRes en
+// .mov con rate 1.0, compositor activo, sin canvas y geometría FULL; si el
+// motor propio no puede (DLL ausentes, demux, GPU), el engine cae a mpv clásico
+// MUTEADO — nunca audio doble, nunca negro.
 // ExternalAudio = true (RUTA HÍBRIDA, paso 3b): el AUDIO del cue lo reproduce
 // el AudioEngine (espejo del controlador) — mpv arranca SIN pista de audio
 // (aid=no fijado antes del loadfile) y su vídeo se disciplina al reloj del
