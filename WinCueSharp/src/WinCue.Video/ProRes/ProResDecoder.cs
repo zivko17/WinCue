@@ -303,6 +303,25 @@ public sealed unsafe class ProResDecoder : IDisposable
         return true;
     }
 
+    /// <summary>
+    /// TRASPASA el frame retenido al slot del ring SIN COPIARLO
+    /// (<c>av_frame_move_ref</c>): el slot pasa a ser su dueño y el
+    /// decodificador queda libre para el frame siguiente.
+    /// </summary>
+    /// <remarks>
+    /// Es lo que evita un memcpy de frame completo por fotograma (63 MB en 4K
+    /// 4444) en el hilo que menos margen tiene. Ver ProResFrameSlot.
+    /// </remarks>
+    public void MoveFrameTo(ProResFrameSlot slot)
+    {
+        ArgumentNullException.ThrowIfNull(slot);
+        EnsureFrame();
+        slot.Release();
+        ffmpeg.av_frame_move_ref(slot.Raw, _frame);
+        slot.MarkFilled();
+        _frameHeld = false;
+    }
+
     /// <summary>Suelta el frame retenido (devuelve el buffer al pool de FFmpeg).
     /// UN FRAME 4K 4444 SON 63 MB: no soltarlo es una fuga que crece rápido.</summary>
     public void ReleaseFrame()
