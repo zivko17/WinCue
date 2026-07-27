@@ -37,6 +37,8 @@ public interface IShowClock
     bool IsFrozen { get; }
     void Freeze();
     void Resume();
+    event Action? Frozen;    // avisos de transición: el planificador suspende
+    event Action? Resumed;   // y re-arma sus plazos vivos
 }
 ```
 
@@ -148,16 +150,55 @@ correcto** en vez de quedarse atrás.
 | `FadeAllRunning` (`MainWindow`) | **Sin cambios** | Mide lo que dura un fundido **de los motores** para apagar el parpadeo. Es tiempo de media. |
 | `UndoService` (antirrebote de 800 ms) | **Sin cambios** | Gesto de edición, no de show. |
 
+## La pausa global congela también los PLAZOS
+
+Antes, la pausa paraba los motores y congelaba el tiempo de show, pero **los
+timers seguían corriendo**. Un cue con `duration` fija al que le pillaba una
+pausa larga **se cortaba antes de tiempo**: su timer de fin llegaba a cero con
+el motor parado.
+
+Ahora el reloj **avisa** de cada transición y el planificador reacciona:
+
+```csharp
+event Action? Frozen;    // el planificador suspende sus plazos vivos
+event Action? Resumed;   // y los re-arma con lo que les faltaba
+```
+
+`TimerScheduler` se suscribe en su constructor. Al congelar guarda por cada
+plazo vivo `Restante = Deadline − NowRaw` y lo desarma (`Timer.Change(Infinite)`);
+al reanudar recalcula `Deadline = NowRaw + Restante` y lo vuelve a armar. El eje
+de los plazos (`NowRaw`) **no** se congela, así que el plazo se **desplaza** con
+la pausa en vez de dejarse contar.
+
+Detalles que importan:
+
+- **Se congela TODO lo que es tiempo de show**: los plazos absolutos de la
+  secuencia (`ScheduleAt`) y los relativos que cuelgan de un motor (fin de un
+  media, reintentos corregidos contra su posición). Con el motor parado, su
+  reloj tampoco avanza.
+- **La frontera no se mueve.** El fin de un media se sigue anclando a su
+  arranque **REAL** y corrigiendo contra la posición del motor
+  (`VideoEndCheck`, `BeginVideoFadeOut`). Lo único que cambia es que ese plazo
+  deja de correr mientras el show está en pausa.
+- **Un plazo creado DURANTE la pausa nace suspendido**: un cue disparado con el
+  show parado no gasta su `pre_wait` con el sonido detenido.
+- **La única excepción es `Schedule(0)`**: un plazo de cero no es un plazo, es
+  un despacho al hilo del controlador (`HapConvertService.Post`). Congelarlo
+  dejaría colgado hasta la reanudación un mensaje de servicio que no tiene nada
+  que ver con el show.
+- **El borde se decide bajo cerrojo.** Un plazo que vence justo al pausar o
+  dispara ahora, o se suspende y sale al reanudar — nunca las dos cosas. El
+  cerrojo del `TimerScheduler` es lo que impide el doble disparo entre el hilo
+  del timer y el de la botonera.
+- **`STOP ALL` en pausa** descongela el reloj, y con él vuelven a correr los
+  plazos: si se quedaran suspendidos, el resto de la función no terminaría ni
+  un cue.
+- La pausa de UN cue (`OnPauseCueToggle`) sigue como estaba: tira sus timers y,
+  al reanudar, reprograma lo que le queda **según el motor**. Las dos pausas se
+  combinan sin descontar dos veces.
+
 ## Lo que NO hace (a propósito)
 
-- **La pausa global no congela los plazos ya programados.** Es exactamente el
-  comportamiento que había antes del ShowClock y se conserva: cambiarlo obliga a
-  re-armar todos los timers vivos en cada `Freeze`/`Resume`, y eso es cirugía de
-  más riesgo que beneficio para lo que aporta. Consecuencia conocida
-  (**preexistente, no introducida aquí**): un cue con `duration` fija al que le
-  pilla una pausa larga se corta antes de tiempo, porque su timer de fin sigue
-  corriendo mientras el motor está parado. La pausa de UN cue
-  (`RetriggerMode`/pausa individual) sí reprograma lo que le queda.
 - **No toca los relojes de media.** Ver la frontera, arriba.
 - **No hay timecode externo.** Este trabajo va de **coherencia interna**; el
   MTC/wall-clock de `RemoteRouter` sigue como estaba.
@@ -212,7 +253,18 @@ LIMPIO ✔` (0 cuentas negativas, 0 cues colgados, 0 cadenas estancadas).
 
 - `ShowClockTests.cs` — el reloj en aislamiento: monotonía, la pausa congela el
   show pero no la pared, reanudar no salta ni retrocede, `Freeze`/`Resume`
-  idempotentes.
+  idempotentes, y los avisos de transición se emiten **una sola vez** y con el
+  reloj **ya** en su nuevo estado.
+- `PausaCongelaLosPlazosTests.cs` — la pausa global contra los plazos, con el
+  reloj virtual: la duración fija sobrevive a una pausa de un minuto (y también
+  con el PC cargado), varias pausas no se comen el resto, un plazo al borde de
+  vencer ni se pierde ni dispara dos veces, `pre_wait` / cadena `AUTO_CONTINUE`
+  / cue `WAIT` no avanzan en pausa, un cue disparado en pausa nace congelado,
+  `STOP ALL` devuelve los plazos a la vida, la pausa individual dentro de la
+  global no descuenta dos veces, y el despacho de 0 ms **no** se congela.
+- `TimerSchedulerTests.cs` — lo mismo en el planificador **de producción**
+  (timers reales): suspender un plazo vivo, nacer congelado, el despacho de
+  0 ms, y que cancelar un plazo suspendido no lo resucite al reanudar.
 - `DerivaDelTemporizadoTests.cs` — el temporizado con **el PC cargado
   simulado** de forma determinista (`VirtualScheduler.RetrasoDeDisparo`):
   relativo vs absoluto al desnudo, cadena de 60 cues sin deriva, cadena de

@@ -838,7 +838,12 @@ public class MainController
         _video.SetMasterVolume(m);
     }
 
-    /// <summary>Pausa/reanuda todos los motores de reproducción.</summary>
+    /// <summary>Pausa/reanuda todos los motores de reproducción. Congelar el
+    /// reloj del show congela TAMBIÉN los plazos ya programados: el
+    /// planificador escucha el Freeze/Resume y suspende sus timers vivos (ver
+    /// IScheduler.cs). Antes no lo hacía, y un cue con duration fija al que le
+    /// pillaba una pausa larga se cortaba antes de tiempo — su timer de fin
+    /// seguía contando con el motor parado.</summary>
     public void OnPauseToggle()
     {
         if (_running.Count == 0)
@@ -852,11 +857,15 @@ public class MainController
             // adelante (TStartTicks += dt) y el que hubiera arrancado DURANTE
             // la pausa se iba al futuro (elapsed negativo). Ahora es el reloj
             // el que se congela, y todos los elapsed con él.
+            // Los motores se reanudan ANTES de descongelar: cuando vuelvan a
+            // correr los plazos, la reproducción ya está en marcha.
             Clock.Resume();
             _paused = false;
         }
         else
         {
+            // Y aquí al revés: primero se paran los motores y luego se congela,
+            // para que ningún plazo pueda vencer con el sonido ya detenido.
             _audio.PauseAll();
             _video.PauseAll();
             Clock.Freeze();

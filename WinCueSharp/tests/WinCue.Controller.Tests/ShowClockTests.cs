@@ -90,6 +90,49 @@ public class ShowClockTests
         Assert.Equal(1.0, clock.Now, 9);
     }
 
+    /// <summary>El reloj AVISA de cada transición: es por donde el planificador
+    /// se entera de que tiene que suspender o re-armar sus plazos. Solo en la
+    /// transición — un Freeze repetido no vuelve a avisar, o el planificador
+    /// recalcularía el resto de cada plazo contra un ahora ya pasado.</summary>
+    [Fact]
+    public void LasTransiciones_AvisanUnaSolaVez()
+    {
+        var clock = new ManualShowClock();
+        int congelados = 0, reanudados = 0;
+        clock.Frozen += () => congelados++;
+        clock.Resumed += () => reanudados++;
+
+        clock.Resume();            // no estaba congelado: no hay transición
+        Assert.Equal(0, reanudados);
+
+        clock.Freeze();
+        clock.Freeze();            // idempotente: un solo aviso
+        Assert.Equal(1, congelados);
+
+        clock.Resume();
+        clock.Resume();
+        Assert.Equal(1, reanudados);
+    }
+
+    /// <summary>El aviso llega con el reloj YA en su nuevo estado: el
+    /// planificador consulta NowRaw dentro del manejador para calcular lo que
+    /// le falta a cada plazo.</summary>
+    [Fact]
+    public void ElAviso_LlegaConElRelojYaEnSuNuevoEstado()
+    {
+        var clock = new ManualShowClock();
+        clock.Advance(3.0);
+        bool congeladoAlAvisar = false, descongeladoAlAvisar = false;
+        clock.Frozen += () => congeladoAlAvisar = clock.IsFrozen;
+        clock.Resumed += () => descongeladoAlAvisar = !clock.IsFrozen;
+
+        clock.Freeze();
+        clock.Resume();
+
+        Assert.True(congeladoAlAvisar);
+        Assert.True(descongeladoAlAvisar);
+    }
+
     [Fact]
     public void ElRelojNuncaRetrocede()
     {

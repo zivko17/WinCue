@@ -1,4 +1,4 @@
-// =============================================================================
+﻿// =============================================================================
 // Fakes.cs — Dobles de prueba: scheduler virtual, motores falsos, vista falsa
 // =============================================================================
 // Permiten testear el controlador de forma DETERMINISTA: el tiempo avanza con
@@ -22,7 +22,10 @@ namespace WinCue.Controller.Tests;
 /// LATENCIA SIMULADA: RetrasoDeDisparo emula un PC cargado — cada timer
 /// despierta N ms DESPUÉS de su vencimiento, que es justo lo que hace
 /// System.Threading.Timer cuando la máquina va justa. Con plazos absolutos ese
-/// retraso no debe acumularse de un eslabón al siguiente.</summary>
+/// retraso no debe acumularse de un eslabón al siguiente.
+///
+/// PAUSA GLOBAL: como el planificador de producción, escucha el Freeze/Resume
+/// del reloj y suspende los plazos vivos mientras el show está en pausa.</summary>
 public sealed class VirtualScheduler : IScheduler
 {
     private long _now;
@@ -34,11 +37,20 @@ public sealed class VirtualScheduler : IScheduler
     /// <summary>Milisegundos que cada timer despierta TARDE (PC cargado).</summary>
     public int RetrasoDeDisparo { get; set; }
 
+    public VirtualScheduler()
+    {
+        _clock.Frozen += Congelar;
+        _clock.Resumed += Descongelar;
+    }
+
     private sealed class Entry
     {
         public long Due;
         public required Action Fn;
         public bool Cancelled;
+        public bool Congelable = true;
+        public bool Suspendido;
+        public long Restante;      // ms que le faltaban al congelar
     }
 
     private sealed class Canceller(Entry e) : IDisposable
@@ -46,12 +58,15 @@ public sealed class VirtualScheduler : IScheduler
         public void Dispose() => e.Cancelled = true;
     }
 
-    public IDisposable Schedule(int ms, Action fn)
-    {
-        var e = new Entry { Due = _now + Math.Max(0, ms) + RetrasoDeDisparo, Fn = fn };
-        _entries.Add(e);
-        return new Canceller(e);
-    }
+    public IDisposable Schedule(int ms, Action fn) =>
+        // ms = 0 es un despacho al hilo del controlador, no un plazo del show:
+        // no se congela (misma regla que TimerScheduler).
+        Registrar(new Entry
+        {
+            Due = _now + Math.Max(0, ms) + RetrasoDeDisparo,
+            Fn = fn,
+            Congelable = ms > 0,
+        });
 
     /// <summary>Plazo ABSOLUTO en segundos del reloj: se guarda tal cual (sin
     /// convertirlo a un retardo relativo), que es la razón de ser de la API —
@@ -59,12 +74,45 @@ public sealed class VirtualScheduler : IScheduler
     public IDisposable ScheduleAt(double deadline, Action fn)
     {
         long due = (long)Math.Round(deadline * 1000.0) + RetrasoDeDisparo;
-        var e = new Entry { Due = Math.Max(_now, due), Fn = fn };
+        return Registrar(new Entry { Due = Math.Max(_now, due), Fn = fn });
+    }
+
+    private IDisposable Registrar(Entry e)
+    {
+        if (e.Congelable && _clock.IsFrozen)
+        {
+            // Nace en pausa: se re-armará al reanudar con lo que le falta.
+            e.Restante = Math.Max(0L, e.Due - _now);
+            e.Suspendido = true;
+        }
         _entries.Add(e);
         return new Canceller(e);
     }
 
-    /// <summary>Avanza el reloj virtual ejecutando los timers vencidos en orden.</summary>
+    private void Congelar()
+    {
+        foreach (var e in _entries)
+        {
+            if (e.Cancelled || !e.Congelable || e.Suspendido)
+                continue;
+            e.Restante = Math.Max(0L, e.Due - _now);
+            e.Suspendido = true;
+        }
+    }
+
+    private void Descongelar()
+    {
+        foreach (var e in _entries)
+        {
+            if (!e.Suspendido)
+                continue;
+            e.Suspendido = false;
+            e.Due = _now + e.Restante;
+        }
+    }
+
+    /// <summary>Avanza el reloj virtual ejecutando los timers vencidos en orden.
+    /// Los suspendidos por la pausa global no cuentan como vencidos.</summary>
     public void Advance(int ms)
     {
         long target = _now + ms;
@@ -72,7 +120,8 @@ public sealed class VirtualScheduler : IScheduler
         {
             Entry? next = null;
             foreach (var e in _entries)
-                if (!e.Cancelled && e.Due <= target && (next is null || e.Due < next.Due))
+                if (!e.Cancelled && !e.Suspendido && e.Due <= target
+                    && (next is null || e.Due < next.Due))
                     next = e;
             if (next is null)
                 break;

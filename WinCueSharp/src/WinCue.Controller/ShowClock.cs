@@ -36,9 +36,12 @@
 //     Es el eje de la MEDICIÓN y la PRESENTACIÓN (elapsed/remaining de los
 //     cues, reloj grande, cursor del timeline). Al congelarse en la pausa, los
 //     números se quedan quietos sin tener que corregir marcas hacia atrás.
-//   La pausa global NO congela los plazos ya programados: es exactamente el
-//   comportamiento que había antes de este reloj y se conserva a propósito
-//   (ver docs/arquitectura-reloj.md, "Lo que NO hace").
+//   La pausa global SÍ congela los plazos ya programados: al congelar, el
+//   reloj avisa (Frozen) y el planificador suspende sus timers vivos guardando
+//   lo que les faltaba; al reanudar (Resumed) los re-arma con ese resto. Sin
+//   eso, un cue con duration fija al que le pilla una pausa larga se cortaba
+//   antes de tiempo, porque su timer de fin seguía contando con el motor
+//   parado (ver docs/arquitectura-reloj.md).
 //
 // MONOTONÍA
 //   La base es Stopwatch (contador de alta resolución del sistema), no
@@ -72,6 +75,16 @@ public interface IShowClock
     /// <summary>Reanuda el tiempo de show SIN saltos: al reanudar,
     /// <see cref="Now"/> vale exactamente lo que valía al congelar.</summary>
     void Resume();
+
+    /// <summary>Aviso de que el show ACABA de congelarse. Lo escucha el
+    /// planificador para suspender los plazos vivos: si siguieran corriendo, la
+    /// pausa pararía los motores pero no los relojes que los cortan.
+    /// Solo se emite en la transición (Freeze idempotente no lo repite).</summary>
+    event Action? Frozen;
+
+    /// <summary>Aviso de que el show ACABA de reanudarse. El planificador
+    /// re-arma con lo que les faltaba los plazos que había suspendido.</summary>
+    event Action? Resumed;
 }
 
 /// <summary>Contabilidad común de la pausa. Las implementaciones solo aportan
@@ -95,6 +108,9 @@ public abstract class ShowClockBase : IShowClock
         get { lock (_gate) return _frozen; }
     }
 
+    public event Action? Frozen;
+    public event Action? Resumed;
+
     public void Freeze()
     {
         lock (_gate)
@@ -104,6 +120,10 @@ public abstract class ShowClockBase : IShowClock
             _frozenAt = NowRaw - _pausedTotal;
             _frozen = true;
         }
+        // FUERA del cerrojo: el suscriptor (el planificador) lee el reloj para
+        // calcular lo que le falta a cada plazo, y avisarle con el cerrojo
+        // cogido sería pedir una reentrada.
+        Frozen?.Invoke();
     }
 
     public void Resume()
@@ -118,6 +138,7 @@ public abstract class ShowClockBase : IShowClock
             _pausedTotal = NowRaw - _frozenAt;
             _frozen = false;
         }
+        Resumed?.Invoke();
     }
 }
 
