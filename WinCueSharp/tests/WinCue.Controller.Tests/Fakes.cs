@@ -264,7 +264,7 @@ public sealed class FakeVideoEngine : IVideoEngine
     public readonly List<(int CueId, string Path, VideoPlayParams P)> Plays = new();
     public readonly List<int> Stops = new();
     public readonly List<(int CueId, double Target, double Duration, bool StopAfter)> Fades = new();
-    public readonly List<(int CueId, VideoGeometry Geo)> GeometryApplied = new();
+    public readonly List<(int CueId, VideoGeometry Geo, double? Scale)> GeometryApplied = new();
     public readonly Dictionary<int, double> Volumes = new();
     public readonly Dictionary<int, double> Durations = new();
     public readonly Dictionary<int, double> Elapsed = new();
@@ -327,7 +327,8 @@ public sealed class FakeVideoEngine : IVideoEngine
     public bool IsPlaying(int cueId) => Playing.Contains(cueId);
     public double GetDuration(int cueId) => Durations.GetValueOrDefault(cueId);
     public double GetElapsed(int cueId) => Elapsed.GetValueOrDefault(cueId);
-    public void ApplyGeometry(int cueId, VideoGeometry geo) => GeometryApplied.Add((cueId, geo));
+    public void ApplyGeometry(int cueId, VideoGeometry geo, double? scalePercent = null) =>
+        GeometryApplied.Add((cueId, geo, scalePercent));
     public void SetWindowHandleProvider(Func<nint> getWindowHandle) => HandleProvider = getWindowHandle;
     public int CleanupCalls;
     public void Cleanup() => CleanupCalls++;

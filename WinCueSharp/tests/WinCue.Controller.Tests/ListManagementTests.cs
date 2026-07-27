@@ -178,7 +178,7 @@ public class ListManagementTests : ControllerTestBase
             ["rotate_z"] = 90.0,
         });
 
-        var (cueId, geo) = Assert.Single(Video.GeometryApplied);
+        var (cueId, geo, _) = Assert.Single(Video.GeometryApplied);
         Assert.Equal(v.Id, cueId);
         Assert.Equal("CUSTOM", geo.Mode);
         Assert.Equal(100.0, geo.TranslateX);

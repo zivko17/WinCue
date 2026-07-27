@@ -585,13 +585,20 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     }
 
     /// <summary>Aplica la geometría a un vídeo EN REPRODUCCIÓN (en vivo).
-    /// El modo FULL conserva la escala base del cue (no la pisa a 0).</summary>
-    public void ApplyGeometry(int cueId, VideoGeometry geo)
+    /// El modo FULL conserva la escala base del cue (no la pisa a 0).
+    /// <paramref name="scalePercent"/> la ACTUALIZA (fader «Escala (%)» del
+    /// inspector): se guarda en los parámetros del cue para que la escala
+    /// nueva sobreviva a un reinicio del player o a la promoción del standby.
+    /// null = dejarla como está.</summary>
+    public void ApplyGeometry(int cueId, VideoGeometry geo, double? scalePercent = null)
     {
+        if (scalePercent is double s && _playParams.GetValueOrDefault(cueId) is { } prev)
+            _playParams[cueId] = prev with { Scale = s };
+        var p = _playParams.GetValueOrDefault(cueId);
         if (_players.TryGetValue(cueId, out var player))
-            ApplyGeo(player, geo, BaseZoom(_playParams.GetValueOrDefault(cueId)));
+            ApplyGeo(player, geo, BaseZoom(p));
         if (_hapPlayers.TryGetValue(cueId, out var hap))
-            hap.ApplyGeometry(geo, _playParams.GetValueOrDefault(cueId)?.Scale ?? 100.0);
+            hap.ApplyGeometry(geo, p?.Scale ?? scalePercent ?? 100.0);
     }
 
     /// <summary>video-zoom (log2) equivalente al parámetro Scale del cue.</summary>
