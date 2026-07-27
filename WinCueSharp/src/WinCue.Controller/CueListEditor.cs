@@ -112,6 +112,15 @@ public sealed class CueListEditor
         if (cues.Count == 0)
             return;
 
+        // Pegar un GRUPO dentro de otro anidaría. Si el bloque trae un grupo de
+        // primer nivel, el bloque entero aterriza en la raíz, DETRÁS del grupo
+        // en el que se soltó (así no parte su bloque en dos).
+        var blockIds = cues.Select(c => c.Id).ToHashSet();
+        bool blockHasGroup = cues.Any(
+            c => c.Type == CueType.Group && !(c.ParentId is int p && blockIds.Contains(p)));
+        if (blockHasGroup && afterRow >= 0)
+            afterRow = RowAfterEnclosingGroup(afterRow);
+
         _pushUndo();
 
         // Ids nuevos preservando la jerarquía interna del bloque
@@ -120,13 +129,14 @@ public sealed class CueListEditor
         foreach (var c in cues)
             idMap[c.Id] = nextId++;
         var refCue = afterRow >= 0 ? _model.GetCue(afterRow) : null;
+        int? topLevelParent = blockHasGroup ? null : refCue?.ParentId;
         foreach (var c in cues)
         {
             int oldId = c.Id;
             c.Id = idMap[oldId];
             c.ParentId = c.ParentId is int pid && idMap.TryGetValue(pid, out int npid)
                 ? npid                     // padre dentro del bloque pegado
-                : refCue?.ParentId;        // nivel superior: hereda contexto
+                : topLevelParent;          // nivel superior: hereda contexto
             c.State = CueState.Idle;
             c.LatencyMs = null;
         }
@@ -179,6 +189,22 @@ public sealed class CueListEditor
         if (newParent is int np && moveIds.Contains(np))
             return;   // no puede quedar dentro de sí mismo
 
+        // GRUPOS SIN ANIDAR: si lo que se mueve es un grupo y el destino cae
+        // dentro de otro, se DESLIZA hasta detrás del bloque del grupo anfitrión
+        // en vez de meterse dentro (y en vez de rechazar el arrastre, que en
+        // directo se lee como "la aplicación no responde").
+        if (block[0].Type == CueType.Group && newParent is int host)
+        {
+            int hostIdx = all.FindIndex(c => c.Id == host);
+            if (hostIdx >= 0)
+            {
+                insertAt = hostIdx + 1;
+                while (insertAt < all.Count && all[insertAt].ParentId == host)
+                    insertAt++;
+            }
+            newParent = null;
+        }
+
         _pushUndo();
         block[0].ParentId = newParent;
 
@@ -211,6 +237,10 @@ public sealed class CueListEditor
     /// <summary>Inserta un cue nuevo del tipo dado justo debajo de la fila row.</summary>
     public void OnInsertCue(CueType cueType, int row)
     {
+        // Un GRUPO nuevo nunca nace dentro de otro: si la fila de referencia
+        // está dentro de uno, se crea DETRÁS del bloque entero (raíz).
+        if (cueType == CueType.Group && row >= 0)
+            row = RowAfterEnclosingGroup(row);
         _pushUndo();
         int insertAt = row >= 0 ? row + 1 : _model.Count;
         // Heredar el grupo del cue de referencia (mantiene contigüidad)
@@ -222,7 +252,7 @@ public sealed class CueListEditor
             Name = $"{Capitalize(cueType)} cue",
             Duration = cueType is CueType.Wait or CueType.Fade ? 3.0 : 0.0,
             Number = _model.NextNumber(),
-            ParentId = refCue?.ParentId,
+            ParentId = cueType == CueType.Group ? null : refCue?.ParentId,
         };
         _model.InsertCue(insertAt, cue);
         _view.ReloadTable();
@@ -265,15 +295,45 @@ public sealed class CueListEditor
     // Grupos: agrupar / desagrupar / colapsar
     // ------------------------------------------------------------------
 
-    /// <summary>Crea un GROUP que contiene los cues seleccionados (y descendientes).</summary>
+    /// <summary>Primera fila DESPUÉS del bloque del grupo que contiene la fila
+    /// dada. Si la fila no está dentro de ningún grupo, se devuelve tal cual.
+    /// Es el punto de aterrizaje de todo lo que NO puede quedar anidado.</summary>
+    private int RowAfterEnclosingGroup(int row)
+    {
+        var cue = _model.GetCue(row);
+        if (cue?.ParentId is not int pid)
+            return row;
+        int gi = _model.IndexOfId(pid);
+        return gi < 0 ? row : _model.GroupExtent(gi) - 1;
+    }
+
+    /// <summary>Crea un GROUP que contiene los cues seleccionados.
+    /// GRUPOS SIN ANIDAR: se rechaza si la selección ya vive dentro de un grupo
+    /// o si contiene un grupo — en ambos casos el resultado sería un grupo
+    /// dentro de otro, que en una lista de cues no aporta nada y complica la
+    /// lectura en directo.</summary>
     public void OnGroupSelected(IReadOnlyList<int> rows)
     {
         var valid = rows.Where(r => r >= 0 && r < _model.Count).Distinct().OrderBy(r => r).ToList();
         if (valid.Count == 0)
             return;
-        _pushUndo();
         var cues = _model.Cues;
         var selCues = valid.Select(r => cues[r]).ToList();
+        if (selCues.Any(c => c.Type == CueType.Group))
+        {
+            _view.FlashStatus(Loc.T(
+                "No se puede agrupar un grupo dentro de otro.",
+                "A group cannot be put inside another group."));
+            return;
+        }
+        if (selCues.Any(_model.IsInsideGroup))
+        {
+            _view.FlashStatus(Loc.T(
+                "Esos cues ya están en un grupo: los grupos no se anidan.",
+                "Those cues are already in a group: groups are not nested."));
+            return;
+        }
+        _pushUndo();
 
         // Conjunto a mover = seleccionados + todos sus descendientes
         var moveIds = new HashSet<int>();
@@ -290,7 +350,9 @@ public sealed class CueListEditor
         {
             Id = gid, Type = CueType.Group, Name = "Grupo", Duration = 0.0,
             Number = _model.NextNumber(),
-            ParentId = selCues[0].ParentId, GroupMode = GroupMode.Enter,
+            // Siempre en la raíz: la comprobación de arriba ya garantiza que la
+            // selección no cuelga de ningún grupo.
+            ParentId = null, GroupMode = GroupMode.Enter,
         };
         // Solo los seleccionados de nivel superior cuelgan del nuevo grupo
         foreach (var c in selCues)

@@ -137,6 +137,28 @@ public class CueModel
         return end;
     }
 
+    /// <summary>True si el cue tiene ALGÚN grupo por encima en la cadena de
+    /// padres. Con la regla de "grupos sin anidar" esto solo puede ser cierto
+    /// para cues normales: ningún GROUP debe cumplirlo.</summary>
+    public static bool HasGroupAncestor(Cue cue, Func<int, Cue?> byId)
+    {
+        ArgumentNullException.ThrowIfNull(cue);
+        ArgumentNullException.ThrowIfNull(byId);
+        int? pid = cue.ParentId;
+        int guard = 0;
+        while (pid is not null && guard++ < 100)
+        {
+            var parent = byId(pid.Value);
+            if (parent is null) return false;
+            if (parent.Type == CueType.Group) return true;
+            pid = parent.ParentId;
+        }
+        return false;
+    }
+
+    /// <summary>True si el cue está dentro de algún grupo (atajo sobre el modelo).</summary>
+    public bool IsInsideGroup(Cue cue) => HasGroupAncestor(cue, GetById);
+
     /// <summary>True si algún grupo ancestro del cue está colapsado (debe ocultarse).</summary>
     public bool IsAncestorCollapsed(Cue cue)
     {
@@ -237,7 +259,13 @@ public class CueModel
     /// Retrocompatible: los shows antiguos solo tienen id/type/name/duration/
     /// file_path; el resto de campos toman sus valores por defecto.
     /// </summary>
-    public static List<Cue> FromJson(string text)
+    public static List<Cue> FromJson(string text) => FromJson(text, out _);
+
+    /// <inheritdoc cref="FromJson(string)"/>
+    /// <param name="text">Contenido del fichero de show.</param>
+    /// <param name="flattenedGroups">Cuántos grupos ANIDADOS se degradaron al
+    /// cargar (ver <see cref="FlattenNestedGroups"/>). 0 en un show normal.</param>
+    public static List<Cue> FromJson(string text, out int flattenedGroups)
     {
         JsonNode? root;
         try
@@ -277,7 +305,54 @@ public class CueModel
                 throw new FormatException($"ID duplicado en el archivo: {c.Id}");
             cues.Add(c);
         }
+        flattenedGroups = FlattenNestedGroups(cues);
         return cues;
+    }
+
+    /// <summary>
+    /// Aplana los GRUPOS ANIDADOS de una lista recién cargada: un grupo dentro
+    /// de otro no tiene sentido en una lista de cues y ya no se puede crear,
+    /// pero los shows guardados con versiones anteriores (o por la versión
+    /// Python) pueden traerlos. Cargar NUNCA debe fallar por eso.
+    ///
+    /// QUÉ SE HACE Y POR QUÉ: el grupo interior se DEGRADA A MEMO y sus hijos
+    /// pasan a colgar del grupo exterior. Se eligió así frente a las
+    /// alternativas porque es lo único que no pierde nada ni mueve nada:
+    ///   · borrar el grupo interior perdería su nombre, número, color y notas;
+    ///   · sacarlo al nivel raíz obligaría a reordenar la lista (su bloque
+    ///     tendría que saltar por encima de los hermanos que quedan detrás),
+    ///     y en una lista de cues el ORDEN es el show;
+    ///   · tolerarlos dejaría el "Grupo &gt; Grupo" en pantalla para siempre.
+    /// Un MEMO es exactamente lo que queda de una cabecera de grupo sin acción:
+    /// una línea de comentario, en su sitio, con su texto y su color.
+    ///
+    /// Compatible con Python: no se inventa ningún campo (solo cambian "type"
+    /// y "parent_id", que ya existían).
+    /// </summary>
+    /// <returns>Cuántos grupos se degradaron (0 = el show ya estaba plano).</returns>
+    public static int FlattenNestedGroups(IList<Cue> cues)
+    {
+        ArgumentNullException.ThrowIfNull(cues);
+        var byId = new Dictionary<int, Cue>();
+        foreach (var c in cues)
+            byId[c.Id] = c;
+        Cue? Lookup(int id) => byId.TryGetValue(id, out var c) ? c : null;
+
+        int flattened = 0;
+        // Cada vuelta degrada UN grupo anidado; con 3 niveles hacen falta 2
+        // vueltas. El techo (una por cue) corta cualquier ciclo del fichero.
+        for (int guard = 0; guard <= cues.Count; guard++)
+        {
+            var nested = cues.FirstOrDefault(
+                c => c.Type == CueType.Group && HasGroupAncestor(c, Lookup));
+            if (nested is null)
+                break;
+            foreach (var child in cues.Where(c => c.ParentId == nested.Id).ToList())
+                child.ParentId = nested.ParentId;
+            nested.Type = CueType.Memo;
+            flattened++;
+        }
+        return flattened;
     }
 
     /// <summary>Wrapper de fichero de show: {"version": 1, "cues": [...]}.</summary>
