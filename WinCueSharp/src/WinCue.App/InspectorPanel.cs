@@ -1589,26 +1589,60 @@ public sealed class InspectorPanel : ContentControl
         _loaders[key] = c => cb.IsChecked = read(c);
     }
 
+    /// <summary>Nombre legible de un color de etiqueta (para el tooltip).</summary>
+    private static string ColorLabel(string key) => key switch
+    {
+        "red" => Loc.T("Rojo", "Red"),
+        "orange" => Loc.T("Naranja", "Orange"),
+        "yellow" => Loc.T("Amarillo", "Yellow"),
+        "green" => Loc.T("Verde", "Green"),
+        "blue" => Loc.T("Azul", "Blue"),
+        "purple" => Loc.T("Morado", "Purple"),
+        _ => Loc.T("Sin color", "No color"),
+    };
+
+    /// <summary>Fila de muestras de color. Es también el sitio donde se elige el
+    /// COLOR DE UN GRUPO: con él se pinta su recuadro en la lista y en el
+    /// timeline, así que la muestra activa tiene que verse — antes no había
+    /// ningún indicativo de cuál estaba puesto.</summary>
     private void ColorSwatches(StackPanel panel)
     {
         var row = LabeledRow(panel, Loc.T("Color:", "Color:"));
+        var swatches = new List<Button>();
         foreach (var (name, hex) in CueConstants.CueColors)
         {
             var btn = new Button
             {
-                Width = 26, Height = 20, Margin = new Thickness(2, 0, 2, 0),
+                Width = 26, Height = 22, Margin = new Thickness(2, 0, 2, 0),
+                // El estilo general deja Padding 10,4: en 26 px de ancho no
+                // cabe el glifo y salía recortado a una esquirla.
+                Padding = new Thickness(0),
                 Background = hex.Length > 0
                     ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
                     : Brushes.Transparent,
                 BorderBrush = Theme.TextFaintBrush,
-                Content = hex.Length == 0 ? Icons.NoColor : "",
-                Foreground = Theme.TextNoteBrush,
                 Tag = name,
+                ToolTip = ColorLabel(name),
             };
-            btn.Click += (_, _) => Commit("color", name);
+            string key = name;
+            btn.Click += (_, _) => Commit("color", key);
             row.Children.Add(btn);
+            swatches.Add(btn);
         }
-        _loaders["color"] = _ => { };   // sin estado visual de selección (5b)
+        _loaders["color"] = c =>
+        {
+            foreach (var b in swatches)
+            {
+                string key = (string)b.Tag!;
+                bool active = key == c.Color;
+                // La marca de verificación va oscura sobre el color y clara
+                // sobre el hueco de «sin color»: contraste en los dos casos.
+                b.Content = active ? Icons.Check : key.Length == 0 ? Icons.NoColor : "";
+                b.Foreground = active && key.Length > 0
+                    ? Theme.TextOnAccentBrush : Theme.TextBrightBrush;
+                b.FontWeight = FontWeights.Bold;
+            }
+        };
     }
 
     private void FileRow(StackPanel panel)

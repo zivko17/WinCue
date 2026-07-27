@@ -272,9 +272,17 @@ public static class Theme
 
     /// <summary>Botón «Relocalizar» (medios no encontrados).</summary>
     public static readonly Color RelocateBg = Hex(0x7e5a1e);
-    /// <summary>Botón «detener este cue».</summary>
-    public static readonly Color StopSmallBg = Hex(0x5a2a2a);
-    public static readonly Color StopSmallBorder = Hex(0x703030);
+    /// <summary>Botón «detener este cue» de las tarjetas de EN REPRODUCCIÓN.
+    /// Era un granate (#5a2a2a) que sobre la tarjeta (#333) se leía como un
+    /// trozo muerto: ahora es el ROJO de programa, con un cuadrado blanco
+    /// dentro (el símbolo universal de parada).</summary>
+    public static readonly Color StopSmallBg = Pgm;
+    public static readonly Color StopSmallBorder = Hex(0xe05a4a);
+
+    /// <summary>Fondo de los desplegables de flecha pegados a «Abrir» y
+    /// «Guardar»: hundido respecto al botón principal para que se lean como
+    /// dos controles y no como un botón con un pegote al lado.</summary>
+    public static readonly Color SplitArrowBg = Hex(0x232323);
 
     // ═════════════════════════ RELIEVE DE LOS BOTONES ═════════════════════════
     // El botón deja de ser un rectángulo plano y pasa a leerse como una tecla de

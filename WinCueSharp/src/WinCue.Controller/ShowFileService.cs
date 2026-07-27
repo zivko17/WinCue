@@ -254,9 +254,10 @@ public sealed class ShowFileService
     public bool LoadShow(string path)
     {
         List<Cue> newCues;
+        int flattenedGroups;
         try
         {
-            newCues = CueModel.FromJson(File.ReadAllText(path));
+            newCues = CueModel.FromJson(File.ReadAllText(path), out flattenedGroups);
         }
         catch (Exception exc) when (exc is IOException or FormatException)
         {
@@ -311,6 +312,14 @@ public sealed class ShowFileService
             ? Loc.T($" — {classicPath} vídeo(s) HAP → ruta clásica (sin fundidos de opacidad)",
                     $" — {classicPath} HAP video(s) → classic path (no opacity fades)")
             : "";
+        // Grupos anidados del show antiguo: se avisa SIEMPRE, porque al guardar
+        // se consolida el aplanado y el operador tiene que saberlo.
+        warn += flattenedGroups > 0
+            ? Loc.T($" — {flattenedGroups} grupo(s) anidado(s) convertidos en NOTA (ya no se pueden anidar grupos)",
+                    $" — {flattenedGroups} nested group(s) turned into MEMO (groups can no longer be nested)")
+            : "";
+        if (flattenedGroups > 0)
+            _log($"Grupos anidados aplanados al cargar: {flattenedGroups}");
         _view.FlashStatus(warn.Length > 0
             ? Loc.T($"Show cargado{warn}", $"Show loaded{warn}")
             : Loc.T($"Show cargado: {Path.GetFileName(path)}", $"Show loaded: {Path.GetFileName(path)}"));
