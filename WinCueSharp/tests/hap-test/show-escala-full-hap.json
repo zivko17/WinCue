@@ -1,0 +1,10 @@
+{
+  "version": 1,
+  "cues": [
+    { "id": 1, "type": "VIDEO", "number": "1", "name": "B HAP al 60% (modo FULL)",
+      "file_path": "xf-B-hap.mov", "duration": 12.0, "loop": true,
+      "geo_mode": "FULL", "scale": 60.0,
+      "timeline_layer": 2,
+      "continue_mode": "NONE" }
+  ]
+}

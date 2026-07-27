@@ -1058,3 +1058,177 @@ recibe cableado desde `MainWindow`.
   de opacidad y fundidos larguísimos que SÍ caben (no avisan).
 
 Suite completa: **483 en verde, 0 warnings**, smoke exit 0.
+
+---
+
+# Verificación en directo (segunda tanda) — dos fallos más
+
+Reportados por Andrés probando la aplicación en su equipo.
+
+## Fallo E — el FADE ALL no fundía la IMAGEN (solo el audio)
+
+Literal: «el botón de fade all no funciona, se corta la imagen pero el audio sí
+que hace el fade».
+
+### Cómo se midió (método reproducible, hermano del § Fallo C)
+
+Mismo arnés de luma plana (`generar-crossfade.ps1`) y misma captura por Desktop
+Duplication a 60 fps sin pérdidas, pero lo que se mide ya no es un cruce sino
+una **bajada a negro**: `tests/hap-test/medir-fade-all.ps1`.
+
+El show es UN vídeo en LOOP (`show-fadeall-hap.json`, `show-fadeall-h264.json`),
+así que la salida se queda clavada en la meseta (YAVG ≈ 197) hasta que llega el
+disparo. El FADE ALL / PANIC se dispara **por OSC** (`/wincue/fadeall`,
+`/wincue/panic`) contra la app corriendo desatendida con `--stress`: el modo de
+estrés solo hace GO, y el mensaje UDP es la única forma de apretar el botón sin
+manos. Un fundido correcto es una **rampa monótona de la meseta a negro (16)**
+que dura los segundos configurados; el fallo es una caída de 1 fotograma.
+
+⚠ El arnés desatendido RELANZA la vuelta tras 3 s sin nada sonando: hay que
+medir con un fundido **más corto que esos 3 s** (se usa `-Fade 2.0`) o el
+relanzamiento pisa el final de la rampa.
+
+### Causa RAÍZ
+
+**El retroceso del playhead que hace `StopEverything` volvía a preparar el
+standby del cue que acababa de salir del aire, y la precarga le fijaba la
+opacidad a 0 SIN fundido.**
+
+`FADE ALL` y `PANIC` llaman `StopEverything(fade, rewindToShowPoint: true)`.
+Dentro:
+
+1. `EndCue` programa bien las dos cosas: el fundido de volumen del motor
+   (`FadeVolume(..., stopAfter: true)`) y la **rampa de opacidad**
+   (`SetVideoCueOpacity(cue, 0.0, fade)`), y saca el cue de `_running`.
+2. Al final, el retroceso `SetPlayhead(_showPointCueId)` — que apunta
+   justamente al cue que estaba al aire — llama `PrepareVideoStandby`. Como
+   `EndCue` ya lo había sacado de `_running`, la guarda
+   `!_running.ContainsKey(cue.Id)` **dejaba pasar la precarga**, que termina en
+   `_view.SetVideoCueOpacity(cue.Id, 0.0)` **sin fundido**.
+3. Un `SetCueOpacity` con `fadeSeconds = 0` hace `BeginAnimation(Opacity, null)`:
+   **mata la animación recién nacida** y clava la opacidad a 0 en el fotograma
+   siguiente. El audio, que funde en el AudioEngine por su cuenta, seguía
+   bajando — de ahí el «la imagen se corta y el audio sí funde».
+
+Los sospechosos de partida quedan **DESCARTADOS**, con medida:
+`ReleaseFrozenSurfaces()` no toca nada si no hay congelados de un cruce; la
+carrera entre el `stopAfter` del motor y la animación no existe (ambos vencen a
+la vez y el `Stop` llega al final); `SetVideoCueOpacity` con `fadeSeconds > 0`
+anima de verdad (se ve en la rampa del después); y `SuppressVisualFadeOut` vive
+en otra rama (el fade_out del propio cue), no en `EndCue`.
+
+**Solo se rompía la ruta mpv/híbrida** (H.264 y demás): en la ruta del MOTOR HAP
+la precarga sale antes por la rama de códec no soportado
+(`IsUnsupportedVideoCodec` → `PreloadNext` y `return`) y nunca llega a tocar la
+opacidad. Medido: el HAP ya fundía bien antes del arreglo.
+
+### Arreglo elegido
+
+**Un cue que se está fundiendo está BLINDADO hasta que acabe.**
+`MainController._videoFadingOut` (cueId → timer del plazo) registra los vídeos
+que ya salieron de `_running` pero cuya imagen sigue en pantalla:
+
+- `PrepareVideoStandby` no toca un cue blindado — ni le fija la opacidad ni le
+  prepara un standby que, en la ruta del compositor, le **robaría la superficie
+  del pool** (`AssignCue` reinicia opacidad y z).
+- Al vencer el plazo el blindaje se levanta solo y, si el playhead se quedó
+  encima (que es lo que deja el retroceso), **entonces** se prepara el standby:
+  el GO siguiente sigue siendo instantáneo.
+- `RefreshVideoTally` cuenta a los blindados como «en pantalla»: en la ruta
+  CLÁSICA (HWND, sin opacidad por cue) las pistas activas se recalculaban desde
+  `_running` ya vacío y **ocultaban el panel en el primer fotograma**. Ahí no hay
+  fundido posible, pero al menos la imagen se sostiene hasta el final del plazo
+  en vez de cortarse al principio.
+- El blindaje se levanta también si el cue vuelve al aire (GO), si un STOP ALL
+  sin fundido corta de verdad, y al cerrar la app.
+
+### Antes / después (medido en la salida real, 60 fps, fundido de 2 s = 120 fotogramas)
+
+| Escenario | Antes | Después |
+|---|---|---|
+| FADE ALL, H.264 (mpv/híbrido + compositor) | **1 fotograma**: 197 → 16 | **104 fotogramas** de rampa monótona 193 → 25 |
+| PANIC con fundido, H.264 | **1 fotograma**: 197 → 16 | **109 fotogramas** de rampa monótona 189 → 25 |
+| FADE ALL, HAP (motor propio) | 109 fotogramas (ya iba bien) | 109 fotogramas (sin regresión) |
+
+(La rampa mide ~1,8 s y no 2,0 s porque la ventana va del último fotograma en
+meseta al primero por debajo de 25: los extremos del fundido caen fuera.)
+
+### Tests sin GPU
+
+`FadeAllVisualTests` (5): el FADE ALL programa la rampa de opacidad y **nadie la
+pisa después**; no se prepara el standby de un cue que sigue en pantalla; al
+acabar el fundido el cue **sí** se vuelve a preparar (GO instantáneo intacto);
+el PANIC con fundido se comporta igual; y el STOP ALL sin fundido sigue
+preparando el standby como siempre.
+
+## Fallo F — el fader «Escala (%)» movía el previo pero no la salida
+
+Literal: «no funciona el fader en el vídeo pero en el preview del edit del
+inspector sí» (con MODO = «Superficie completa»).
+
+### Causa RAÍZ
+
+Hay **DOS escalas** y solo una estaba conectada a la edición en vivo:
+
+- **`scale`** — el % del modo FULL (zoom sobre el ajuste a la salida). Viaja en
+  `VideoPlayParams.Scale` y lo aplican los dos motores: mpv como
+  `video-zoom = log2(scale/100)` (`VideoEngine.BaseZoom`) y el motor HAP como
+  factor del rectángulo destino (`HapCuePlayer.ComputeDest`).
+- **`scale_x`** — el multiplicador del modo CUSTOM. Vive en `VideoGeometry`.
+
+`MainController.GeoKeys` —la lista de campos que rehacen la geometría de un
+vídeo EN REPRODUCCIÓN— tenía `scale_x` pero **no `scale`**: mover el fader no
+llamaba a `ApplyGeometry`. Y aunque lo hubiera llamado, `VideoEngine.ApplyGeometry`
+leía la escala del **snapshot de parámetros del GO** (`_playParams`), que nadie
+actualizaba. El previo del inspector, en cambio, lee `cue.Scale` directamente
+(`InspectorPanel.ApplyPreviewGeometry`, con la misma fórmula que el motor): por
+eso el previo sí se movía. Dos comportamientos para el mismo control.
+
+### Decisión: la escala en FULL SÍ tiene sentido — se arregla, no se esconde
+
+Se descartó ocultar/deshabilitar el control en modo FULL:
+
+1. **No es redundante con CUSTOM.** En FULL la escala es un zoom sobre el ajuste
+   a la salida, **centrado y con el aspecto respetado**; el CUSTOM es
+   posicionamiento libre (escala + desplazamiento + giro) y obliga a recolocar
+   el vídeo a mano para conseguir lo mismo.
+2. **Es la ÚNICA escala del motor HAP.** `HapEngineEligible` exige
+   `GeoMode != Custom`: esconder el fader en FULL dejaría los cues HAP **sin
+   ninguna forma de escalar**, o los expulsaría al mpv clásico.
+3. **Ya estaba implementada en la salida** en las dos rutas — lo único roto era
+   el camino de la edición en vivo.
+
+Arreglo: `scale` entra en `GeoKeys`, y `IVideoEngine.ApplyGeometry` gana un
+`double? scalePercent` que el motor **guarda en `_playParams`** antes de
+aplicarlo (así la escala nueva sobrevive a un reinicio del player o a la
+promoción del standby). La UI no cambia: el panel FULL y el CUSTOM ya eran
+excluyentes (`SyncGeometryUi`), así que nunca se ven las dos escalas a la vez.
+
+### Antes / después (medido en la salida real)
+
+Con el clip de luma plana (meseta 196,8 a escala 100) sobre la salida, un
+`scale = 60` debe dejar el vídeo ocupando 0,6² = 36 % del área y el resto negro
+(16): luma esperada **0,36 × 196,8 + 0,64 × 16 = 81,1**.
+
+| Ruta | Escala 100 | Escala 60 | Esperado |
+|---|---|---|---|
+| mpv/híbrido (`show-escala-full-h264.json`) | 196,8 | **80,9** | 81,1 |
+| motor HAP (`show-escala-full-hap.json`) | 196,8 | **81,1** | 81,1 |
+
+O sea: los dos motores escalan IGUAL y con la misma matemática del previo. Lo
+que faltaba era que el fader llegase hasta ahí, y eso se cubre con tests.
+
+⚠ Límite de la medida: lo que se mide en la salida real es la escala del GO
+(que ya funcionaba). El camino de la EDICIÓN EN VIVO no se puede disparar sin
+manos (no hay verbo OSC para el inspector) y queda cubierto por
+`GeometryScaleTests`.
+
+### Tests sin GPU
+
+`GeometryScaleTests` (9): la escala en vivo llega al motor en FULL y en CUSTOM;
+sin reproducir no se llama al motor pero **sí** se rehace el standby con la
+escala nueva; y la matemática compartida — mpv (`2^video-zoom`) y HAP
+(`ComputeDest`) dan el MISMO multiplicador para 50/100/149/200 %, el zoom crece
+desde el centro y no deforma el aspecto.
+
+Suite completa: **646 en verde, 0 warnings**, smoke exit 0.
