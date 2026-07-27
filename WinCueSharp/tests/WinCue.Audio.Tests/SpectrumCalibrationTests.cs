@@ -33,7 +33,7 @@ public class SpectrumCalibrationTests
     /// antes de leer y se vuelve a pedir después.</summary>
     private static float[] SpectrumOf(double freq, double amplitude)
     {
-        var p = new CueSampleProvider(1, Tone(freq, amplitude, FftSize * 8), volume: 1.0);
+        using var p = new CueSampleProvider(1, Tone(freq, amplitude, FftSize * 8), volume: 1.0);
         p.GetSpectrum();   // enciende el analizador
         var block = new float[4096];
         for (int i = 0; i < 8; i++)

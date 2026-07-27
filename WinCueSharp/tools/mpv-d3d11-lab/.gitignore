@@ -1,0 +1,6 @@
+# Volcados de verificación del lab (8 MB por BMP)
+out/
+
+# Paquete portable (se regenera con empaquetar.ps1)
+paquete/
+mpv-d3d11-lab.zip

@@ -48,6 +48,122 @@ internal sealed class HapVideoSession : IDisposable
     internal required int BlockRows { get; init; }    // filas de bloques 4x4
     internal required int RowBytes { get; init; }     // bytes por fila de bloques
 
+    /// <summary>Crea el ring de texturas BC del tamaño del vídeo. Estática (y
+    /// no un método del pipeline) porque la comparten el pipeline clásico y el
+    /// destino de anillo del motor nuevo: la lógica de subida del DXT es la
+    /// misma, solo cambia a DÓNDE se dibuja después.
+    /// Intenta DYNAMIC + Map WRITE_DISCARD (validado en el lab) y cae a
+    /// DEFAULT + UpdateSubresource si el driver rechaza BC dinámico.</summary>
+    internal static HapVideoSession Create(ID3D11Device device, int videoWidth,
+        int videoHeight, HapTextureFormat format)
+    {
+        int blocksX = (videoWidth + 3) / 4;
+        int blockRows = (videoHeight + 3) / 4;
+        int rowBytes = blocksX * (format == HapTextureFormat.RgbDxt1 ? 8 : 16);
+        Vortice.DXGI.Format texFormat = format == HapTextureFormat.RgbDxt1
+            ? Vortice.DXGI.Format.BC1_UNorm
+            : Vortice.DXGI.Format.BC3_UNorm;
+
+        var texDesc = new Texture2DDescription
+        {
+            Width = (uint)videoWidth,
+            Height = (uint)videoHeight,
+            MipLevels = 1,
+            ArraySize = 1,
+            Format = texFormat,
+            SampleDescription = new SampleDescription(1, 0),
+            Usage = ResourceUsage.Dynamic,
+            BindFlags = BindFlags.ShaderResource,
+            CPUAccessFlags = CpuAccessFlags.Write,
+            MiscFlags = ResourceOptionFlags.None,
+        };
+
+        var session = new HapVideoSession
+        {
+            DynamicUpload = true,
+            YCoCg = format == HapTextureFormat.YCoCgDxt5,
+            BlockRows = blockRows,
+            RowBytes = rowBytes,
+        };
+        try
+        {
+            session.FillRing(device, texDesc);
+            return session;
+        }
+        catch (SharpGenException)
+        {
+            // Fallback documentado en el INFORME del lab: BC dinámico no
+            // soportado por este driver → DEFAULT + UpdateSubresource
+            session.Dispose();
+            texDesc.Usage = ResourceUsage.Default;
+            texDesc.CPUAccessFlags = CpuAccessFlags.None;
+            var fallback = new HapVideoSession
+            {
+                DynamicUpload = false,
+                YCoCg = format == HapTextureFormat.YCoCgDxt5,
+                BlockRows = blockRows,
+                RowBytes = rowBytes,
+            };
+            fallback.FillRing(device, texDesc);
+            return fallback;
+        }
+    }
+
+    private void FillRing(ID3D11Device device, Texture2DDescription desc)
+    {
+        for (int i = 0; i < RingSize; i++)
+        {
+            Ring[i] = device.CreateTexture2D(desc);
+            RingSrv[i] = device.CreateShaderResourceView(Ring[i], null);
+        }
+    }
+
+    /// <summary>Sube el DXT de un frame al slot del ring. Solo el hilo de
+    /// presentación del player.</summary>
+    internal void Upload(ID3D11DeviceContext context, int slot, ReadOnlySpan<byte> dxt)
+    {
+        ID3D11Texture2D tex = Ring[slot];
+        if (DynamicUpload)
+        {
+            MappedSubresource mapped = context.Map(tex, 0, MapMode.WriteDiscard,
+                Vortice.Direct3D11.MapFlags.None);
+            try
+            {
+                CopyRows(dxt, mapped.DataPointer, (int)mapped.RowPitch);
+            }
+            finally
+            {
+                context.Unmap(tex, 0);
+            }
+        }
+        else
+        {
+            unsafe
+            {
+                fixed (byte* src = dxt)
+                {
+                    // El pitch de un BC es bytes por FILA DE BLOQUES 4x4
+                    context.UpdateSubresource(tex, 0, null, (nint)src, (uint)RowBytes, 0);
+                }
+            }
+        }
+    }
+
+    private unsafe void CopyRows(ReadOnlySpan<byte> dxt, nint dest, int destPitch)
+    {
+        if (destPitch == RowBytes)
+        {
+            dxt.CopyTo(new Span<byte>((void*)dest, dxt.Length));
+            return;
+        }
+
+        for (int row = 0; row < BlockRows; row++)
+        {
+            dxt.Slice(row * RowBytes, RowBytes)
+               .CopyTo(new Span<byte>((byte*)dest + ((long)row * destPitch), RowBytes));
+        }
+    }
+
     public void Dispose()
     {
         for (int i = 0; i < RingSize; i++)
@@ -58,7 +174,7 @@ internal sealed class HapVideoSession : IDisposable
     }
 }
 
-internal sealed class HapGpuPipeline : IDisposable
+internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
 {
     private readonly ID3D11Device _device;
     private readonly ID3D11DeviceContext _context;
@@ -190,115 +306,18 @@ internal sealed class HapGpuPipeline : IDisposable
         }
     }
 
-    /// <summary>Crea los recursos por cue: ring de texturas BC del tamaño del
-    /// vídeo. Intenta DYNAMIC + Map WRITE_DISCARD (validado en el lab) y cae a
-    /// DEFAULT + UpdateSubresource si el driver rechaza BC dinámico.</summary>
-    public HapVideoSession CreateSession(int videoWidth, int videoHeight, HapTextureFormat format)
-    {
-        int blocksX = (videoWidth + 3) / 4;
-        int blockRows = (videoHeight + 3) / 4;
-        int rowBytes = blocksX * (format == HapTextureFormat.RgbDxt1 ? 8 : 16);
-        Vortice.DXGI.Format texFormat = format == HapTextureFormat.RgbDxt1
-            ? Vortice.DXGI.Format.BC1_UNorm
-            : Vortice.DXGI.Format.BC3_UNorm;
-
-        var texDesc = new Texture2DDescription
-        {
-            Width = (uint)videoWidth,
-            Height = (uint)videoHeight,
-            MipLevels = 1,
-            ArraySize = 1,
-            Format = texFormat,
-            SampleDescription = new SampleDescription(1, 0),
-            Usage = ResourceUsage.Dynamic,
-            BindFlags = BindFlags.ShaderResource,
-            CPUAccessFlags = CpuAccessFlags.Write,
-            MiscFlags = ResourceOptionFlags.None,
-        };
-
-        var session = new HapVideoSession
-        {
-            DynamicUpload = true,
-            YCoCg = format == HapTextureFormat.YCoCgDxt5,
-            BlockRows = blockRows,
-            RowBytes = rowBytes,
-        };
-        try
-        {
-            FillRing(session, texDesc);
-            return session;
-        }
-        catch (SharpGenException)
-        {
-            // Fallback documentado en el INFORME del lab: BC dinámico no
-            // soportado por este driver → DEFAULT + UpdateSubresource
-            session.Dispose();
-            texDesc.Usage = ResourceUsage.Default;
-            texDesc.CPUAccessFlags = CpuAccessFlags.None;
-            var fallback = new HapVideoSession
-            {
-                DynamicUpload = false,
-                YCoCg = format == HapTextureFormat.YCoCgDxt5,
-                BlockRows = blockRows,
-                RowBytes = rowBytes,
-            };
-            FillRing(fallback, texDesc);
-            return fallback;
-        }
-    }
-
-    private void FillRing(HapVideoSession s, Texture2DDescription desc)
-    {
-        for (int i = 0; i < HapVideoSession.RingSize; i++)
-        {
-            s.Ring[i] = _device.CreateTexture2D(desc);
-            s.RingSrv[i] = _device.CreateShaderResourceView(s.Ring[i], null);
-        }
-    }
+    /// <summary>Crea los recursos por cue (ring de texturas BC del tamaño del
+    /// vídeo). La lógica vive en HapVideoSession.Create porque la comparte con
+    /// el destino de anillo del motor nuevo.</summary>
+    public HapVideoSession CreateSession(int videoWidth, int videoHeight, HapTextureFormat format) =>
+        HapVideoSession.Create(_device, videoWidth, videoHeight, format);
 
     /// <summary>Sube el DXT de un frame al slot del ring (¡solo el hilo de
     /// presentación del player: el contexto D3D11 no es thread-safe!).</summary>
     public void Upload(HapVideoSession s, int slot, ReadOnlySpan<byte> dxt)
     {
-        ID3D11Texture2D tex = s.Ring[slot];
-        if (s.DynamicUpload)
-        {
-            MappedSubresource mapped = _context.Map(tex, 0, MapMode.WriteDiscard, Vortice.Direct3D11.MapFlags.None);
-            try
-            {
-                CopyRows(s, dxt, mapped.DataPointer, (int)mapped.RowPitch);
-            }
-            finally
-            {
-                _context.Unmap(tex, 0);
-            }
-        }
-        else
-        {
-            unsafe
-            {
-                fixed (byte* src = dxt)
-                {
-                    // El pitch de un BC es bytes por FILA DE BLOQUES 4x4
-                    _context.UpdateSubresource(tex, 0, null, (nint)src, (uint)s.RowBytes, 0);
-                }
-            }
-        }
-    }
-
-    private static unsafe void CopyRows(HapVideoSession s, ReadOnlySpan<byte> dxt, nint dest, int destPitch)
-    {
-        if (destPitch == s.RowBytes)
-        {
-            dxt.CopyTo(new Span<byte>((void*)dest, dxt.Length));
-            return;
-        }
-
-        for (int row = 0; row < s.BlockRows; row++)
-        {
-            dxt.Slice(row * s.RowBytes, s.RowBytes)
-               .CopyTo(new Span<byte>((byte*)dest + ((long)row * destPitch), s.RowBytes));
-        }
+        ArgumentNullException.ThrowIfNull(s);
+        s.Upload(_context, slot, dxt);
     }
 
     /// <summary>Dibuja el slot del ring al RT compartido: fondo negro + vídeo
@@ -339,8 +358,11 @@ internal sealed class HapGpuPipeline : IDisposable
         }
     }
 
-    /// <summary>El player terminó de dibujar un frame: avisar a los sinks.</summary>
-    public void NotifyFrame()
+    /// <summary>El player terminó de dibujar un frame: avisar a los sinks.
+    /// El PTS se ignora en esta ruta — la mezcla la hace el DWM, que no
+    /// sincroniza por tiempo (justo la carencia que arregla el motor nuevo).
+    /// </summary>
+    public void NotifyFrame(double pts)
     {
         try { FrameRendered?.Invoke(); } catch (Exception) { }
     }

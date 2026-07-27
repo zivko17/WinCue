@@ -29,7 +29,7 @@ internal sealed class HapCuePlayer : IDisposable
 {
     private readonly string _path;
     private readonly MovInfo _info;
-    private readonly HapGpuPipeline _pipeline;
+    private readonly IHapRenderTarget _pipeline;
     private readonly HapVideoSession _session;
     private readonly HapFrameSource _source;
     private readonly HapMediaClock _clock;
@@ -61,7 +61,7 @@ internal sealed class HapCuePlayer : IDisposable
     /// en segundos desde su trim, o null si no suena). Se consulta desde el
     /// hilo de presentación: debe ser thread-safe.</param>
     public HapCuePlayer(string path, MovInfo info, HapTextureFormat format,
-        HapGpuPipeline pipeline, VideoPlayParams p, Func<double?>? clock,
+        IHapRenderTarget pipeline, VideoPlayParams p, Func<double?>? clock,
         Action<string>? trace = null)
     {
         _path = path;
@@ -317,7 +317,7 @@ internal sealed class HapCuePlayer : IDisposable
         _pipeline.Upload(_session, slot, dxt);
         _pipeline.Render(_session, slot, d.X, d.Y, d.W, d.H);
         _source.Consume(logical);
-        _pipeline.NotifyFrame();
+        _pipeline.NotifyFrame(logical / _fps);
         if (Interlocked.Exchange(ref _firstFrameRaised, 1) == 0)
         {
             try { FirstFrame?.Invoke(); } catch (Exception) { }
