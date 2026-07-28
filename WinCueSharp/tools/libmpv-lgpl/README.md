@@ -1,11 +1,21 @@
-# Compilar libmpv LGPL para WinCue (ruta GitHub Actions)
+# Compilar libmpv LGPL para WinCue (ruta GitHub Actions) — PLAN B
+
+> ⚠️ **2026-07-28: esta guía ya NO es el camino principal.** Existe una build
+> LGPL prebuilt para Windows: `zhongfly/mpv-winbuild` publica a diario
+> `mpv-dev-lgpl-x86_64-<fecha>-git-<sha>.7z` desde su CI pública (LGPLv2.1+,
+> FFmpeg LGPLv3 enlazado estáticamente). Lo de abajo decía que no existían:
+> era cierto solo respecto a shinchiro. **Primero probar el prebuilt** siguiendo
+> el plan de `docs/hoja-de-ruta.md` (F1.1); compilar la nuestra queda como plan
+> B si la verificación de licencia o la prueba funcional fallan.
+> El verificador de al lado (`verificar-licencia`) sirve para las dos rutas.
 
 Objetivo: obtener una `libmpv-2.dll` **LGPL** (compilada `-Dgpl=false`, FFmpeg
 sin `--enable-gpl`) para poder distribuir WinCue con licencia propietaria.
 La compila **la CI gratuita de GitHub** — tú no montas nada local.
 
 > Contexto: la DLL actual es **GPL confirmado** (probado con `mpv-configuration`).
-> No existen builds LGPL prebuilt para Windows. Ver `docs/legal/checklist-distribucion.md`.
+> (Lo que decía aquí — "no existen builds LGPL prebuilt para Windows" — quedó
+> corregido arriba.) Ver `docs/legal/checklist-distribucion.md`.
 > WinCue solo usa el núcleo LGPL (reproducción, render API, hwdec, keep-open,
 > geometría) → funcionalmente el cambio es seguro; solo se pierden encoders
 > GPL (x264/x265/xvid) y dvd-nav, que WinCue NO usa.
