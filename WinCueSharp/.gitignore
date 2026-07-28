@@ -21,3 +21,10 @@ tests/prores-test/*.mp4
 ffmpeg-lgpl/bin/
 ffmpeg-lgpl/LICENSE.txt
 ffmpeg-lgpl/_extract/
+
+# libmpv LGPL (la que se distribuye, 98 MB): mismo criterio — el binario no se
+# versiona, se obtiene con tools/libmpv-lgpl/obtener-libmpv-lgpl.ps1; lo que SÍ
+# se versiona es libmpv-BUILD.txt con la procedencia y el SHA256.
+libmpv-lgpl/*.dll
+libmpv-lgpl/*.7z
+libmpv-lgpl/_extract/

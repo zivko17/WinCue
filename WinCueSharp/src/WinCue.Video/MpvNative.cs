@@ -5,11 +5,17 @@
 // necesita; el render API (mpv_render_context_*) se añadirá en la fase del
 // compositor D3D11.
 //
-// LOCALIZACIÓN DE libmpv-2.dll (en orden):
-//   1. Directorio del ejecutable / PATH estándar de Windows
-//   2. Variable de entorno WINCUE_LIBMPV (ruta completa al .dll)
-//   3. Búsqueda hacia arriba desde el directorio de la app de una carpeta
-//      "WinCue/libmpv-2.dll" (el proyecto Python hermano, útil en desarrollo)
+// LOCALIZACIÓN DE libmpv-2.dll (en orden). El orden va de lo MÁS explícito a lo
+// más ambiental, no al revés: la DLL que se carga determina qué licencia se está
+// probando, y eso no puede depender del PATH de la máquina.
+//   1. Variable de entorno WINCUE_LIBMPV (ruta completa al .dll)
+//   2. Junto al ejecutable — la disposición del paquete distribuido
+//   3. Hacia arriba, "libmpv-lgpl/libmpv-2.dll" — LA BUILD LGPL que se
+//      distribuye (ver tools/libmpv-lgpl/obtener-libmpv-lgpl.ps1)
+//   4. Hacia arriba, "WinCue/libmpv-2.dll" (el proyecto Python hermano). Es
+//      GPL: sirve para probar en local, NUNCA para distribuir.
+//   5. Carga estándar de Windows (PATH). Último recurso — ver el comentario
+//      en Resolve: ponerlo primero enmascaraba la DLL del repo.
 //
 // El API de libmpv es thread-safe: cualquier hilo puede llamar a comandos y
 // propiedades. mpv_wait_event debe usarse desde UN solo hilo por handle.
@@ -38,24 +44,44 @@ internal static partial class MpvNative
         if (!name.Equals(Dll, StringComparison.OrdinalIgnoreCase))
             return 0;
 
-        // 1. Carga estándar (directorio de la app, PATH…)
-        if (NativeLibrary.TryLoad(name, assembly, searchPath, out nint handle))
-            return handle;
+        nint handle;
 
-        // 2. Variable de entorno explícita
+        // 1. Variable de entorno explícita: si alguien la fija, manda.
         string? env = Environment.GetEnvironmentVariable("WINCUE_LIBMPV");
         if (!string.IsNullOrEmpty(env) && File.Exists(env) &&
             NativeLibrary.TryLoad(env, out handle))
             return handle;
 
-        // 3. Buscar WinCue/libmpv-2.dll subiendo desde el directorio de la app
-        var dir = new DirectoryInfo(AppContext.BaseDirectory);
-        for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+        // 2. Junto al ejecutable: ES la disposición del paquete que se
+        //    distribuye (publish.ps1 deja ahí la DLL ya verificada como LGPL).
+        string juntoAlExe = Path.Combine(AppContext.BaseDirectory, Dll);
+        if (File.Exists(juntoAlExe) && NativeLibrary.TryLoad(juntoAlExe, out handle))
+            return handle;
+
+        // 3 y 4. Subir por los directorios padre buscando, EN ESTE ORDEN, la
+        // build LGPL (la que se distribuye) y solo después la GPL del proyecto
+        // Python hermano. El orden importa: si en desarrollo ganara la GPL,
+        // estaríamos probando contra una DLL distinta de la que va al cliente.
+        foreach (string sub in new[] { "libmpv-lgpl", "WinCue" })
         {
-            string candidate = Path.Combine(dir.FullName, "WinCue", Dll);
-            if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out handle))
-                return handle;
+            var dir = new DirectoryInfo(AppContext.BaseDirectory);
+            for (int i = 0; i < 8 && dir is not null; i++, dir = dir.Parent)
+            {
+                string candidate = Path.Combine(dir.FullName, sub, Dll);
+                if (File.Exists(candidate) && NativeLibrary.TryLoad(candidate, out handle))
+                    return handle;
+            }
         }
+
+        // 5. ÚLTIMO recurso: carga estándar (PATH del sistema). Va al final a
+        //    propósito. Antes iba primero, y eso hacía que una libmpv cualquiera
+        //    del PATH —en esta misma máquina hay una GPL en %USERPROFILE%\
+        //    .local\bin— ganara a la LGPL del repo: se probaba en desarrollo una
+        //    DLL distinta de la que recibe el cliente, sin avisar. De paso
+        //    estrecha el hueco de DLL planting anotado como CA5392 en la
+        //    auditoría 01.
+        if (NativeLibrary.TryLoad(name, assembly, searchPath, out handle))
+            return handle;
 
         return 0;   // dejar que DllNotFoundException suba con su mensaje normal
     }

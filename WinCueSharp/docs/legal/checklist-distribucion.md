@@ -6,14 +6,47 @@
 
 ## 1. Las DLL nativas — análisis hecho desde el repo
 
-### libmpv (`libmpv-2.dll`) — 🔴 EL BLOQUEANTE
+### libmpv (`libmpv-2.dll`) — 🟢 RESUELTO (2026-07-28)
+
+> **Estado actual:** WinCue distribuye la build **`mpv-dev-lgpl`** de
+> `zhongfly/mpv-winbuild`, verificada LGPL y con guardián en `publish.ps1` que
+> aborta la publicación si alguna vez se colara una GPL. Procedencia y SHA256 en
+> `libmpv-lgpl/libmpv-BUILD.txt`; se obtiene con
+> `tools/libmpv-lgpl/obtener-libmpv-lgpl.ps1`. **Qué se comprobó**, en cuatro
+> frentes independientes:
+>
+> 1. **Integridad**: SHA256 del `.7z` igual al publicado por GitHub.
+> 2. **La DLL se autodeclara**: `mpv-configuration` trae `-Dgpl=false`
+>    (+ `dvdnav=disabled`, `rubberband=disabled`, `openal=disabled`).
+> 3. **La receta**: `compile-lgpl-libmpv.patch` quita `--enable-gpl` del
+>    `configure` de FFmpeg y elimina x264, x265, zvbi, dvdnav, dvdread,
+>    rubberband, avisynth y davs2; mantiene `--enable-version3` (→ el FFmpeg
+>    estático de dentro es **LGPLv3**, no v2.1). También desactiva LZO en
+>    libarchive.
+> 4. **El binario corrobora la receta**: las cadenas de identidad `libx264`,
+>    `libx265`, `libxvid`, `librubberband`, `libdvdnav`, `libdvdread`, `libzvbi`
+>    y `AviSynth` están en la DLL GPL antigua y **no** en la nueva; la línea de
+>    meson del binario coincide flag por flag con el parche.
+>
+> **Límite honesto de la prueba:** el LTO elimina `avcodec_configuration` y
+> `avutil_license` del binario, así que la ausencia de `--enable-gpl` en el
+> FFmpeg de dentro **no se puede leer directamente**: se infiere de la receta más
+> la ausencia de componentes. Es sólido, pero es una inferencia.
+>
+> **Paridad funcional comprobada** con los medios de `tests/`: H.264 (1080p30,
+> 1080p60, 720p+PCM) y HAP decodifican con los mismos códec, dimensiones y audio
+> que con la build GPL. **hwdec (d3d11va) sigue sin verificar**: requiere salida
+> de vídeo real, o sea la app en pantalla.
+
+<details>
+<summary>Análisis original (2026-07-18), cuando era el bloqueante</summary>
 
 | Comprobación | Resultado |
 |---|---|
 | ¿Dónde se carga? | `src/WinCue.Video/MpvNative.cs` y `MpvRenderNative.cs` (`[LibraryImport("libmpv-2.dll")]` + `DllImportResolver` propio que busca la DLL junto al exe / subiendo directorios / env `WINCUE_LIBMPV`) |
 | ¿Qué binario se distribuye? | `publish.ps1` copia `..\WinCue\libmpv-2.dll` (121 MB) junto al exe |
 | ¿Enlace dinámico? | **SÍ** ✓ — P/Invoke con carga en tiempo de ejecución; la DLL es sustituible por el usuario (cumple el mecanismo de la LGPL §6, que exige que el usuario pueda reemplazar la biblioteca) |
-| ¿La build actual es LGPL o GPL? | **GPL — CONFIRMADO** (2026-07-18, vía `mpv-configuration` de la propia DLL): build de `shinchiro/mpv-winbuild-cmake`, sin `-Dgpl=false`, con componentes que exigen GPL activados (dvdnav). Además la GPL obliga a entregar el CÓDIGO FUENTE del conjunto → incompatible con licencia propietaria de código cerrado. **CORRECCIÓN 2026-07-28: sí existe build LGPL prebuilt para Windows.** Lo que aquí se afirmaba ("no existen") se apoyaba solo en el issue #586 de shinchiro (abierto ene-2024, sigue sin respuesta), pero `zhongfly/mpv-winbuild` publica a diario `mpv-dev-lgpl-x86_64-*.7z` desde CI pública — LGPLv2.1+ con FFmpeg LGPLv3 estático. Ver el plan de verificación en `docs/hoja-de-ruta.md` (F1.1). Nota positiva: WinCue solo usa el núcleo LGPL (reproducción, render API, hwdec, keep-open, geometría), así que el cambio es funcionalmente seguro. |
+| ¿La build actual es LGPL o GPL? | **GPL — CONFIRMADO** (2026-07-18, vía `mpv-configuration` de la propia DLL): build de `shinchiro/mpv-winbuild-cmake`, sin `-Dgpl=false`, con componentes que exigen GPL activados (dvdnav). Además la GPL obliga a entregar el CÓDIGO FUENTE del conjunto → incompatible con licencia propietaria de código cerrado. *(Aquí se afirmaba además que "no existen builds LGPL prebuilt para Windows", apoyándose solo en el issue #586 de shinchiro. Era falso: ver el bloque de arriba.)* Nota positiva: WinCue solo usa el núcleo LGPL (reproducción, render API, hwdec, keep-open, geometría), así que el cambio es funcionalmente seguro. |
 
 **Consecuencia:** con una libmpv GPL, distribuir WinCue propietario **obliga a
 licenciar WinCue bajo GPL** (el enlace dinámico NO exime del GPL; solo la
@@ -38,6 +71,8 @@ esta DLL.**
    archivo (versión) + `mpv_get_property(handle, "mpv-configuration")` o
    buscar en el binario la cadena `-Dgpl=false`/`lgpl`. Si la publican los
    autores con changelog, basta su declaración de licencia.
+
+</details>
 
 ### FFmpeg — dos usos DISTINTOS, no confundirlos
 
@@ -93,9 +128,13 @@ píxel, fallback por cue a mpv, **interruptor en Ajustes → Vídeo** y kill-swi
 ## 3. Pendiente FUERA del código (lo tuyo)
 
 **Bloqueante:**
-- [ ] **libmpv LGPL** (punto 1 de arriba) — sin esto no hay distribución cerrada legal.
-      *(Las bibliotecas de FFmpeg del motor ProRes ya están resueltas y
-      verificadas automáticamente; el bloqueante que queda es solo libmpv.)*
+- [x] **libmpv LGPL — RESUELTO (2026-07-28)**, ver punto 1. Con esto **ya no
+      queda ningún bloqueante legal de código**: las dos nativas que WinCue
+      enlaza (FFmpeg del motor ProRes y libmpv) son LGPL verificadas, y las dos
+      tienen guardián en `publish.ps1`. Lo que falta para vender es de negocio
+      (EULA comercial, modelo de licencia, firma de código, marca).
+- [ ] **Verificación en pantalla de Andrés con la libmpv LGPL**: hwdec
+      (d3d11va) y un show real. Es lo único de libmpv que los tests no cubren.
 - [x] Textos oficiales de licencia en `licenses/`: LGPL-2.1 (libmpv),
       LGPL-3.0 + GPL-3.0 (FFmpeg).
 

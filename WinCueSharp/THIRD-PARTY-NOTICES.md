@@ -62,23 +62,32 @@ textos completos de las licencias referenciadas se distribuyen en la carpeta
 ## Bibliotecas nativas
 
 ### libmpv (mpv media player) — `libmpv-2.dll`
-- **Versión distribuida:** ver propiedades del archivo (actual: v0.41.0)
-- **Licencia:** LGPL-2.1-or-later *(requisito de distribución de WinCue: usar
-  una build LGPL de libmpv — compilada con la opción `lgpl` de mpv y FFmpeg
-  sin componentes GPL; ver docs/legal/checklist-distribucion.md)*
+- **Versión distribuida:** build *mpv-dev-lgpl* de
+  [zhongfly/mpv-winbuild](https://github.com/zhongfly/mpv-winbuild) (CI pública
+  de GitHub Actions). La release exacta, el commit de la receta y el **SHA256
+  del paquete y de la DLL** están en `libmpv-BUILD.txt`, que se distribuye
+  junto al ejecutable.
+- **Licencia:** LGPL-2.1-or-later *(la build se compila con `-Dgpl=false`; se
+  verifica en cada publicación — ver abajo)*
 - **Copyright:** © 2000-2026 mpv/MPlayer/mplayer2 projects
 - **Proyecto:** https://mpv.io · https://github.com/mpv-player/mpv
-- **Enlace:** dinámico (la DLL se carga en tiempo de ejecución por P/Invoke y
-  puede sustituirse por cualquier build compatible de libmpv, conforme a la
-  sección 6 de la LGPL).
-- **Código fuente:** el código fuente completo de la build de libmpv
-  distribuida está disponible en https://github.com/mpv-player/mpv (y el de
-  la build concreta, en el origen indicado en `licenses/libmpv-BUILD.txt`).
+- **Uso:** reproducción de todos los formatos que no cubre el motor de vídeo
+  propio de WinCue, y fallback universal.
+- **Enlace:** **dinámico**. La DLL se carga en tiempo de ejecución por P/Invoke,
+  vive junto al ejecutable sin firmar ni sellar y **puede sustituirse** por
+  cualquier build compatible de libmpv (variable de entorno `WINCUE_LIBMPV` para
+  apuntar a otra ruta), conforme a la sección 6 de la LGPL.
+- **Código fuente:** el de mpv está en https://github.com/mpv-player/mpv; el de
+  **esta build concreta** se reconstruye desde el repositorio de la receta en el
+  commit anotado en `libmpv-BUILD.txt`.
 - **Texto:** `licenses/LGPL-2.1.txt`
 
-libmpv incorpora a su vez FFmpeg (© the FFmpeg developers, LGPL-2.1+ en la
-configuración requerida) y otras bibliotecas; sus avisos se incluyen en el
-paquete fuente de la build.
+libmpv incorpora **FFmpeg enlazado estáticamente** (© the FFmpeg developers),
+compilado **sin** `--enable-gpl` y **con** `--enable-version3` → **LGPL-3.0**.
+Por eso el paquete incluye también `licenses/LGPL-3.0.txt` y
+`licenses/GPL-3.0.txt`. La build excluye los componentes que exigirían GPL
+(x264, x265, xvid, dvdnav, dvdread, zvbi, rubberband, avisynth): son encoders y
+DVD que WinCue no usa — solo reproduce.
 
 ### FFmpeg (bibliotecas) — `ffmpeg-lgpl\bin\avcodec-62.dll`, `avutil-60.dll`, `swresample-6.dll`
 - **Versión distribuida:** rama n8.1, build *lgpl-shared* de
@@ -158,6 +167,8 @@ Los textos completos y oficiales se distribuyen como `licenses/LGPL-3.0.txt` y
 `licenses/GPL-3.0.txt` junto a la aplicación (fuentes oficiales:
 https://www.gnu.org/licenses/lgpl-3.0.txt y
 https://www.gnu.org/licenses/gpl-3.0.txt). Aplican a las bibliotecas de FFmpeg
-que distribuye WinCue: la build lleva `--enable-version3`, y la LGPLv3 se define
-como un conjunto de permisos adicionales sobre la GPLv3, de modo que ambos
-textos forman parte de la licencia.
+que distribuye WinCue —tanto las de `ffmpeg-lgpl\bin` como el FFmpeg enlazado
+estáticamente dentro de `libmpv-2.dll`—: ambas builds llevan
+`--enable-version3`, y la LGPLv3 se define como un conjunto de permisos
+adicionales sobre la GPLv3, de modo que ambos textos forman parte de la
+licencia.

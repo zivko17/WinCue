@@ -52,6 +52,9 @@ hay ya varias sagas enteras validadas solo por tests:
 - Refactor del compositor (pool de pipelines GPU): crossfades en la misma pista,
   cruce entre capas, modo canvas, salida 2, GO instantáneo del standby.
 - Localización: repasar EN y ES buscando cadenas sueltas.
+- **La libmpv LGPL nueva en pantalla**: que `hwdec` (d3d11va) siga entrando —es
+  lo único que las pruebas automáticas no pueden ver— y un show real por la ruta
+  mpv. La DLL ya está en `libmpv-lgpl/` y la app la coge sola.
 - La beta `beta-20260728` en otros PCs — **sobre todo en una máquina con gráfica
   integrada**, que es lo menos probado de todo.
 
@@ -72,7 +75,35 @@ distribuirse y cobrarse.*
 - [x] Repo privado en GitHub (`zivko17/WinCue`, rama `pruebas-v2`).
 - [x] Borrador de **EULA de evaluación** (`docs/legal/EULA-EVALUACION.md`).
 
-### 1. libmpv LGPL — EL BLOQUEANTE, con camino nuevo
+### 1. libmpv LGPL — ✅ RESUELTO (2026-07-28)
+
+WinCue distribuye ya la build **`mpv-dev-lgpl`** de `zhongfly/mpv-winbuild`,
+verificada en cuatro frentes (integridad SHA256, autodeclaración `-Dgpl=false`
+de la propia DLL, la receta `compile-lgpl-libmpv.patch` leída línea a línea, y
+la desaparición en el binario de todas las cadenas de identidad de x264/x265/
+xvid/rubberband/dvdnav/dvdread/zvbi/avisynth que sí lleva la GPL antigua).
+Paridad funcional comprobada con los medios de `tests/`: H.264 y HAP decodifican
+con idénticos códec, dimensiones y audio.
+
+Lo que quedó montado:
+- `tools/libmpv-lgpl/obtener-libmpv-lgpl.ps1` — release **fijada** (no "latest"),
+  aborta si el SHA256 no cuadra, deja `libmpv-lgpl/libmpv-BUILD.txt` con
+  procedencia, SHA256 y **commit de la receta** (sin él no se puede cumplir la
+  oferta de fuente de la LGPL).
+- `publish.ps1` copia esa DLL —ya no la GPL de `..\WinCue`— y **la verifica
+  dentro del paquete**, borrándola y abortando si no es LGPL. Probado en los dos
+  sentidos: acepta la LGPL y rechaza la GPL.
+- `MpvNative` busca `libmpv-lgpl/` **antes** que `WinCue/`, para que en
+  desarrollo se pruebe contra la misma DLL que recibe el cliente.
+
+**Dos cosas honestas:** (a) el LTO borra `avcodec_configuration` del binario, así
+que la ausencia de `--enable-gpl` en el FFmpeg estático de dentro se infiere de
+la receta y de la ausencia de componentes, no se lee directamente; (b) **hwdec
+(d3d11va) sigue sin verificar** — necesita salida de vídeo real. Ver el bloque de
+verificación visual.
+
+<details>
+<summary>Cómo se llegó aquí (el camino, por si hay que rehacerlo)</summary>
 
 **Dato nuevo del 2026-07-28 que invalida lo que decía este repo:** la auditoría
 del 2026-07-18 afirmaba que *"no existen builds LGPL prebuilt para Windows"*.
@@ -123,11 +154,13 @@ guardar la procedencia. No hay que inventar nada: hay que repetirlo.
 - **Plan B** si la verificación falla: reintentar la CI propia, que ya tiene el
   fork con los 3 cambios aplicados (`tools/libmpv-lgpl/README.md`).
 
-**Nota honesta sobre la beta ya repartida:** `beta-20260728` se empaquetó con la
-`libmpv-2.dll` **GPL** de siempre (`publish.ps1` la copia de `..\WinCue`).
-Entregarla a quien la prueba es distribución, y con GPL eso arrastra obligación
-de fuente. Es asumible en un círculo cerrado de pruebas; **no lo es en cuanto
-haya una entrega pública o de pago.** Esto va antes que eso.
+</details>
+
+**Nota sobre la beta ya repartida:** `beta-20260728` se empaquetó con la
+`libmpv-2.dll` **GPL** de siempre. Entregarla a quien la prueba es distribución,
+y con GPL eso arrastra obligación de fuente. Asumible en un círculo cerrado de
+pruebas, pero **el próximo paquete debe rehacerse** con la LGPL — `publish.ps1`
+ya no deja empaquetar de otra forma.
 
 ### 2. CI en GitHub Actions — NO EXISTE
 
@@ -220,13 +253,9 @@ la vieja por defecto), F3 después. Nunca directo a F3.
    ruta mpv, con el motor propio activo para HAP y ProRes. Se arrancó el bucle de
    feedback sin esperar a que el motor fuera el buque insignia.
 
-2. **libmpv LGPL — la decisión ya no es "pelear la CI o buscar prebuilt".**
-   El prebuilt existe (arriba). La decisión que queda es: ¿nos vale la build de
-   un tercero que se declara LGPL con descargo de responsabilidad, verificada por
-   nuestras dos comprobaciones y con el guardián de publish?
-   *Recomendación Claude:* **sí.** Es el mismo estándar de prueba que ya
-   aceptamos para FFmpeg, y es objetivamente más verificable que una build
-   propia sin verificar. Una sesión de trabajo contra ocho CI rojas.
+2. ~~**libmpv LGPL.**~~ **RESUELTA** el 2026-07-28 con la build prebuilt de
+   zhongfly, verificada y con guardián. El fork con las 8 CI rojas queda
+   archivado como plan B (`tools/libmpv-lgpl/README.md`).
 
 3. **Modelo de negocio.** Precio, tipo de licencia, protección/activación,
    prueba. No condiciona el código a corto plazo, pero sí el empaquetado de F1.

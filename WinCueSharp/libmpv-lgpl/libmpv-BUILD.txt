@@ -1,0 +1,34 @@
+﻿libmpv LGPL — la libmpv que DISTRIBUYE WinCue
+=============================================
+
+Origen        : https://github.com/zhongfly/mpv-winbuild/releases/download/2026-07-27-48e6c35c0e/mpv-dev-lgpl-x86_64-20260727-git-48e6c35c0e.7z
+Release       : 2026-07-27-48e6c35c0e
+Descargado    : 2026-07-28 08:21:28 +02:00
+SHA256 paquete: 558470F135D061D1409D17333D94E53D8EDE5A4F58B409F71750577B3152D087
+SHA256 DLL    : C12041B52A3BAD2884353F8B4B57CB17C7356909515A376BA904661513791929
+Tamano DLL    : 98.165.760 bytes
+
+Receta CI     : https://github.com/zhongfly/mpv-winbuild
+Commit receta : 85c1c19692ad369698824fd2994cbfb970751767
+Parche LGPL   : compile-lgpl-libmpv.patch (de ese commit)
+
+LICENCIA: mpv compilado con -Dgpl=false -> LGPLv2.1+. Lleva FFmpeg ENLAZADO
+ESTATICAMENTE dentro, compilado SIN --enable-gpl y CON --enable-version3 ->
+LGPLv3. Por eso en licenses/ van los tres textos: LGPL-2.1, LGPL-3.0 y
+GPL-3.0 (la LGPLv3 son permisos adicionales sobre la GPLv3).
+
+OBLIGACION LGPL: al distribuir esta DLL hay que poder ofrecer el fuente
+EXACTO de ESTA build (repo de la receta en el commit de arriba + el mpv y
+el FFmpeg que ese commit fija) y permitir que el usuario la sustituya: va
+junto al exe, sin firmar ni sellar, y WINCUE_LIBMPV permite apuntar a otra.
+
+VERIFICACION (la corre tambien publish.ps1 sobre el paquete):
+    $env:WINCUE_LIBMPV = "<repo>\libmpv-lgpl\libmpv-2.dll"
+    dotnet run --project tools\libmpv-lgpl\verificar-licencia
+  -> VEREDICTO: LGPL (gpl=false)
+
+NO se pierde nada que WinCue use: fuera quedan encoders (x264/x265/xvid),
+DVD (dvdnav/dvdread), teletexto (zvbi), rubberband y avisynth. Decodificacion
+H.264/HEVC/AV1/VP9/HAP, hwdec, render API, keep-open y geometria son nucleo
+LGPL. Comprobado con los medios de tests/: paridad de codec, dimensiones y
+audio frente a la build GPL.

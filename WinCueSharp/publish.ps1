@@ -38,13 +38,28 @@ if (Test-Path $readme) { Copy-Item $readme $out -Force }
 $eula = Join-Path $root 'docs\legal\EULA-EVALUACION.md'
 if (Test-Path $eula) { Copy-Item $eula $out -Force }
 
-# libmpv junto al exe (desde la carpeta del proyecto Python hermano)
-$mpv = Join-Path $root '..\WinCue\libmpv-2.dll'
+# ── libmpv LGPL junto al exe ────────────────────────────────────────────
+# OJO: la fuente es libmpv-lgpl\, NO ..\WinCue\ (el proyecto Python hermano).
+# Aquella DLL es GPL CONFIRMADO y con ella no se puede distribuir WinCue
+# cerrado: la GPL obliga a entregar el fuente del conjunto. Va junto al exe,
+# sin firmar ni sellar, para que el usuario pueda sustituirla (LGPL §6).
+$mpvSrc = Join-Path $root 'libmpv-lgpl'
+$mpv = Join-Path $mpvSrc 'libmpv-2.dll'
 if (Test-Path $mpv) {
     Copy-Item $mpv $out -Force
-    Write-Host "libmpv-2.dll copiada junto al exe." -ForegroundColor Green
+    # La procedencia acompaña SIEMPRE al binario: la LGPL exige poder ofrecer
+    # el fuente exacto de la build distribuida.
+    $marca = Join-Path $mpvSrc 'libmpv-BUILD.txt'
+    if (Test-Path $marca) { Copy-Item $marca $out -Force }
+    else { Write-Warning "FALTA libmpv-lgpl\libmpv-BUILD.txt (procedencia obligatoria por la LGPL)." }
+    # Sin adjetivos: aquí solo se ha copiado. Quien dice si es LGPL es el
+    # guardián de más abajo, mirando la DLL ya dentro del paquete.
+    Write-Host "libmpv-2.dll copiada junto al exe (licencia pendiente de verificar)." -ForegroundColor Green
 } else {
-    Write-Warning "libmpv-2.dll no encontrada en ..\WinCue — copiala a mano junto al exe."
+    Write-Warning ("No hay libmpv-lgpl\libmpv-2.dll: el paquete saldrá SIN mpv " +
+        "(los formatos que no cubre el motor propio no reproducirán). " +
+        "Obtenla con tools\libmpv-lgpl\obtener-libmpv-lgpl.ps1. " +
+        "NO copies la de ..\WinCue: es GPL y no se puede distribuir.")
 }
 
 # ── Cumplimiento de licencias (auditoría 05) ────────────────────────────
@@ -121,6 +136,31 @@ if ($SinVerificarLicencias) {
                "Consigue una build 'lgpl-shared' con tools\ffmpeg-lgpl\obtener-ffmpeg-lgpl.ps1.")
     }
     Write-Host "Licencia de FFmpeg verificada: LGPL." -ForegroundColor Green
+}
+
+# ── El mismo guardián, para libmpv ──────────────────────────────────────
+# libmpv era el bloqueante histórico: la build de shinchiro / del proyecto
+# Python es GPL y colarla en un paquete obligaría a abrir el código de WinCue.
+# Se comprueba la DLL DEL PAQUETE, no la del árbol de desarrollo.
+$mpvOut = Join-Path $out 'libmpv-2.dll'
+if ($SinVerificarLicencias) {
+    Write-Warning "Verificación de libmpv SALTADA (-SinVerificarLicencias). NO distribuyas este paquete."
+} elseif (Test-Path $mpvOut) {
+    Write-Host "`nVerificando la licencia de libmpv del PAQUETE..." -ForegroundColor Cyan
+    $verifMpv = Join-Path $root 'tools\libmpv-lgpl\verificar-licencia\verificar-licencia.csproj'
+    # Ruta explícita por variable de entorno, igual que con FFmpeg: sin ella el
+    # verificador podría cargar OTRA libmpv del PATH y dar por bueno el paquete
+    # sin haber mirado la DLL que se entrega.
+    $env:WINCUE_LIBMPV = $mpvOut
+    try { & dotnet run --project $verifMpv -c Release } finally { $env:WINCUE_LIBMPV = $null }
+    if ($LASTEXITCODE -ne 0) {
+        Remove-Item $mpvOut -Force
+        Remove-Item (Join-Path $out 'libmpv-BUILD.txt') -Force -ErrorAction SilentlyContinue
+        throw ("LICENCIA RECHAZADA: la libmpv del paquete NO es LGPL. Se ha borrado del " +
+               "paquete. Con una libmpv GPL no se puede distribuir WinCue cerrado. " +
+               "Consigue la build LGPL con tools\libmpv-lgpl\obtener-libmpv-lgpl.ps1.")
+    }
+    Write-Host "Licencia de libmpv verificada: LGPL." -ForegroundColor Green
 }
 
 Write-Host "`nPublicado en: $out" -ForegroundColor Green
