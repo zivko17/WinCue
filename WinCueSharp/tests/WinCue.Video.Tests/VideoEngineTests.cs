@@ -95,12 +95,19 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
     // Disponibilidad
     // ------------------------------------------------------------------
 
+    // Este NO lleva la guarda `Ready` a propósito: es el canario. Su trabajo es
+    // fallar a gritos el día que libmpv deje de encontrarse en la máquina de
+    // desarrollo; guardarlo lo convertiría en un test que nunca dice nada.
+    // Por eso mismo no puede correr en el CI, donde la DLL no existe (98 MB, no
+    // se versiona): allí se excluye por este Trait, explícitamente y a la vista
+    // en el comando, en vez de camuflarlo con un `return`.
     [Fact]
+    [Trait("Requiere", "libmpv")]
     public void Mpv_IsAvailable_OnThisMachine()
     {
         // Aviso temprano si libmpv-2.dll dejó de encontrarse
         Assert.True(VideoEngine.MpvAvailable,
-            "libmpv-2.dll no se pudo cargar (¿se movió la carpeta WinCue?)");
+            "libmpv-2.dll no se pudo cargar (¿se movió libmpv-lgpl/?)");
     }
 
     [Fact]
@@ -256,6 +263,7 @@ public class VideoEngineTests : IClassFixture<MediaFixture>
     [Fact]
     public void UnsupportedFormat_EmitsError()
     {
+        if (!Ready) return;   // faltaba: el error lo emite mpv, sin mpv no hay error
         using var engine = MakeEngine();
         string bad = Path.Combine(_media.Dir, "raro.xyz");
         File.WriteAllText(bad, "x");

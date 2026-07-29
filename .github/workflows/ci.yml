@@ -88,10 +88,16 @@ jobs:
           -c Release --no-restore
           -p:TreatWarningsAsErrors=true
 
+      # --filter "Requiere!=libmpv": excluye el canario que comprueba que
+      # libmpv-2.dll se carga en la máquina. Aquí no existe (98 MB, no se
+      # versiona), así que fallaría siempre. Se excluye A LA VISTA y no con un
+      # `return` dentro del test: su valor está justamente en fallar a gritos en
+      # la máquina de desarrollo si la DLL desaparece.
       - name: Tests
         run: >
           dotnet test WinCueSharp/WinCueSharp.sln
           -c Release --no-build
+          --filter "Requiere!=libmpv"
           --logger "trx;LogFileName=tests.trx"
           --results-directory "${{ github.workspace }}/resultados"
 
