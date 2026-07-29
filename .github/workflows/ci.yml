@@ -1,0 +1,91 @@
+# =============================================================================
+#  CI de WinCue — build + suite completa en cada empujón
+# =============================================================================
+#  POR QUÉ EXISTE: hasta ahora lo único que protegía el proyecto era la
+#  disciplina manual (build → test → smoke). Funciona mientras no haya un
+#  despiste, y no sobrevive a un segundo par de manos. Esto es la red.
+#
+#  DÓNDE VIVE: en la RAÍZ del repo, no en WinCueSharp/. GitHub solo mira
+#  .github/workflows del primer nivel; un workflow dentro de la subcarpeta se
+#  ignora en silencio, que es la peor forma de no tener CI.
+#
+#  RUNNER: windows-latest obligatorio. El producto es net8.0-windows + WPF y no
+#  compila en Linux; un runner ubuntu sería más barato y no serviría de nada.
+#
+#  LO QUE ESTE CI **NO** CUBRE (dicho aquí para que nadie lo confunda con una
+#  garantía que no da):
+#    - La media de prueba (.mov/.mp4) y las DLL nativas (ffmpeg-lgpl\bin,
+#      libmpv-lgpl) NO están versionadas. Los tests que dependen de ellas se
+#      autoexcluyen y salen VERDES SIN EJECUTAR su parte nativa. Verificado
+#      clonando el repo en limpio: 753 tests pasan sin una sola de esas piezas.
+#    - El smoke (--smoke) no se ejecuta: abre una ventana WPF y necesita libmpv.
+#    - El guardián de licencias de publish.ps1 tampoco: necesita esas DLL.
+#    Traducido: esto protege la LÓGICA (motor, controlador, JSON, audio), no la
+#    capa que el operador toca ni las rutas nativas. Eso lo sigue viendo Andrés
+#    en pantalla.
+# =============================================================================
+name: CI
+
+on:
+  push:
+    branches: [pruebas-v2, main]
+    paths:
+      - 'WinCueSharp/**'
+      - '.github/workflows/ci.yml'
+  pull_request:
+    branches: [pruebas-v2, main]
+    paths:
+      - 'WinCueSharp/**'
+      - '.github/workflows/ci.yml'
+  workflow_dispatch:
+
+# Empujones seguidos a la misma rama: cancela el anterior. El repo es privado y
+# los runners de Windows gastan minutos al DOBLE que los de Linux.
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+permissions:
+  contents: read
+
+jobs:
+  build-y-tests:
+    name: Build + tests (Windows)
+    runs-on: windows-latest
+    timeout-minutes: 25
+
+    steps:
+      - name: Traer el código
+        uses: actions/checkout@v4
+
+      - name: Instalar .NET 8
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '8.0.x'
+
+      - name: Restaurar
+        run: dotnet restore WinCueSharp/WinCueSharp.sln
+
+      # TreatWarningsAsErrors se fuerza AQUÍ y no en Directory.Build.props: en
+      # local sigue en false para no interrumpir mientras se trabaja, pero nada
+      # entra en la rama con un warning. Comprobado que hoy compila a cero.
+      - name: Compilar (Release, warnings = errores)
+        run: >
+          dotnet build WinCueSharp/WinCueSharp.sln
+          -c Release --no-restore
+          -p:TreatWarningsAsErrors=true
+
+      - name: Tests
+        run: >
+          dotnet test WinCueSharp/WinCueSharp.sln
+          -c Release --no-build
+          --logger "trx;LogFileName=tests.trx"
+          --results-directory "${{ github.workspace }}/resultados"
+
+      - name: Guardar los resultados
+        if: always()
+        uses: actions/upload-artifact@v4
+        with:
+          name: resultados-tests
+          path: resultados/
+          retention-days: 14
