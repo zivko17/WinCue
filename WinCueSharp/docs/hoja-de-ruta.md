@@ -162,18 +162,34 @@ y con GPL eso arrastra obligación de fuente. Asumible en un círculo cerrado de
 pruebas, pero **el próximo paquete debe rehacerse** con la LGPL — `publish.ps1`
 ya no deja empaquetar de otra forma.
 
-### 2. CI en GitHub Actions — NO EXISTE
+### 2. CI en GitHub Actions — ✅ EN VERDE (2026-07-29)
 
-Confirmado 2026-07-28: **no hay `.github/` en el repo.** Ningún workflow. Lo que
-hoy protege la calidad es la disciplina manual (build → test → smoke), que
-funciona pero no sobrevive a un despiste ni a un segundo par de manos.
+`.github/workflows/ci.yml`, **en la raíz del repo** (`ffmpeg-gui/`, no dentro de
+`WinCueSharp/`: GitHub solo mira el primer nivel y un workflow en la subcarpeta
+se ignora en silencio). Runner `windows-latest` — obligatorio, el producto es
+net8.0-windows. En cada push a `pruebas-v2`: restore → build en Release **con
+`TreatWarningsAsErrors=true`** → suite completa. ~3 min.
 
-Mínimo que hay que montar:
-- `build + dotnet test` (la suite completa) en cada push a `pruebas-v2`. Sin
-  cifra escrita a mano: cada vez que se anota, caduca en el siguiente commit.
-- Smoke (`--smoke`, exit 0).
-- Después: gate de `TreatWarningsAsErrors` y `nuget-license` en cada cambio de
-  dependencias.
+**Encontró dos cosas de verdad en sus dos primeras ejecuciones**, que es
+exactamente para lo que está:
+
+1. **La build no era reproducible.** No había `global.json`, así que `dotnet`
+   cogía el SDK más alto instalado: el runner trae .NET 10 y compilaba con él
+   mientras aquí se compilaba con 8.0. Con `AnalysisLevel=latest-all`, distinto
+   SDK = distintas reglas → 60+ errores que en local no existen. Era una mina
+   para cualquiera que instalase .NET 10. Fijado en `global.json` (8.0.423,
+   `rollForward: latestFeature`).
+2. **Un test verde por accidente.** `UnsupportedFormat_EmitsError` no tenía la
+   guarda `Ready` que sí tienen sus seis hermanos, y pasaba aquí solo porque en
+   esta máquina hay una libmpv suelta en el PATH.
+
+Pendiente de añadirle: `nuget-license` en cada cambio de dependencias.
+
+**Lo que este CI NO cubre** (escrito también en el propio workflow): la media de
+prueba y las DLL nativas no se versionan, así que los tests que dependen de
+ellas se autoexcluyen; el smoke no corre (abre ventana WPF y necesita libmpv); y
+el guardián de licencias de `publish.ps1` tampoco. Protege la lógica, **no** la
+capa que el operador toca. Eso lo sigue viendo Andrés en pantalla.
 
 ### 3. Decisiones de Andrés (no son código)
 
