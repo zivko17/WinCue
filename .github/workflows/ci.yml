@@ -58,10 +58,23 @@ jobs:
       - name: Traer el código
         uses: actions/checkout@v4
 
-      - name: Instalar .NET 8
+      # La versión se lee de global.json y NO se escribe aquí: si estuviera en
+      # los dos sitios, acabarían discrepando. Ojo, esto instala el SDK pero no
+      # impide que la imagen del runner traiga otros más nuevos — quien decide
+      # cuál se usa es global.json. Sin él, el runner compilaba con .NET 10
+      # mientras en local se compilaba con 8.0, y con AnalysisLevel=latest-all
+      # eso significa analizadores distintos: 60+ errores que aquí no salían.
+      - name: Instalar .NET (según global.json)
         uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: '8.0.x'
+          global-json-file: global.json
+
+      # Deja constancia en el log de con qué SDK se compila de verdad. Si algún
+      # día vuelve a divergir, se ve en dos líneas en vez de en media hora.
+      - name: SDK en uso
+        run: |
+          dotnet --version
+          dotnet --list-sdks
 
       - name: Restaurar
         run: dotnet restore WinCueSharp/WinCueSharp.sln

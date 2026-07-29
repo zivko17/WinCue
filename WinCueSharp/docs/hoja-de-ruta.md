@@ -209,9 +209,19 @@ Mínimo que hay que montar:
 - [ ] ProRes: prefetch de disco real y medida en solo-iGPU.
 - [ ] Fase 4 de assets: panel de Media con progreso (conversión visible).
 - [ ] Presets de EQ/compresor.
-- [ ] `TreatWarningsAsErrors` — hoy está a `false` a propósito en
-      `Directory.Build.props`; el build ya va a cero warnings, así que es gratis
-      en cuanto haya CI que lo sostenga.
+- [x] `TreatWarningsAsErrors` — **resuelto por el CI** (2026-07-29): se fuerza
+      allí, no en `Directory.Build.props`, para no interrumpir el trabajo local.
+- [ ] **Deuda que aparecerá al subir de .NET 8.** El primer CI compiló sin
+      querer con el SDK de .NET 10 (no había `global.json`; `dotnet` coge el más
+      alto instalado) y, como `AnalysisLevel` es `latest-all`, saltaron reglas
+      que aquí no existen: **~60 `CA1515`** (clases de test públicas que podrían
+      ser internas — xUnit v2 las quiere públicas, así que probablemente toque
+      silenciar la regla en los proyectos de test, no cambiar el código) y **2
+      `CS8618`** en `src/WinCue.Video/Gpu/RenderGraph.cs:39-40` (`Renderer` y
+      `Pool` no anulables sin inicializar) — este último **es un agujero real**
+      del compositor, aunque hoy no lo dispare ningún SDK que usemos. Ya está
+      fijado el SDK en `global.json`, así que no molesta; pero el día que se
+      suba de major, esto es lo que hay esperando.
 - [ ] Pulir lo que salga del soak y de los primeros shows reales.
 
 ## FASE 2b — Compositor D3D11 (escrito, sin conectar)

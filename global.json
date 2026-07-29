@@ -1,0 +1,9 @@
+{
+  "//": "Fija el SDK con el que se compila WinCue. SIN ESTE FICHERO, dotnet elige el SDK MAS ALTO que haya instalado: el runner de GitHub trae .NET 10 y compilaba con el, mientras aqui se compilaba con 8.0. Como Directory.Build.props usa AnalysisLevel=latest-all, el juego de analizadores cambiaba con el SDK y el CI fallaba con 60+ reglas (CA1515, CS8618) que en local no existen. El producto es net8.0: se compila con el SDK de .NET 8 en todas partes.",
+  "//rollForward": "latestFeature = admite parches y bandas superiores DENTRO de 8.0, pero nunca salta a 9 o 10. Para subir de major se cambia aqui a proposito, no por sorpresa.",
+  "sdk": {
+    "version": "8.0.423",
+    "rollForward": "latestFeature",
+    "allowPrerelease": false
+  }
+}
