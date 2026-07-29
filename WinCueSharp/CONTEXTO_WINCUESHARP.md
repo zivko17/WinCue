@@ -1,5 +1,12 @@
 # CONTEXTO WinCueSharp — para continuar en otro chat
 
+> **Repasado el 2026-07-28.** Este documento describe la ARQUITECTURA, que se
+> mueve poco. Para el ESTADO (qué está hecho, qué falta, qué decide Andrés) la
+> referencia es `docs/hoja-de-ruta.md`; para el motor de vídeo y el reloj,
+> `docs/arquitectura-motor-video.md` y `docs/arquitectura-reloj.md`.
+> No se anotan aquí cifras que caducan (número de tests, tamaño del exe): las da
+> `dotnet test` y `publish.ps1`, que no mienten.
+
 ## Qué es
 **WinCueSharp**: reproductor de cues para directo estilo QLab, en **C#/.NET 8 + WPF**.
 Es la migración completa (y ya superación) del WinCue original en Python/PySide6, que
@@ -9,14 +16,24 @@ está cumplido: `publish.ps1` genera un single-file autocontenido.
 ## Ubicación / stack / ejecutar
 - Carpeta: `C:\Proyectos\ffmpeg-gui\WinCueSharp` (repo ffmpeg-gui, rama `pruebas-v2`).
   Las hermanas `ffmpeg-gui/` y `FMC_py/` son OTRO proyecto con repos git propios — IGNORAR.
-- Stack: .NET 8 LTS (SDK 8.0.319) · WPF · **NAudio 2.3** (audio) · **libmpv-2.dll vía
-  P/Invoke propio** (vídeo; la DLL se localiza subiendo directorios hasta `WinCue/` o vía
-  env `WINCUE_LIBMPV`) · FFmpeg/ffprobe en PATH (decode fallback, duraciones, waveform).
+- Stack: .NET 8 LTS · WPF · **NAudio 2.3** (audio) · **libmpv-2.dll vía P/Invoke
+  propio** (vídeo) · **bibliotecas LGPL de FFmpeg en proceso** (`ffmpeg-lgpl\bin`,
+  motor ProRes propio) · FFmpeg/ffprobe en PATH por SUBPROCESO (conversión a HAP,
+  duraciones, waveform — ahí la licencia es del usuario).
+- **Dónde se busca libmpv** (`MpvNative.Resolve`, de lo explícito a lo ambiental):
+  `WINCUE_LIBMPV` → junto al exe → subiendo, `libmpv-lgpl/` → subiendo, `WinCue/`
+  → PATH. **`libmpv-lgpl/` es la build LGPL que se distribuye**; la de `WinCue/`
+  (proyecto Python hermano) es **GPL** y solo vale para probar en local. El PATH
+  va el último a propósito: iba primero y hacía que una libmpv cualquiera del
+  sistema tapara la del repo.
 - Ejecutar: `dotnet run --project src/WinCue.App` o el exe en
   `src\WinCue.App\bin\Debug\net8.0-windows\WinCue.App.exe`. Acepta ruta `.json` como
   argumento y `--smoke` (arranca y se cierra solo a los 3 s, sin diálogo de recuperación).
-- Publicar: `.\publish.ps1` → `publish\WinCue.App.exe` (155 MB autocontenido) + libmpv-2.dll.
-- Tests: `dotnet test WinCueSharp.sln` — **163 tests, todos en verde**.
+- Publicar: `.\publish.ps1` → `publish\WinCue.App.exe` autocontenido + `libmpv-2.dll`
+  + `ffmpeg-lgpl\bin` + notices/licencias. **Verifica la licencia de las nativas
+  del paquete y aborta si alguna no es LGPL** (borrándolas): es un guardián, no un
+  aviso.
+- Tests: `dotnet test WinCueSharp.sln` — la suite completa, toda en verde.
 
 ## Cómo trabajar
 Andrés prueba en pantalla (el asistente no la ve). Flujo: editar → `dotnet build` →
@@ -88,12 +105,17 @@ precarga ya es automática), settings placebo pre_roll_ms/video_fade_frames. Col
 Lat OFF por defecto.
 
 ## Pendiente
-1. **Fase 6 — OSC/MIDI IN**: el gran pendiente. Disparo remoto (Companion/consolas).
-   La UI ya guarda todo (osc_*, midi_* en settings y por cue). NAudio.Midi disponible.
-2. **Compositor D3D11 (3b)**: solo para layers/opacidad/varias superficies (el PGM en
-   vivo ya existe). mpv render API expone OpenGL/SW, no D3D11 directo → requiere interop.
-3. Menores: VU del inspector podría ser estéreo, rate/preserve-pitch en AUDIO (resampling),
-   editor Timeline de grupos, pulido del tema.
+
+> La lista viva está en `docs/hoja-de-ruta.md`. Aquí solo lo que afecta a la
+> arquitectura descrita arriba.
+
+1. ~~**Fase 6 — OSC/MIDI IN**~~ **HECHO** (`RemoteInputService`, `OscPacket`,
+   `RemoteRouter` y sus tests).
+2. **Compositor D3D11**: escrito en `src/WinCue.Video/Gpu/` y **sin conectar** —
+   no lo llama nadie todavía. Su plan y sus condiciones, en
+   `docs/plan-compositor.md`.
+3. Menores: VU del inspector podría ser estéreo, rate/preserve-pitch en AUDIO
+   (resampling), editor Timeline de grupos, pulido del tema.
 
 ## Gotchas resueltos (NO repetir)
 - **mpv keep-open=yes NO emite end-file** al llegar al final → se observa `eof-reached`.

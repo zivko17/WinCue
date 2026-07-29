@@ -169,7 +169,8 @@ hoy protege la calidad es la disciplina manual (build → test → smoke), que
 funciona pero no sobrevive a un despiste ni a un segundo par de manos.
 
 Mínimo que hay que montar:
-- `build + dotnet test` (752 tests) en cada push a `pruebas-v2`.
+- `build + dotnet test` (la suite completa) en cada push a `pruebas-v2`. Sin
+  cifra escrita a mano: cada vez que se anota, caduca en el siguiente commit.
 - Smoke (`--smoke`, exit 0).
 - Después: gate de `TreatWarningsAsErrors` y `nuget-license` en cada cambio de
   dependencias.

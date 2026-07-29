@@ -1,9 +1,17 @@
 # WinCue — Traspaso de contexto (2026-07-22)
 
-> Para retomar en otro chat. Léelo junto con `docs/auditoria/INFORME.md` (estado
-> ejecutivo) y `CONTEXTO_WINCUESHARP.md` (brief técnico — algo desactualizado,
-> ver notas abajo). La memoria persistente del asistente se auto-carga si abres
-> el chat en esta carpeta.
+> ⚠️ **INSTANTÁNEA DEL 2026-07-22, YA SUPERADA. No la uses como estado actual.**
+> Se conserva como registro de aquel momento. Lo de entonces que ha cambiado:
+> el motor ProRes propio no existía, el reloj único del show tampoco, la beta no
+> había salido, y **libmpv LGPL figuraba aquí como "EN CURSO" con la CI del fork:
+> se resolvió el 2026-07-28** con una build prebuilt verificada (ver
+> `docs/hoja-de-ruta.md` F1.1). Las cifras que aparecen abajo (286 tests) son las
+> de aquel día.
+>
+> **Estado actual → `docs/hoja-de-ruta.md`.** Arquitectura →
+> `CONTEXTO_WINCUESHARP.md`, `docs/arquitectura-motor-video.md`,
+> `docs/arquitectura-reloj.md`. La memoria persistente del asistente se
+> auto-carga si abres el chat en esta carpeta.
 
 ## Qué es
 **WinCue** = reproductor de cues de audio/vídeo para directo estilo QLab, en
