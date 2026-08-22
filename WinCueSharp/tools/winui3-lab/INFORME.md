@@ -417,7 +417,7 @@ que WinCue deja fuera por LGPL — aquí no hay nada parecido a eso, este lab
 no toca mpv. Es que el runtime self-contained de WindowsAppSDK/WinUI3 se
 reparte en más piezas finas (varias decenas de DLL nativas de
 Composition/DWrite/Input/Xaml.Controls, etc.) y añade **una carpeta por
-idioma** (`de-DE/`, `es-ES/`, `ja-JP/`... unas 60 en total) para los
+idioma** (`de-DE/`, `es-ES/`, `ja-JP/`, etc. — 86 en total) para los
 recursos `.resources.dll` de .NET, cosa que WinCue con WPF no acarrea igual.
 Ninguna de las dos cosas (recuento ni peso) señala un problema de
 viabilidad: es, literalmente, "forma distinta de la misma clase de
