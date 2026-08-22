@@ -1,0 +1,33 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       WinUi3Lab — banco de pruebas DESECHABLE del hito 0 de Secuence.
+       No entra en WinCueSharp.sln a propósito: mide cuánto ruido de
+       analizadores mete WinUI 3 ANTES de arriesgar el CI, que hoy está a cero.
+       Cuando el hito 0 cierre, esta carpeta se borra o se congela con su
+       INFORME.md, como tools/mpv-d3d11-lab.
+       ========================================================================== -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>WinUi3Lab</RootNamespace>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versiones verificadas en la cache local: 1.6.250602001 y
+         10.0.22621.756. No las subas "porque hay una mas nueva" sin
+         comprobar que restauran con el SDK 8.0.423. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.*" />
+  </ItemGroup>
+
+</Project>
