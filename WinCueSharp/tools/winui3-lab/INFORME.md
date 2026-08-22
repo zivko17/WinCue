@@ -462,23 +462,122 @@ real del archivo, reportada por mpv después de haberlo cargado sobre el
 - `mpv_command("loadfile", ...)` → `0` (éxito, comando aceptado; que sea
   asíncrono es normal en mpv).
 - `mpv_get_property("width"/"height")` → `0` (éxito) con `1280x720`, que
-  coincide con la resolución real del archivo por `ffprobe`. **Esto es el
-  caso "todo OK y mpv reporta dimensiones" que el propio encargo identifica
-  como el HWND hijo funcionando**, sin depender de que nadie mire.
+  coincide con la resolución real del archivo por `ffprobe`.
 
-### Veredicto de la Pregunta 3
+**Corrección metodológica (revisión de la tarea 3):** lo de arriba, tal
+como estaba escrito la primera vez, **sobrevendía el veredicto**. La
+revisión encontró el fallo correcto: `width`/`height` son metadatos del
+demuxer, se pueblan en cuanto se abre el archivo — **con `wid` válido,
+inválido o sin fijar en absoluto**. No distinguen "mpv decodificó hacia
+NUESTRO HWND" de "mpv decodificó hacia cualquier sitio". La sección
+siguiente resuelve esto con un control negativo; el veredicto de más
+abajo está reescrito con esa evidencia, no con la de aquí arriba.
 
-**El HWND hijo de un `AppWindow` de WinUI 3 acepta vídeo.** mpv decodifica
-de verdad hacia la superficie que se le pasa por `wid` — la evidencia
-(`initialize=0`, `command=0`, `width`/`height` = resolución real del
-archivo verificada por partida doble contra `ffprobe`) es, para mí, tan
-sólida como es posible sin ojos sobre la pantalla. **Grado de certeza: alto
-para "mpv decodifica sobre el HWND hijo"**, que es la pregunta que podía
-parar el proyecto. **Certeza nula (por diseño) sobre las dos cosas que
-exigen ojo humano**: si el vídeo tapa al `TextBlock` (airspace) y qué pasa
-al arrastrar entre monitores con DPI distinto — ninguna de las dos se
-puede inferir desde código o desde `stdout`, y no las doy por buenas. Van
-al epígrafe PENDIENTE de abajo, con el comando exacto al lado.
+### Control negativo — la comprobación que sí discrimina
+
+Añadido tras la revisión. Se repitió el mismo experimento tres veces, cada
+vez con una instancia de mpv nueva (creada y destruida con
+`mpv_terminate_destroy` para no arrastrar estado entre pruebas), variando
+solo el `wid`:
+
+- **A** — `wid` = nuestro HWND hijo real (el control positivo: el mismo
+  camino que la Prueba A de arriba).
+- **B** — sin fijar `wid` en absoluto (mpv decide su propia superficie).
+- **C** — `wid` inválido, un HWND que no existe: `0xDEADBEEF`.
+
+Y, en las tres, además de `width`/`height`, se midió:
+
+- `video-out-params/w` (sub-propiedad de un nodo; solo se puebla con una
+  cadena de render **activa**, a diferencia de `width`/`height`).
+- `current-vo` (qué salida de vídeo eligió mpv).
+- **El discriminador real**: cuántas ventanas descendientes tiene nuestro
+  HWND hijo real, contadas con `EnumChildWindows` (recursivo) **antes** de
+  las tres pruebas y **después** de cada una. Si mpv crea su superficie de
+  render dentro de nuestro HWND, tiene que aparecer ahí; si no, el número
+  no debe moverse.
+
+Comando ejecutado (con `LAB_CONTROL=1` además de `LAB_MEDIA`; deliberadamente
+una variable de entorno **distinta** para no interferir con la verificación
+humana normal, que necesita que el vídeo de la Prueba A del botón se quede
+reproduciendo sin que nada lo destruya a los pocos segundos):
+
+```
+LAB_MEDIA="C:\Proyectos\ffmpeg-gui\WinCueSharp\tests\show-prueba\video-A-colores.mp4" LAB_CONTROL=1 \
+  dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release \
+  "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
+```
+
+Salida real (log completo, sin recortar ni maquillar):
+
+```
+[control] HWND hijo real = 1050372. Descendientes antes de las pruebas: 0.
+[control] A (wid = hijo real, control positivo): init=0 command=0 width=1280 height=720 video-out-params/w=1280 current-vo=gpu-next descendientesDeHijoReal=1
+[control] B (sin wid): init=0 command=0 width=1280 height=720 video-out-params/w=1280 current-vo=gpu-next descendientesDeHijoReal=0
+[control] C (wid invalido = 0xDEADBEEF): init=0 command=0 width=0 height=0 video-out-params/w=0 current-vo=(ninguno) descendientesDeHijoReal=0
+```
+
+**Lectura, literal, sin adornar:**
+
+- **A y B dan exactamente el mismo `width`/`height` (1280x720), el mismo
+  `video-out-params/w` (1280) y el mismo `current-vo` (`gpu-next`).** Esto
+  **confirma la crítica del revisor al pie de la letra**: ninguna de esas
+  tres propiedades distingue "decodificó hacia nuestro HWND" de "decodificó
+  hacia su propia ventana top-level". Si me hubiera quedado solo con esas
+  tres, el veredicto de la primera versión de este informe habría sido
+  **igual de "alto" con B que con A** — y B es precisamente el caso en el
+  que **no** se usó nuestro HWND. Dicho con las palabras que pidió Andrés:
+  **la evidencia de la primera versión de este informe no discriminaba
+  nada**, tal como señaló la revisión.
+- **La diferencia real está en `descendientesDeHijoReal`.** Antes de las
+  tres pruebas, nuestro HWND hijo real tenía **0** descendientes. Después
+  de A (wid = ese mismo HWND), tiene **1**: mpv creó su superficie de
+  render (el contexto GPU de `gpu-next`) *dentro* de él. Después de B (sin
+  wid), vuelve a **0**: el mismo mpv, con la misma media, el mismo vídeo
+  decodificado, **no tocó nuestro HWND** — abrió su propia ventana en otro
+  sitio. Esto es justo la comprobación que sugirió el revisor
+  (`EnumChildWindows`) y es la que de verdad separa las dos hipótesis.
+- **C (wid inválido) se comporta distinto de las otras dos**: ni
+  `width`/`height` ni `video-out-params/w` llegaron a poblarse en los ~6 s
+  de sondeo, y `current-vo` quedó vacío. Lectura más plausible (no
+  confirmada con logs de mpv, que no capturé): con un HWND que no existe,
+  la salida de vídeo `gpu-next` falla al intentar enganchar la superficie
+  de render, y esa parte de la carga del archivo no llega a completarse en
+  el tiempo sondeado — a diferencia de la hipótesis inicial de que
+  `width`/`height` se poblarían igual "pase lo que pase" con el demuxer.
+  No hizo falta profundizar más porque no cambia el veredicto: en los tres
+  casos, `descendientesDeHijoReal` se mantuvo en su valor de partida salvo
+  exactamente en el caso donde el `wid` era el HWND real.
+
+### Veredicto de la Pregunta 3 (recalibrado tras la revisión)
+
+**El HWND hijo de un `AppWindow` de WinUI 3 acepta vídeo, y ahora hay
+evidencia que de verdad lo distingue de la hipótesis alternativa** ("mpv
+decodificó hacia cualquier sitio, no hacia nuestro HWND"). La evidencia
+que sostiene esto ya no es solo `width`/`height` (que, como demuestra el
+control negativo, **no discriminan** — A y B dan el mismo valor) sino el
+recuento de ventanas descendientes de nuestro HWND real con
+`EnumChildWindows`: **0 antes, 1 con `wid` = nuestro HWND (A), 0 sin `wid`
+(B) y 0 con `wid` inválido (C)**. Ese patrón solo se explica si mpv crea su
+superficie de render dentro de nuestro HWND exactamente cuando se le pasa
+como `wid`, y en ningún otro caso.
+
+**Grado de certeza: alto para "mpv decodifica sobre el HWND hijo"** — esta
+vez apoyado en un control negativo real, no en un único código de retorno
+en 0. **Certeza nula (por diseño) sobre las dos cosas que exigen ojo
+humano**: si el vídeo tapa al `TextBlock` (airspace) y qué pasa al
+arrastrar entre monitores con DPI distinto — ninguna de las dos se puede
+inferir desde código o desde `stdout`, y no las doy por buenas. Van al
+epígrafe PENDIENTE de abajo, con el comando exacto al lado.
+
+**Duda metodológica que sí existía y que la primera versión de este
+informe no reconocía** (contestando directamente al hallazgo de la
+revisión): sí, había una duda de fondo — la evidencia original
+(`initialize`/`command` = 0, `width`/`height` coincidente con `ffprobe`)
+era compatible con que mpv hubiera abierto su propia ventana top-level en
+vez de usar nuestro HWND, y no había nada en el informe que descartara esa
+posibilidad. Queda descartada ahora, con el control negativo de arriba —
+pero **la duda era real y el "Ninguna duda de fondo" que escribí la
+primera vez estaba mal calibrado.**
 
 ## Notas del Paso 2 (build + arranque) — para que la tarea 2/3 no repita la investigación
 
@@ -564,6 +663,17 @@ como aquí.
   `.gitignore` (y también por `libmpv-lgpl/*.dll`, que es de donde se
   copió). Confirmado con `git status` antes del `git add` que esa carpeta
   no aparece como pendiente de commitear.
+- (arreglo, tras revisión) El `_mpv` del botón (Prueba A humana) sigue sin
+  llamar a `mpv_terminate_destroy` — decisión deliberada, no descuido: tiene
+  que seguir reproduciendo en bucle para que Andrés pueda mirar el airspace
+  y arrastrar la ventana entre monitores. Las instancias del control
+  negativo (`ProbarConWidAsync`), que sí son de usar y tirar, se destruyen
+  cada una antes de pasar a la siguiente — necesario además para que el
+  recuento de `EnumChildWindows` de una prueba no arrastre el descendiente
+  creado por la anterior.
+- (arreglo, tras revisión) `ProbarVideo(this, null!)` se deja igual — el
+  revisor lo marcó como "frágil pero inocuo" y coincido: `e` no se usa en
+  el cuerpo del método, así que pasar `null!` no tiene efecto observable.
 
 ## Dudas para Andrés
 
@@ -586,10 +696,18 @@ como aquí.
    los framework packages VCLibs/UI.Xaml en esta máquina), o lo dejamos
    anotado como hallazgo de entorno y seguimos con las tareas 3/4, que
    también van a necesitar arrancar este tipo de proyecto?
-4. (tarea 3, nueva) Ninguna duda de fondo sobre la pregunta del hito — el
-   HWND hijo acepta vídeo, con evidencia por partida doble (códigos de mpv
-   + `width`/`height` contrastados con `ffprobe`). La única duda es de
-   forma: el `cp` del encargo apuntaba a
+4. (tarea 3, nueva) **Corregido tras revisión** — aquí decía "ninguna duda
+   de fondo sobre la pregunta del hito". Eso estaba mal calibrado: la
+   revisión encontró, con razón, que la evidencia original (`initialize`/
+   `command` = 0, `width`/`height` coincidente con `ffprobe`) **no
+   discriminaba** "mpv decodificó hacia nuestro HWND" de "mpv decodificó
+   hacia cualquier sitio" — sí había una duda de fondo, y no estaba
+   reconocida. Se cerró con un control negativo (ver Pregunta 3): con el
+   mismo `width`/`height`/`video-out-params/w`/`current-vo` en los casos
+   con y sin `wid` válido, el único dato que sí distinguió los dos casos
+   fue `EnumChildWindows` sobre nuestro HWND real (0 descendientes sin
+   `wid`, 1 con `wid` = nuestro HWND). Queda una duda menor, de forma, sin
+   relación con lo anterior: el `cp` del encargo apuntaba a
    `bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/`, que no existe en
    este proyecto (no hay carpeta `x64/` intermedia); la real es
    `bin/Release/net8.0-windows10.0.19041.0/win-x64/`, y es donde copié la
