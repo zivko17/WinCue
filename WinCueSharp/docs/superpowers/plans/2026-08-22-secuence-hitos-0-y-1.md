@@ -51,7 +51,7 @@ Todo lo que se cree aquí es **desechable y va fuera de `src/`**, en
 
 > **RESUELTO 2026-08-22 — el build de WinUI 3 necesita una propiedad extra.**
 > `MrtCore.PriGen.targets` busca sus tareas en
-> `$(MSBuildExtensionsPath)\Microsoft\VisualStudio17.0\AppxPackage\`, y con
+> `$(MSBuildExtensionsPath)\Microsoft\VisualStudio\v17.0\AppxPackage\`, y con
 > `dotnet build` eso apunta al SDK de .NET, donde nunca están. Se instaló la
 > carga `Microsoft.VisualStudio.Workload.UniversalBuildTools` en Build Tools
 > 2022 y **todos los comandos de este hito llevan ahora
@@ -286,7 +286,7 @@ viabilidad.
 - [ ] **Step 1: Intentar la publicación single-file**
 
 ```bash
-dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tools/winui3-lab/pub-single "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tools/winui3-lab/pub-single "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
 ```
 
 Anotar **literalmente** qué pasa: si falla, el mensaje exacto; si "funciona",
@@ -295,7 +295,7 @@ si de verdad produce un exe suelto o deja nativas fuera igualmente.
 - [ ] **Step 2: Publicar sin single-file, como referencia**
 
 ```bash
-dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -o tools/winui3-lab/pub-carpeta "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -o tools/winui3-lab/pub-carpeta "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
 ```
 
 - [ ] **Step 3: Contar y medir las dos salidas**
@@ -503,7 +503,7 @@ cp libmpv-lgpl/libmpv-2.dll tools/winui3-lab/bin/x64/Release/net8.0-windows10.0.
 - [ ] **Step 3: Ejecutar y mirar la pantalla**
 
 ```bash
-LAB_MEDIA=tests/show-prueba/video-A-colores.mp4 dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
+LAB_MEDIA=tests/show-prueba/video-A-colores.mp4 dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
 ```
 
 **Ojo en clon limpio:** la media de prueba **no está versionada** (lo dice el
