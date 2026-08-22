@@ -4,8 +4,18 @@
 `docs/superpowers/specs/2026-08-22-secuence-winui3-design.md`.*
 
 Máquina: Windows 11 Pro 10.0.26200, SDK de .NET `8.0.423`, sin Visual Studio
-completo instalado (solo **Visual Studio 2022 Build Tools**, sin el
-componente de empaquetado UWP/Appx — esto resulta relevante más abajo).
+completo instalado (solo **Visual Studio 2022 Build Tools**).
+
+**Actualización (tarea 2):** cuando se escribió lo de abajo (tarea 1), esta
+máquina no tenía el componente de Visual Studio para empaquetado UWP/Appx, y
+el build no terminaba en verde. Entre la tarea 1 y esta, Andrés instaló ese
+componente (workload "Universal Windows Platform build tools"). Con eso más
+`-p:AppxMSBuildToolsPath=...` en cada comando `dotnet` (ver por qué en el
+encargo de la tarea 2), **el build sí termina en verde**: confirmado de
+nuevo en la Pregunta 1 con `dotnet publish` completo, 0 errores. El
+diagnóstico de abajo se deja tal cual porque sigue siendo la explicación
+correcta de la causa raíz — solo estaba pendiente de la pieza de VS que
+faltaba, no de un problema de código ni de versión de paquete.
 
 ## Pregunta 2 — ¿cuánto ruido de analizadores mete WinUI 3?
 
@@ -62,6 +72,20 @@ en esta máquina**, independiente de qué versión de WindowsAppSDK se use.
 Studio es una modificación del sistema que no me corresponde decidir sola.
 Dejo esto marcado como hallazgo de entorno para hablarlo (ver Veredicto y el
 epígrafe PENDIENTE).
+
+**Resuelto así (tarea 2):** Andrés instaló el componente. Con él en el
+disco, la propiedad `AppxMSBuildToolsPath` (que estos targets ya soportan
+vía `Condition="'$(AppxMSBuildToolsPath)' == ''"`) se puede apuntar
+directamente al árbol de Build Tools en vez de dejar que MSBuild la derive
+de `$(MSBuildExtensionsPath)`, que con `dotnet build` apunta al SDK de .NET
+(donde el componente nunca estará, sea cual sea la máquina). Añadiendo
+`-p:AppxMSBuildToolsPath="C:\Program Files (x86)\Microsoft Visual
+Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`
+a cada comando `dotnet build`/`dotnet publish`, el build termina en verde
+sin tocar el `.csproj` ni cambiar de motor. Confirmado por partida doble:
+por el controlador con `dotnet build` ("Compilación correcta, 0 Errores")
+y por mí en la Pregunta 1 con `dotnet publish` completo (0 errores, 1
+advertencia CA5392 — la ya conocida).
 
 ### Cómo se obtuvo igualmente la medición de analizadores
 
@@ -129,15 +153,210 @@ proyecto de una ventana con un botón — no dice nada sobre lo que aparecerá
 al crecer el código de Secuence de verdad; conviene repetir esta medición
 cuando haya más superficie (tareas 2–4 y en adelante).
 
-**Aparte, y más urgente que el recuento de analizadores:** el hallazgo del
-Paso 2 (la máquina no tiene el componente de Visual Studio para
-empaquetado UWP/Appx) sí es un obstáculo real para "compila y arranca" y
-hay que resolverlo antes de dar por bueno el hito 0 completo — ver el
-epígrafe PENDIENTE.
+**Actualización (tarea 2):** el hallazgo del Paso 2 (componente de Visual
+Studio ausente) está resuelto — ver el recuadro de arriba y la Pregunta 1.
+La medición de analizadores de esta sección queda así **confirmada sobre
+un build completo** (0 errores, 1 advertencia CA5392), no sobre uno
+truncado en `CoreCompile` como cuando se escribió esto por primera vez.
+Lo que sigue abierto, y va a la Pregunta 1 y al epígrafe PENDIENTE, es otra
+cosa distinta: que el `.exe` ya publicado arranque limpio en esta
+máquina.
 
 ## Pregunta 1 — forma del paquete
 
-(tarea 2)
+*Tarea 2, ejecutada 2026-08-22 sobre el mismo `.csproj` de la tarea 1 (sin
+tocar), con el componente de VS ya instalado (ver arriba).*
+
+### Nota sobre el `AppxMSBuildToolsPath` literal del encargo
+
+El encargo trae la propiedad ya escrita en cada comando, con instrucción
+explícita de no cambiarla. Al ejecutar los comandos tal cual venían en
+`task-2-brief.md`, fallaron con MSBuild quejándose de que la carpeta
+`AppxPackage` no existía en la ruta indicada. Inspeccioné el archivo del
+encargo con `cat -A` (bytes crudos, no el renderizado) y confirmé que el
+valor de `AppxMSBuildToolsPath` en ese archivo lleva **bytes corruptos**:
+donde debería decir `\2022\` aparece el carácter U+2022 (viñeta "•") sin la
+barra ni los dígitos, y donde debería decir `\v17.0\` aparece un tabulador
+vertical (`\x0B`) en vez de la `v`. Es decir, el texto del encargo no es la
+ruta real de esta máquina, es esa misma ruta con dos fragmentos
+reemplazados por caracteres de control — un problema de codificación en
+cómo se generó/guardó el `.md`, no una ruta distinta a propósito.
+
+Verifiqué la ruta real en disco (`ls` sobre el árbol de Build Tools) y
+encontré ahí mismo, íntegros, los dos `.dll` que el hallazgo de la tarea 1
+había dado por ausentes (`Microsoft.Build.Packaging.Pri.Tasks.dll` y
+`Microsoft.Build.AppxPackage.dll`):
+
+```
+C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\
+```
+
+Esta es también, carácter a carácter, la ruta que el controlador ya había
+verificado por separado en `progress.md` con `MSBuild.exe` directo. Usé
+esta ruta (la correcta, no la corrupta) en los dos comandos de publish de
+abajo — es la misma propiedad, con el mismo propósito, solo con los bytes
+arreglados. No es un cambio de criterio: es corregir una corrupción de
+texto para poder ejecutar literalmente lo que el encargo pedía.
+
+### Paso 1 — publicación single-file
+
+```
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tools/winui3-lab/pub-single "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\\"
+```
+
+**Falla, con un mensaje claro y literal del propio SDK** (no un error de
+entorno esta vez):
+
+```
+Microsoft.WindowsAppSDK.SingleFile.targets(15,9): error : PublishSingleFile requires EnableMsixTooling for embedded resources.pri generation:
+    <PropertyGroup>
+        <EnableMsixTooling>true</EnableMsixTooling>
+    </PropertyGroup>
+```
+
+No se generó ni siquiera la carpeta `pub-single/` — el publish aborta antes
+de escribir ninguna salida (`find` sobre esa ruta: 0 archivos, y la carpeta
+ni existe).
+
+**Lectura del mensaje:** WindowsAppSDK acopla `PublishSingleFile` a la
+generación de `.pri` (el índice de recursos empaquetados), que exige
+`EnableMsixTooling=true` — es decir, volver a encender la maquinaria de
+empaquetado MSIX/Appx que este `.csproj` apaga a propósito con
+`WindowsPackageType=None`. No lo probé (`EnableMsixTooling=true` no es la
+propiedad que el encargo pidió tocar, y mezclar cosas para "hacerlo
+funcionar" habría maquillado la respuesta): el hallazgo en sí, tal como
+pide el Paso 1, es que **`PublishSingleFile` no es una opción libre en
+WinUI 3 no empaquetado** — es una u otra cosa, no ambas a la vez, con la
+configuración de este lab.
+
+### Paso 2 — publicación en carpeta, como referencia
+
+```
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -o tools/winui3-lab/pub-carpeta "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\\"
+```
+
+Termina en verde:
+
+```
+...UndockedRegFreeWinRT-AutoInitializer.cs(18,36): warning CA5392: [...]
+  WinUi3Lab -> ...\bin\Release\net8.0-windows10.0.19041.0\win-x64\WinUi3Lab.dll
+  WinUi3Lab -> ...\tools\winui3-lab\pub-carpeta\
+```
+
+0 errores, 1 advertencia (CA5392, la misma de la Pregunta 2, del propio
+paquete NuGet). Esto **confirma de nuevo**, esta vez con `dotnet publish`
+completo de punta a punta (no solo `CoreCompile` como en la Pregunta 2),
+que el build entero termina en verde con la propiedad correcta.
+
+### Paso 3 — recuento y medida
+
+```
+for d in pub-single pub-carpeta; do echo -n "$d: "; find "tools/winui3-lab/$d" -type f 2>/dev/null | wc -l; du -sh "tools/winui3-lab/$d" 2>/dev/null; done
+```
+
+| Paquete | Archivos | Tamaño | Nota |
+|---|---|---|---|
+| `pub-single` | 0 | — (carpeta ni se creó) | el publish aborta antes de escribir salida (ver Paso 1) |
+| `pub-carpeta` | 439 | 160 MB | self-contained, `WindowsPackageType=None`, sin MSIX |
+| **WinCue actual** (referencia, no medido en esta tarea) | **24** | **324 MB** | libmpv-2.dll y ffmpeg-lgpl/ fuera por LGPL |
+
+**Lectura, con la vara que pide el encargo (mide acabado, no viabilidad):**
+`pub-carpeta` es, en la forma, exactamente el mismo tipo de paquete que ya
+usa WinCue hoy — una carpeta con el `.exe`, sus DLL y sus recursos al lado,
+sin instalador ni virtualización MSIX de por medio — así que "WinUI 3 no
+admite un exe suelto" no es un fallo nuevo frente a WinCue, es el mismo
+punto de partida. La diferencia real está en la composición: **muchos más
+archivos (439 contra 24) pero bastante menos peso (160 MB contra 324 MB)**.
+La causa del recuento alto no es equivalente a las DLL nativas de mpv/ffmpeg
+que WinCue deja fuera por LGPL — aquí no hay nada parecido a eso, este lab
+no toca mpv. Es que el runtime self-contained de WindowsAppSDK/WinUI3 se
+reparte en más piezas finas (varias decenas de DLL nativas de
+Composition/DWrite/Input/Xaml.Controls, etc.) y añade **una carpeta por
+idioma** (`de-DE/`, `es-ES/`, `ja-JP/`... unas 60 en total) para los
+recursos `.resources.dll` de .NET, cosa que WinCue con WPF no acarrea igual.
+Ninguna de las dos cosas (recuento ni peso) señala un problema de
+viabilidad: es, literalmente, "forma distinta de la misma clase de
+paquete" — más archivos, menos peso total, sin instalador, tal como ya
+convive WinCue con su propia carpeta de 24.
+
+### Paso 4 — arranque en limpio y `settings.json`
+
+**Arranque del `.exe` — solo lo observable, sin pantalla:**
+
+```
+[System.Diagnostics.Process]::Start(...) sobre tools/winui3-lab/pub-carpeta/WinUi3Lab.exe
+```
+
+El proceso **no queda vivo**: termina solo, sin esperar señal externa,
+con código de salida `-1073741189` en las 4 veces que lo lancé así. Ese
+decimal es `0xC000027B` (lo comprobé con la conversión exacta, no de
+memoria) — **no `0xC0000135`** como sugiere el encargo (esa aclaración del
+encargo parece un error de conversión: `0xC0000135` en decimal es
+`-1073741519`, un número distinto). No hubo nada en stdout/stderr (ambos
+vacíos).
+
+Para no quedarme solo con el código de salida, miré el Visor de eventos
+(`Get-WinEvent -LogName Application`) justo después de cada intento: las 4
+veces aparece un "Application Error" (Id 1000) idéntico:
+
+```
+Nombre del módulo con errores: Microsoft.UI.Xaml.dll, versión 3.1.6.0
+Código de excepción: 0xc000027b
+Ruta de aplicación: ...\pub-carpeta\WinUi3Lab.exe
+```
+
+Es decir: el proceso sí arranca (el loader carga `Microsoft.UI.Xaml.dll`,
+que está presente en la carpeta) pero **revienta dentro de esa DLL** antes
+de mostrar nada, con una excepción nativa no capturada (`0xC000027B` es
+`STATUS_STOWED_EXCEPTION`, típica de un fallo de inicialización de WinRT
+que se propaga como excepción del sistema). Comprobé también que
+`vcruntime140.dll`/`msvcp140.dll` no van incluidas en `pub-carpeta`
+(`find ... -iname "*vcruntime*"` → vacío) — es una hipótesis plausible de
+por qué falla (WindowsAppSDKSelfContained empaqueta los binarios propios de
+WinAppSDK pero no necesariamente el runtime de C++ que sus DLL nativas
+necesitan), pero no la confirmé instalando ni copiando nada: eso es
+diagnóstico adicional que dejo para quien tenga ojos sobre la pantalla y
+decida si merece la pena, no algo que resolví aquí. **No maquillo esto como
+"funciona": en esta máquina, el paquete publicado no arranca todavía**,
+aunque el build que lo produjo esté en verde. Compila y arranca son cosas
+distintas, y esta tarea solo confirma la primera.
+
+**`settings.json` junto al ejecutable — esto sí lo verifiqué entero:**
+
+```
+echo '{"prueba":1}' > tools/winui3-lab/pub-carpeta/settings.json
+# leído con Get-Content, luego reescrito con Set-Content, releído de nuevo
+```
+
+Creé el archivo en la carpeta de `pub-carpeta`, lo leí, lo **reescribí**
+por completo (`{"prueba":2,"reescrito":true}`) y lo releí — las tres
+operaciones funcionan sin fricción, exactamente como sobre cualquier
+carpeta normal de Windows. Esto es coherente con `WindowsPackageType=None`:
+al no ser un paquete MSIX, no hay virtualización de almacenamiento ni
+redirección de `ApplicationData` de por medio — la carpeta del `.exe` es
+una carpeta corriente, con permisos corrientes. No pude probar la lectura
+_desde el propio proceso_ de `WinUi3Lab.exe` (no arranca, ver arriba), pero
+la pregunta que de verdad importa —¿el modelo de empaquetado permite que un
+archivo de configuración viva junto al ejecutable, como hace WinCue hoy?—
+queda contestada por la propiedad del proyecto (`WindowsPackageType=None`)
+y por esta prueba a nivel de sistema de archivos, no por si esta ventana en
+concreto abre o no.
+
+**Veredicto de `settings.json`: sí.** Nada en la forma del paquete de WinUI
+3 no empaquetado impide que Secuence guarde su configuración junto al
+`.exe`, igual que WinCue.
+
+### Veredicto de la Pregunta 1
+
+`PublishSingleFile` no es viable tal cual con `WindowsPackageType=None`
+(exige `EnableMsixTooling=true`, no probado aquí). La alternativa sin
+single-file **sí produce un build limpio** (0 errores) y una carpeta del
+mismo tipo que ya distribuye WinCue: más archivos (439 contra 24) pero
+menos peso (160 MB contra 324 MB), sin instalador. `settings.json` puede
+vivir junto al ejecutable sin problema. Lo que queda sin cerrar, y no es
+parte de esta pregunta pero hay que arrastrarlo, es que el `.exe` resultante
+no arranca todavía en esta máquina concreta (excepción `0xC000027B` en
+`Microsoft.UI.Xaml.dll`) — ver el epígrafe PENDIENTE.
 
 ## Pregunta 3 — mpv en un HWND hijo
 
@@ -177,14 +396,36 @@ epígrafe PENDIENTE.
   el workload de UWP, así que es posible que allí sí compile). No lo he
   probado — está fuera del alcance de esta tarea y de esta máquina.
 
+**Actualización (tarea 2): resuelto así.** El diagnóstico de arriba sigue
+siendo correcto — el componente que faltaba era real y el `.dll` no estaba
+en ningún sitio del disco — pero ya no es un bloqueo. Andrés instaló el
+componente entre la tarea 1 y esta, y con
+`-p:AppxMSBuildToolsPath="C:\Program Files (x86)\Microsoft Visual
+Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`
+en el comando, `dotnet build`/`dotnet publish` terminan en verde sin cambiar
+de motor ni tocar el `.csproj` (ver Pregunta 1, Paso 2: 0 errores, 1
+advertencia). Lo que **no** queda resuelto por esto es si `dotnet run`
+abre ventana de verdad en esta máquina — eso es un problema distinto,
+posterior al build, que sí sigue abierto: ver Pregunta 1, Paso 4 (el `.exe`
+publicado revienta con excepción `0xC000027B` en `Microsoft.UI.Xaml.dll`
+antes de mostrar nada). Para el hito 2: la ruta de `AppxMSBuildToolsPath`
+de arriba es de **esta máquina concreta**; en el runner de CI hay que
+resolverla con `vswhere` (p. ej. `vswhere -latest -find
+"MSBuild\Microsoft\VisualStudio\v*\AppxPackage\"`), no escribirla a mano
+como aquí.
+
 ## Autorrevisión
 
 - El proyecto **no** se añadió a `WinCueSharp.sln` — verificado con
   `grep -i tools WinCueSharp.sln`, sin resultados.
 - El informe distingue explícitamente lo medido (recuento de analizadores,
-  vía `CoreCompile` que sí completa) de lo no verificado (ventana visible en
-  pantalla, comportamiento del paquete completo en runtime) y de lo
-  bloqueado (build "en verde" completo, por el componente de VS ausente).
+  confirmado en la tarea 2 sobre un build **completo** vía `dotnet publish`,
+  no solo sobre `CoreCompile`) de lo no verificado (ventana visible en
+  pantalla) y de lo que sí se ejecutó pero dio un resultado negativo real
+  (el `.exe` publicado no arranca en esta máquina — Pregunta 1, Paso 4). Lo
+  que en la tarea 1 estaba "bloqueado" (build en verde completo, por el
+  componente de VS ausente) ya no lo está: resuelto en la tarea 2, ver
+  Pregunta 2 y "Notas del Paso 2" arriba.
 - El commit no incluye `bin/` ni `obj/` de `tools/winui3-lab/` — cubiertos
   por las reglas globales `bin/` y `obj/` de `.gitignore`; confirmado que el
   árbol de trabajo estaba limpio de esas carpetas antes del `git add`.
@@ -196,28 +437,51 @@ epígrafe PENDIENTE.
 
 ## Dudas para Andrés
 
-1. La máquina de desarrollo no tiene el componente de Visual Studio para
-   empaquetado UWP/Appx (`Microsoft.Build.Packaging.Pri.Tasks.dll` /
-   `Microsoft.Build.AppxPackage.dll`, bajo
-   `...\Microsoft\VisualStudio\v17.0\AppxPackage\`). Sin él, ningún proyecto
-   WinUI 3 no empaquetado compila en verde aquí, independientemente de la
-   versión de WindowsAppSDK. ¿Instalamos ese componente (vía el instalador
-   de Visual Studio Build Tools, workload "Universal Windows Platform
-   build tools") antes de seguir con las tareas 2–4, que también necesitan
-   compilar y arrancar este mismo tipo de proyecto? Es una decisión de
-   entorno, no de código, y prefiero preguntarlo a instalarlo por mi
-   cuenta sin permiso.
+1. ~~La máquina de desarrollo no tiene el componente de Visual Studio para
+   empaquetado UWP/Appx...~~ **Resuelto** — Andrés instaló el componente
+   entre la tarea 1 y la tarea 2. Ver "Notas del Paso 2" y la Pregunta 2
+   para la confirmación.
 2. Si el runner de CI **sí** trae ese componente (lo normal en
    `windows-latest` de GitHub Actions), este hallazgo afectaría solo al
    desarrollo local, no al hito de "¿compila en CI?" — pero no lo he podido
-   comprobar desde aquí.
+   comprobar desde aquí. **Sigue sin comprobar** tras la tarea 2; sigue
+   fuera de alcance de esta máquina.
+3. (tarea 2, nueva) El `.exe` de `pub-carpeta` (ver Pregunta 1, Paso 4)
+   arranca el loader pero revienta con excepción `0xC000027B` en
+   `Microsoft.UI.Xaml.dll` antes de mostrar nada, en las 4 veces que lo
+   lancé como proceso. Detecté que `vcruntime140.dll`/`msvcp140.dll` no
+   están en la carpeta publicada, lo que es una hipótesis plausible (no
+   confirmada) de la causa. No instalé ni copié nada para probarlo. ¿Quieres
+   que investigue esto más a fondo (instalar el "Windows App SDK Runtime" o
+   los framework packages VCLibs/UI.Xaml en esta máquina), o lo dejamos
+   anotado como hallazgo de entorno y seguimos con las tareas 3/4, que
+   también van a necesitar arrancar este tipo de proyecto?
 
 ## PENDIENTE — verificación en pantalla (Andrés)
 
-- [ ] Confirmar que, una vez resuelto el punto 1 de arriba (componente de
+- [x] Confirmar que, una vez resuelto el punto 1 de arriba (componente de
       Visual Studio para Appx), `dotnet build tools/winui3-lab/WinUi3Lab.csproj -c Release`
-      termina en verde de verdad (0 errores).
-- [ ] Ejecutar `dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release`
+      termina en verde de verdad (0 errores). **Confirmado en la tarea 2**
+      sin necesidad de ojo humano: `dotnet publish` (Pregunta 1, Paso 2) con
+      la misma propiedad termina con 0 errores, 1 advertencia.
+- [ ] Ejecutar `dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`
       y confirmar **a ojo** que aparece una ventana real, con el texto
       "WinUi3Lab" y el botón "Probar mpv en HWND hijo" visibles y legibles
       (tamaño, fuente, que no esté en blanco ni recortada).
+- [ ] (tarea 2, nueva) Hacer doble clic en
+      `tools\winui3-lab\pub-carpeta\WinUi3Lab.exe` (tras regenerarlo con el
+      comando del Paso 2 de la Pregunta 1: `dotnet publish
+      tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64
+      --self-contained true -o tools/winui3-lab/pub-carpeta
+      "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual
+      Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`)
+      y confirmar si también así se cierra solo / aparece el diálogo de "ha
+      dejado de funcionar" — descarta que el cierre con `0xC000027B` visto
+      en esta tarea sea un artefacto de lanzarlo sin sesión interactiva en
+      vez de con doble clic real.
+- [ ] (tarea 2, nueva) Si el punto anterior confirma el cierre también con
+      doble clic: decidir si merece la pena instalar en esta máquina el
+      redistribuible "Windows App SDK Runtime" (o los framework packages
+      VCLibs/Microsoft.UI.Xaml) para descartar la hipótesis de runtime de
+      C++ ausente, o si se deja anotado como hallazgo de entorno sin
+      bloquear el resto del hito 0.
