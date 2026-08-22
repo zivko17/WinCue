@@ -100,8 +100,11 @@ justamente lo que venimos a medir.
   </PropertyGroup>
 
   <ItemGroup>
+    <!-- Versiones verificadas en la cache local: 1.6.250602001 y
+         10.0.22621.756. No las subas "porque hay una mas nueva" sin
+         comprobar que restauran con el SDK 8.0.423. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
-    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.26100.*" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.*" />
   </ItemGroup>
 
 </Project>
@@ -404,12 +407,17 @@ En `MainWindow.xaml.cs`, sustituir el cuerpo por:
 ```csharp
 // =============================================================================
 // MainWindow.xaml.cs — ventana del banco de pruebas.
-// El botón crea un HWND hijo y le pasa el --wid a mpv.exe. Se usa el EJECUTABLE
-// y no libmpv a propósito: lo que se prueba aquí es que un HWND hijo de un
-// AppWindow acepta vídeo, no el P/Invoke, que ya está probado en WinCue.Video.
+// El botón crea un HWND hijo y le mete libmpv dentro por «wid».
+//
+// POR QUÉ libmpv Y NO mpv.exe: el ejecutable habría sido más corto, pero NO
+// está en el PATH de esta máquina — sí está libmpv-2.dll en libmpv-lgpl\, que
+// es además lo que usa el producto. El P/Invoke de abajo es el mínimo
+// imprescindible (crear, wid, inicializar, cargar) y NO pretende parecerse al
+// de WinCue.Video: aquí solo se comprueba que un HWND hijo de un AppWindow de
+// WinUI 3 acepta vídeo.
 // =============================================================================
 
-using System.Diagnostics;
+using System.Runtime.InteropServices;
 using Microsoft.UI.Xaml;
 using WinRT.Interop;
 
@@ -417,6 +425,22 @@ namespace WinUi3Lab;
 
 public sealed partial class MainWindow : Window
 {
+    [DllImport("libmpv-2.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern nint mpv_create();
+
+    [DllImport("libmpv-2.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int mpv_initialize(nint ctx);
+
+    [DllImport("libmpv-2.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int mpv_set_option_string(nint ctx, byte[] name, byte[] data);
+
+    [DllImport("libmpv-2.dll", CallingConvention = CallingConvention.Cdecl)]
+    private static extern int mpv_command(nint ctx, nint[] args);
+
+    private static byte[] Utf8(string s) => System.Text.Encoding.UTF8.GetBytes(s + " ");
+
+    private nint _mpv;
+
     public MainWindow()
     {
         InitializeComponent();
@@ -425,21 +449,43 @@ public sealed partial class MainWindow : Window
 
     private void ProbarVideo(object sender, RoutedEventArgs e)
     {
-        nint padre = WindowNative.GetWindowHandle(this);
-        nint hijo = HwndHijo.Crear(padre, 0, 80, 640, 360);
-
         string media = Environment.GetEnvironmentVariable("LAB_MEDIA")
             ?? throw new InvalidOperationException("Define LAB_MEDIA con la ruta a un vídeo.");
 
-        var p = Process.Start(new ProcessStartInfo("mpv.exe",
-            $"--wid={hijo} --loop --no-terminal \"{media}\"")
-        { UseShellExecute = false });
+        nint padre = WindowNative.GetWindowHandle(this);
+        nint hijo = HwndHijo.Crear(padre, 0, 80, 640, 360);
 
-        Estado.Text = p is null
-            ? "mpv.exe no arrancó — ¿está en el PATH?"
-            : $"mpv en HWND {hijo}. Padre {padre}.";
+        _mpv = mpv_create();
+        if (_mpv == 0) { Estado.Text = "mpv_create falló — ¿está libmpv-2.dll al lado del exe?"; return; }
+
+        // «wid» hay que fijarlo ANTES de mpv_initialize: después no tiene efecto.
+        mpv_set_option_string(_mpv, Utf8("wid"), Utf8(hijo.ToString()));
+        mpv_set_option_string(_mpv, Utf8("loop"), Utf8("inf"));
+
+        int rc = mpv_initialize(_mpv);
+        if (rc < 0) { Estado.Text = $"mpv_initialize falló ({rc})."; return; }
+
+        nint pCarga = Marshal.StringToCoTaskMemUTF8("loadfile");
+        nint pRuta = Marshal.StringToCoTaskMemUTF8(media);
+        try
+        {
+            mpv_command(_mpv, [pCarga, pRuta, 0]);
+        }
+        finally
+        {
+            Marshal.FreeCoTaskMem(pCarga);
+            Marshal.FreeCoTaskMem(pRuta);
+        }
+
+        Estado.Text = $"mpv en HWND {hijo}. Padre {padre}.";
     }
 }
+```
+
+La DLL tiene que estar donde el exe la encuentre. Copiarla al salir del build:
+
+```bash
+cp libmpv-lgpl/libmpv-2.dll tools/winui3-lab/bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/
 ```
 
 - [ ] **Step 3: Ejecutar y mirar la pantalla**
