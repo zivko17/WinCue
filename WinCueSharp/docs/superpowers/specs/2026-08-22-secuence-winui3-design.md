@@ -355,12 +355,18 @@ cualquier otra cosa.
 
 ## Riesgos, por orden
 
-1. **WinUI 3 no admite `PublishSingleFile`.** Cambia la historia de
-   distribución de un producto que hoy es un exe que se copia en un USB.
-   *Mitigación: hito 0, antes de nada.* **Sin verificar** — es la limitación
-   documentada conocida, pero el Windows App SDK se mueve rápido.
-2. **Comportamiento de ventana en directo.** Sin cobertura posible por
-   pruebas. *Mitigación: soak con proyector desde el hito 2.*
+1. **Comportamiento de ventana en directo.** Foco, always-on-top, cambio de
+   DPI entre pantallas, la salida que se va detrás de la de control en mitad
+   de un GO. **Sin cobertura posible por pruebas** y no se ve trabajando en
+   el escritorio. Es lo que tira un show. *Mitigación: soak con proyector
+   real desde el hito 2, y repetido en cada hito posterior.*
+2. **WinUI 3 no admite `PublishSingleFile`.** *Revisado a la baja el
+   2026-08-22:* el paquete de WinCue **ya es una carpeta de 24 archivos**
+   —libmpv y `ffmpeg-lgpl/` van fuera por obligación de la LGPL—, así que sin
+   single-file pasaría a ~250 archivos con el mismo flujo de uso: copiar
+   carpeta, doble clic. Es peor acabado y más soporte (*"me faltan
+   archivos"*), no un motivo para parar. *Mitigación: hito 0, que decide
+   acabado y no viabilidad.* **Sin verificar.**
 3. **Ruido de analizadores.** Podría obligar a relajar el listón que hoy
    protege todo el repo. *Mitigación: se cuenta en el hito 0 y se decide con
    el número delante.*
@@ -397,9 +403,11 @@ cualquier otra cosa.
 
 ## Dónde se puede parar
 
-- **Tras el hito 0**: se ha gastado un par de días y se sabe si el proyecto
-  es viable. Si el single-file es un tapón inaceptable, se para aquí y no se
-  ha perdido nada.
+- **Tras el hito 0**: se ha gastado un par de días y se sabe con qué se
+  juega — cómo será el paquete y cuánto ruido meten los analizadores. Lo que
+  puede parar el proyecto aquí no es el single-file (ver riesgo 2) sino que
+  el ruido de analizadores obligue a bajar el listón que hoy protege todo el
+  repo, o que mpv no pinte en un HWND hijo de un `AppWindow`.
 - **Tras el hito 1**: WinCue queda **mejor** que antes (1.400 líneas
   colocadas donde tocan, `RemoteInputService` en su capa) aunque Secuence no
   se escriba nunca. Este hito se paga solo.
