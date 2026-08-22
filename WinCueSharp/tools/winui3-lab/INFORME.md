@@ -1,5 +1,62 @@
 # Hito 0 de Secuence — informe del banco de pruebas WinUI 3
 
+## Resumen para Andrés — léelo aunque no leas el resto
+
+*(Escrito para alguien que abra esto dentro de seis meses sin recordar nada
+del proceso.)*
+
+1. **¿Se puede empaquetar sin instalador, como WinCue hoy?** Sí, pero no como
+   un único `.exe`: `PublishSingleFile` choca con `WindowsPackageType=None`
+   (exige encender MSIX). La carpeta sí funciona — 439 archivos / 160 MB
+   frente a los 24 / 324 MB de WinCue — y `settings.json` vive junto al
+   ejecutable sin fricción, verificado de extremo a extremo.
+2. **¿Cuánto ruido de analizadores mete WinUI 3?** Casi ninguno: 1 solo
+   aviso (CA5392), y viene de código fuente que trae el propio paquete de
+   Microsoft, no de nada escrito por nosotros — confirmado sobre un build
+   completo, no sobre uno truncado.
+3. **¿mpv pinta dentro de un HWND hijo de WinUI 3?** Sí, con evidencia que
+   de verdad lo distingue de la alternativa (control negativo a cuatro
+   bandas con `EnumChildWindows`: 0 descendientes en línea base, 1 con
+   nuestro HWND como `wid`, 0 sin `wid`, 0 con `wid` inválido).
+4. **Recomendación: seguir.** Las tres preguntas del hito 0 tienen respuesta
+   y ninguna es un tapón de arquitectura — son detalles de empaquetado y de
+   entorno de build, no motivos para no construir Secuence sobre WinUI 3. El
+   único resultado realmente negativo (el `.exe` publicado no arranca en
+   esta máquina, ver más abajo) apunta al paso de publicación, no al motor
+   de UI ni a la integración con mpv, y es investigable sin rehacer nada de
+   lo ya construido.
+
+**Lo que falta y de quién es:**
+
+- **De Andrés — pendiente, verificación en pantalla** (epígrafe PENDIENTE al
+  final de este informe): que la ventana se vea de verdad con texto legible,
+  que el `.exe` publicado abra o no con doble clic real, el airspace del
+  vídeo sobre el `TextBlock`, y el comportamiento al arrastrar entre
+  monitores con DPI distinto. Nada de esto se puede inferir desde código.
+- **Del hito 2** (no contestado aquí, a propósito — este hito 0 es un lab
+  aislado, la medición es indicativa, no definitiva):
+  1. Por qué el `.exe` de `pub-carpeta` revienta con `0xC000027B` en
+     `Microsoft.UI.Xaml.dll` al arrancar, mientras que el de `bin/` (sin
+     publicar) sí sobrevive 6 segundos con ventana abierta. La sospecha más
+     plausible, sin confirmar, es `resources.pri` o alguna nativa que el
+     paso de `dotnet publish` coloca mal — no un problema de WinUI 3 en sí.
+  2. Resolver `AppxMSBuildToolsPath` con `vswhere` en el runner de CI, no a
+     mano como en esta máquina — el CI **no** necesita cambiar de
+     `dotnet build` a `MSBuild.exe`, le basta con esa propiedad.
+  3. Repetir la medición de analizadores cuando el código de Secuence entre
+     de verdad en `WinCueSharp.sln` — este lab se dejó fuera a propósito, así
+     que un proyecto de una ventana con un botón no dice nada sobre lo que
+     aparecerá con más superficie real.
+
+**Un argumento que no estaba explícito y conviene dejar escrito:** el Windows
+App SDK exige Windows 10 1809 como mínimo, y con el target 19041 de este lab
+se pide de facto 2004 o superior. WPF (WinCue) corre en cualquier Windows
+razonablemente moderno. Es una razón más, aparte del negocio ya en marcha,
+para que **WinCue siga vendiéndose** aunque Secuence avance: cubre la cola
+larga de máquinas que Secuence dejaría fuera.
+
+---
+
 *Escrito 2026-08-22 sobre el commit `dac049f1`. Ver el diseño en
 `docs/superpowers/specs/2026-08-22-secuence-winui3-design.md`.*
 
