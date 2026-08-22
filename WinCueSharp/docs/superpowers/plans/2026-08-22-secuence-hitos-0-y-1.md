@@ -49,6 +49,18 @@ Todo lo que se cree aquí es **desechable y va fuera de `src/`**, en
 `tools/winui3-lab/`, igual que ya existen `tools/mpv-d3d11-lab/` y
 `tools/hap-lab/`.
 
+> **RESUELTO 2026-08-22 — el build de WinUI 3 necesita una propiedad extra.**
+> `MrtCore.PriGen.targets` busca sus tareas en
+> `$(MSBuildExtensionsPath)\Microsoft\VisualStudio17.0\AppxPackage\`, y con
+> `dotnet build` eso apunta al SDK de .NET, donde nunca están. Se instaló la
+> carga `Microsoft.VisualStudio.Workload.UniversalBuildTools` en Build Tools
+> 2022 y **todos los comandos de este hito llevan ahora
+> `-p:AppxMSBuildToolsPath=...`**. Verificado: compila con `0 Errores`.
+>
+> **Para el hito 2:** la ruta es de esta máquina. En el runner de CI será otra,
+> así que hay que resolverla con `vswhere` desde `Directory.Build.props` o
+> desde el propio `ci.yml`, no escribirla a mano.
+
 **Este hito no entra en `WinCueSharp.sln`.** Un proyecto WinUI 3 en la
 solución pondría el CI en rojo antes de saber cuánto ruido mete, que es
 justamente lo que venimos a medir.
@@ -274,7 +286,7 @@ viabilidad.
 - [ ] **Step 1: Intentar la publicación single-file**
 
 ```bash
-dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tools/winui3-lab/pub-single
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -p:PublishSingleFile=true -o tools/winui3-lab/pub-single "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
 ```
 
 Anotar **literalmente** qué pasa: si falla, el mensaje exacto; si "funciona",
@@ -283,7 +295,7 @@ si de verdad produce un exe suelto o deja nativas fuera igualmente.
 - [ ] **Step 2: Publicar sin single-file, como referencia**
 
 ```bash
-dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -o tools/winui3-lab/pub-carpeta
+dotnet publish tools/winui3-lab/WinUi3Lab.csproj -c Release -r win-x64 --self-contained true -o tools/winui3-lab/pub-carpeta "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
 ```
 
 - [ ] **Step 3: Contar y medir las dos salidas**
@@ -437,7 +449,7 @@ public sealed partial class MainWindow : Window
     [DllImport("libmpv-2.dll", CallingConvention = CallingConvention.Cdecl)]
     private static extern int mpv_command(nint ctx, nint[] args);
 
-    private static byte[] Utf8(string s) => System.Text.Encoding.UTF8.GetBytes(s + " ");
+    private static byte[] Utf8(string s) => System.Text.Encoding.UTF8.GetBytes(s + "\0");
 
     private nint _mpv;
 
@@ -491,7 +503,7 @@ cp libmpv-lgpl/libmpv-2.dll tools/winui3-lab/bin/x64/Release/net8.0-windows10.0.
 - [ ] **Step 3: Ejecutar y mirar la pantalla**
 
 ```bash
-LAB_MEDIA=tests/show-prueba/video-A-colores.mp4 dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release
+LAB_MEDIA=tests/show-prueba/video-A-colores.mp4 dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio2\BuildTools\MSBuild\Microsoft\VisualStudio17.0\AppxPackage\\"
 ```
 
 **Ojo en clon limpio:** la media de prueba **no está versionada** (lo dice el
