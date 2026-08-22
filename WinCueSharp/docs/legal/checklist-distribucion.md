@@ -151,3 +151,24 @@ píxel, fallback por cue a mpv, **interruptor en Ajustes → Vídeo** y kill-swi
 **Antes del primer .exe público:**
 - [ ] Revisar `CA5392` (rutas de búsqueda de DLL) anotado en la auditoría 01 — endurecer la carga de libmpv para el escenario instalador (DLL planting).
 - [ ] Repetir `nuget-license` en cada actualización de dependencias (candidato a paso de CI).
+
+## 4. Añadido por Secuence sobre lo de arriba (hito 0)
+
+Ver `notices-secuence.md` para el detalle completo (qué se verificó, cómo y
+con qué límites); aquí solo las decisiones pendientes, que son de
+negocio/legal, no de código.
+
+- [ ] **`NOTICE.txt` embebidos en paquetes de terceros que Secuence
+      redistribuye** — el de `Microsoft.WindowsAppSDK` (incluye
+      Newtonsoft.Json 13.0.1 MIT con obligación de *pass-through*, una
+      oferta escrita de código fuente de Microsoft, y una cláusula de
+      referencia a la LGPL) y el propio de `Microsoft.Web.WebView2` (sin
+      revisar el contenido todavía). Decidir si basta con copiarlos íntegros
+      a `licenses/` (como ya se hace con los `license.txt`) o si hace falta
+      algo más explícito en el aviso propio de Secuence.
+- [ ] **`WinRT.Runtime.dll` / `Microsoft.Windows.SDK.NET.dll`** — vienen del
+      runtime pack `Microsoft.Windows.SDK.NET.Ref`, invisible a `dotnet list
+      package --include-transitive` (por eso no se había detectado antes).
+      Se distribuyen de hecho en la carpeta de salida y no tienen licencia
+      verificada — ver `notices-secuence.md`. Verificar antes de que el
+      hito 2 publique nada.

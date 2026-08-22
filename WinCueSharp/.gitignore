@@ -28,3 +28,10 @@ ffmpeg-lgpl/_extract/
 libmpv-lgpl/*.dll
 libmpv-lgpl/*.7z
 libmpv-lgpl/_extract/
+
+# Salidas de `dotnet publish` del banco de pruebas WinUI 3 de Secuence
+# (hito 0): cientos de archivos, ~160 MB, desechables y regenerables con los
+# comandos de tools/winui3-lab/INFORME.md. Sin esto, un `git add` normal del
+# lab se lleva por delante toda esta carpeta.
+tools/winui3-lab/pub-carpeta/
+tools/winui3-lab/pub-single/

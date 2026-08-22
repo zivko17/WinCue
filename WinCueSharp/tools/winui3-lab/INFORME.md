@@ -13,12 +13,21 @@ del proceso.)*
    todavía en esta máquina** (excepción `0xC000027B` en `Microsoft.UI.Xaml.dll`,
    ver Pregunta 1 y el hallazgo del hito 2 más abajo) — compila y arranca son
    cosas distintas, y solo la primera está confirmada.
-2. **¿Cuánto ruido de analizadores mete WinUI 3?** Casi ninguno en este
-   banco de pruebas: 1 solo aviso (CA5392), y viene de código fuente que
-   trae el propio paquete de Microsoft, no de nada escrito por nosotros —
-   confirmado sobre un build completo, no sobre uno truncado. Es una muestra
-   de un proyecto de una ventana con un botón; hay que repetir la medición
-   cuando el código real de Secuence entre en `WinCueSharp.sln` (hito 2).
+2. **¿Cuánto ruido de analizadores mete WinUI 3?** Casi ninguno: 1 solo
+   aviso de WinUI 3 en sí (CA5392, de código fuente que trae el propio
+   paquete de Microsoft, no nuestro) — confirmado sobre un build completo,
+   no sobre uno truncado. **Repetida la medición para este arreglo** (el
+   `dotnet build` de la Pregunta 2 no reflejaba el control negativo que la
+   tarea 3 añadió después): el recuento de advertencias real hoy es **7,
+   no 1** — pero solo **1 sigue siendo de WinUI 3** (el mismo CA5392); las
+   otras **6 son descuidos del propio laboratorio** (4× CA1806 y 1× CA1822
+   en `ProbarVideo`/`ProbarConWidAsync` por ignorar retornos de P/Invoke o
+   no marcar un método como `static`, y 1× CA1303 por una cadena literal en
+   `Console.WriteLine`), no ruido que traiga WinUI 3. Ver Pregunta 2 para
+   el desglose exacto; ninguna de las dos cifras cambia la conclusión de no
+   tocar el listón del repo. Es una muestra de un proyecto de una ventana
+   con un botón; hay que repetir la medición cuando el código real de
+   Secuence entre en `WinCueSharp.sln` (hito 2).
 3. **¿mpv pinta dentro de un HWND hijo de WinUI 3?** Sí, con evidencia que
    de verdad lo distingue de la alternativa (control negativo a cuatro
    bandas con `EnumChildWindows`: 0 descendientes en línea base, 1 con
@@ -27,9 +36,11 @@ del proceso.)*
    y ninguna es un tapón de arquitectura — son detalles de empaquetado y de
    entorno de build, no motivos para no construir Secuence sobre WinUI 3. El
    único resultado realmente negativo (el `.exe` publicado no arranca en
-   esta máquina, ver más abajo) apunta al paso de publicación, no al motor
-   de UI ni a la integración con mpv, y es investigable sin rehacer nada de
-   lo ya construido.
+   esta máquina, ver más abajo) apunta al paso de publicación —confirmado
+   con un experimento que aísla el método de lanzamiento como variable, ver
+   Pregunta 1, Paso 4, no solo sospechado—, no al motor de UI ni a la
+   integración con mpv, y es investigable sin rehacer nada de lo ya
+   construido.
 
 **Lo que falta y de quién es:**
 
@@ -42,9 +53,14 @@ del proceso.)*
   aislado, la medición es indicativa, no definitiva):
   1. Por qué el `.exe` de `pub-carpeta` revienta con `0xC000027B` en
      `Microsoft.UI.Xaml.dll` al arrancar, mientras que el de `bin/` (sin
-     publicar) sí sobrevive 6 segundos con ventana abierta. La sospecha más
-     plausible, sin confirmar, es `resources.pri` o alguna nativa que el
-     paso de `dotnet publish` coloca mal — no un problema de WinUI 3 en sí.
+     publicar) sí sobrevive 6 segundos — con el método de lanzamiento ya
+     descartado como causa (mismo `Start-Process` en los dos casos, ver
+     Pregunta 1, Paso 4). La sospecha más plausible, sin confirmar, es
+     `resources.pri`: la misma pieza que el Paso 1 encontró acoplada a
+     `EnableMsixTooling`, no dos anécdotas sueltas. Si se confirma, lo que
+     queda en cuestión no es un detalle de `dotnet publish` sino si WinUI 3
+     desempaquetado admite el modelo de distribución en carpeta sin
+     instalador que hoy vende WinCue.
   2. Resolver `AppxMSBuildToolsPath` con `vswhere` en el runner de CI, no a
      mano como en esta máquina — el CI **no** necesita cambiar de
      `dotnet build` a `MSBuild.exe`, le basta con esa propiedad.
@@ -208,12 +224,79 @@ mirar ahí.
 **Veredicto:** el ruido de analizadores de WinUI 3 en un proyecto trivial
 como este es **mínimo**: una sola regla, un solo diagnóstico, y viene de
 código fuente que trae el propio SDK de Microsoft, no de código escrito a
-mano ni de un lab más grande. Se relaja por proyecto (`NoWarn` o
-`.editorconfig` con motivo documentado apuntando a este informe) y **no
-hace falta tocar el listón del repo**. Dicho esto, esta muestra es de un
-proyecto de una ventana con un botón — no dice nada sobre lo que aparecerá
-al crecer el código de Secuence de verdad; conviene repetir esta medición
-cuando haya más superficie (tareas 2–4 y en adelante).
+mano ni de un lab más grande. Se relaja por proyecto con `NoWarn` en el
+`.csproj` (no con `.editorconfig` — ver el porqué en la siguiente sección) y
+**no hace falta tocar el listón del repo**. Dicho esto, esta muestra es de
+un proyecto de una ventana con un botón — no dice nada sobre lo que
+aparecerá al crecer el código de Secuence de verdad; conviene repetir esta
+medición cuando haya más superficie (tareas 2–4 y en adelante).
+
+### Por qué el `1` es comparable con producción, y una respuesta más fuerte que aparece al mirarlo
+
+El `1` de arriba solo sirve como medida de "cuánto ruido mete WinUI 3 en
+producción" porque hereda el mismo listón que usará el código real: aunque
+`tools/winui3-lab` está **fuera** de `WinCueSharp.sln` (ver Autorrevisión),
+MSBuild resuelve `Directory.Build.props` y `.editorconfig` **por árbol de
+directorios**, no por pertenencia a una solución — y el lab vive dentro de
+`WinCueSharp/`, así que hereda sin ningún ajuste especial tanto
+`WinCueSharp/Directory.Build.props` (`AnalysisLevel=latest-all`,
+`EnforceCodeStyleInBuild`) como `WinCueSharp/.editorconfig`. Si esto no
+fuera así, el `1` no significaría nada — sería el ruido de un proyecto sin
+las reglas del repo, no una previsión de lo que va a ver el hito 2.
+
+Tirando de ese mismo hilo aparece una respuesta más fuerte que el `1` en sí:
+
+- **La regla que dispara el único diagnóstico ya está silenciada en todo el
+  repo.** `WinCueSharp/.editorconfig:165` fija
+  `dotnet_diagnostic.CA5392.severity = none`, con el motivo documentado en
+  las líneas 163-164 (libmpv usa un `DllImportResolver` propio; forzar
+  `DefaultDllImportSearchPaths` lo rompería). El diagnóstico **solo aparece
+  aquí** porque el `.cs` que lo dispara
+  (`UndockedRegFreeWinRT-AutoInitializer.cs`, tabla de arriba) vive en
+  `~/.nuget/packages/`, **fuera del árbol al que llega el `.editorconfig`**
+  de este repo — un `.editorconfig` solo se aplica a ficheros bajo su propio
+  árbol de directorios, y la caché de NuGet no lo está. Dicho de otro modo:
+  **la respuesta real y más fuerte a esta pregunta es cero reglas nuevas**
+  — el único aviso que mete WinUI 3 viene de una regla que el repo ya
+  decidió no exigir, no de una regla distinta.
+- **El remedio de la sección anterior necesita esta corrección.** Un
+  `.editorconfig` del repo **nunca** va a alcanzar un `.cs` inyectado desde
+  la caché de NuGet, por la misma razón de arriba: esa ruta está fuera de su
+  árbol. Lo único que funciona ahí es
+  `<NoWarn>$(NoWarn);CA5392</NoWarn>` en el `.csproj` del proyecto que
+  referencia el paquete.
+
+**Para el hito 2 — la misma trampa, con más superficie:** cuando Secuence
+entre de verdad en `WinCueSharp.sln` con el CI en
+`TreatWarningsAsErrors=true` y el listón del repo a cero, cualquier
+diagnóstico que venga de código fuente inyectado desde un paquete NuGet
+(este CA5392, o cualquier otro que aparezca con más dependencias) **no se
+puede silenciar con `.editorconfig`** por muy documentado que quede el
+motivo ahí — hace falta `NoWarn` en el `.csproj`. Es fácil dar por bueno el
+`.editorconfig` porque es lo que ya funciona para el código propio del
+repo, y descubrir tarde que no cubre este caso.
+
+**Reconciliación con el número de la Pregunta 3 (añadido tras revisión).**
+El `1` de arriba y el recuento de esta sección son de **antes** de que la
+tarea 3 añadiera el control negativo (Pregunta 3, `ProbarConWidAsync`), que
+introdujo sus propias llamadas a P/Invoke sin comprobar el retorno. Repetido
+el mismo `dotnet build -p:TreatWarningsAsErrors=true` de arriba sobre el
+código actual: **7 diagnósticos, no 1.** Desglosados:
+
+| Regla | Cuenta | Origen |
+|---|---|---|
+| CA5392 | 1 | WinUI 3 / SDK de Microsoft (el mismo de siempre, sin cambios) |
+| CA1806 | 4 | `ProbarVideo` (×2) y `ProbarConWidAsync` (×2): retornos de `mpv_set_option_string`/`mpv_get_property_int64` sin usar |
+| CA1822 | 1 | `ProbarConWidAsync` podría marcarse `static` |
+| CA1303 | 1 | cadena literal en `Console.WriteLine` dentro de `EjecutarControlNegativoAsync` |
+
+**El `1` sigue siendo la respuesta correcta a "¿cuánto ruido mete WinUI 3?"**
+— es la única fila que no es un descuido de este lab escrito deprisa, y es
+la que hay que vigilar cuando crezca la superficie real de Secuence. Las
+otras 6 son del tipo que ya se dejó **a propósito** sin arreglar en este
+lab desechable (ver "Lo que NO tienes que hacer" del encargo de esta
+revisión) — no son ruido de WinUI 3, y no cambian el veredicto de no tocar
+el listón del repo.
 
 **Actualización (tarea 2):** el hallazgo del Paso 2 (componente de Visual
 Studio ausente) está resuelto — ver el recuadro de arriba y la Pregunta 1.
@@ -354,8 +437,47 @@ con código de salida `-1073741189` en las 4 veces que lo lancé así. Ese
 decimal es `0xC000027B` (lo comprobé con la conversión exacta, no de
 memoria) — **no `0xC0000135`** como sugiere el encargo (esa aclaración del
 encargo parece un error de conversión: `0xC0000135` en decimal es
-`-1073741519`, un número distinto). No hubo nada en stdout/stderr (ambos
+`-1073741515`, un número distinto). No hubo nada en stdout/stderr (ambos
 vacíos).
+
+**Control de variables confundidas (añadido tras revisión).** Lo de arriba
+compara el `.exe` de `pub-carpeta` (revienta) contra el de `bin/` lanzado
+con `dotnet run` (vive, Pregunta 3), pero entre esos dos casos cambian
+**dos** variables a la vez: el paso de `publish` y el método de
+lanzamiento (`dotnet run` arranca el proceso desde dentro de su propio
+host; `Start-Process` lo lanza como lo haría un doble clic). Para aislar
+cuál de las dos pesa, repetí el mismo `Start-Process` de arriba sobre el
+`.exe` de `bin/` sin publicar:
+
+| Binario | Método de lanzamiento | Resultado |
+|---|---|---|
+| `bin/.../win-x64/WinUi3Lab.exe` | `dotnet run` | vivo, mpv decodificando (Pregunta 3) |
+| `bin/.../win-x64/WinUi3Lab.exe` | `Start-Process` | **vivo 6 s** |
+| `pub-carpeta/WinUi3Lab.exe` | `Start-Process` | muere (`0xC000027B`) |
+
+Con el método de lanzamiento fijo en las dos últimas filas, el único
+binario que revienta es el publicado. **El método de lanzamiento no es la
+causa; el paso de publicación sí.** Esto también adelanta, en parte, el
+punto 3 del epígrafe PENDIENTE de más abajo (que pedía probar con doble
+clic real): `Start-Process` es el mismo mecanismo con el que Windows lanza
+un proceso fuera de una sesión de `dotnet run`, así que la variable "sesión
+interactiva vs. no interactiva" ya no explica la diferencia — sigue
+pendiente confirmar a ojo si con doble clic aparece el diálogo de "ha
+dejado de funcionar", pero ya no por sospecha de que el lanzamiento sea la
+causa.
+
+**La misma pregunta con otro nombre.** El Paso 1 de más arriba encontró que
+`PublishSingleFile` exige `EnableMsixTooling=true` "for embedded
+`resources.pri` generation", y la hipótesis principal (sin confirmar) de
+por qué `pub-carpeta` revienta es también `resources.pri` mal colocado o
+ausente. No son dos anécdotas sueltas: es la misma pieza —el índice de
+recursos empaquetados de WinUI 3— apareciendo dos veces en el mismo hito.
+No afirmo que la causa del arranque roto vaya a confirmarse como
+`resources.pri` —sigue sin confirmar—, pero si lo es, lo que queda en
+cuestión no es un detalle de `dotnet publish`, sino si WinUI 3
+desempaquetado (sin MSIX) admite el modelo de distribución en carpeta sin
+instalador — que es exactamente el que vende WinCue hoy. El hito 2 tiene
+que cerrar esto, no darlo por bueno porque el lab compile en verde.
 
 Para no quedarme solo con el código de salida, miré el Visor de eventos
 (`Get-WinEvent -LogName Application`) justo después de cada intento: las 4
@@ -383,30 +505,40 @@ decida si merece la pena, no algo que resolví aquí. **No maquillo esto como
 aunque el build que lo produjo esté en verde. Compila y arranca son cosas
 distintas, y esta tarea solo confirma la primera.
 
-**`settings.json` junto al ejecutable — esto sí lo verifiqué entero:**
+**`settings.json` junto al ejecutable — lo que se midió, y lo que no:**
 
 ```
 echo '{"prueba":1}' > tools/winui3-lab/pub-carpeta/settings.json
 # leído con Get-Content, luego reescrito con Set-Content, releído de nuevo
 ```
 
-Creé el archivo en la carpeta de `pub-carpeta`, lo leí, lo **reescribí**
-por completo (`{"prueba":2,"reescrito":true}`) y lo releí — las tres
-operaciones funcionan sin fricción, exactamente como sobre cualquier
-carpeta normal de Windows. Esto es coherente con `WindowsPackageType=None`:
-al no ser un paquete MSIX, no hay virtualización de almacenamiento ni
-redirección de `ApplicationData` de por medio — la carpeta del `.exe` es
-una carpeta corriente, con permisos corrientes. No pude probar la lectura
-_desde el propio proceso_ de `WinUi3Lab.exe` (no arranca, ver arriba), pero
-la pregunta que de verdad importa —¿el modelo de empaquetado permite que un
-archivo de configuración viva junto al ejecutable, como hace WinCue hoy?—
-queda contestada por la propiedad del proyecto (`WindowsPackageType=None`)
-y por esta prueba a nivel de sistema de archivos, no por si esta ventana en
-concreto abre o no.
+**Lo que esto mide:** que PowerShell puede crear, leer, reescribir y releer
+un archivo en la carpeta de `pub-carpeta` sobre el sistema de archivos NTFS
+normal de Windows — las tres operaciones funcionan sin fricción, como sobre
+cualquier carpeta corriente. **Lo que esto NO mide:** que `WinUi3Lab.exe`
+pueda hacer lo mismo *desde dentro de su propio proceso*. El plan pedía
+confirmar que **el proceso** puede leer y reescribir el archivo desde su
+propia carpeta — el riesgo que se quería descartar (redirección o
+virtualización de almacenamiento, el mecanismo que sí existe con
+`ApplicationData` bajo MSIX empaquetado) solo existe, o no, **dentro del
+proceso**; PowerShell tocando la carpeta desde fuera no está sujeto a esa
+virtualización aunque la hubiera, así que no aporta un solo bit sobre la
+pregunta real. No pude hacer la prueba dentro del proceso porque el `.exe`
+no arranca en esta máquina (ver arriba).
 
-**Veredicto de `settings.json`: sí.** Nada en la forma del paquete de WinUI
-3 no empaquetado impide que Secuence guarde su configuración junto al
-`.exe`, igual que WinCue.
+La razón por la que el veredicto va a ser probablemente "sí" es de
+**propiedad del proyecto**, no de medición: `WindowsPackageType=None`
+significa que no hay paquete MSIX, y sin paquete MSIX no hay virtualización
+de `ApplicationData` que active el mecanismo que se quería descartar. Es un
+razonamiento sólido, pero es un razonamiento, no la prueba a nivel de
+proceso que pedía el plan — y no distinguir las dos cosas es exactamente el
+patrón que esta revisión pidió dejar de repetir en este hito.
+
+**Veredicto de `settings.json`: sí, por la propiedad del proyecto
+(`WindowsPackageType=None`), no por medición dentro del proceso.** Falta la
+prueba que sí cerraría esto con evidencia —el `.exe` leyendo y reescribiendo
+su propio `settings.json` en su propia carpeta, una vez arranque—; queda
+como casilla en el epígrafe PENDIENTE de abajo.
 
 ### Veredicto de la Pregunta 1
 
@@ -415,10 +547,13 @@ concreto abre o no.
 single-file **sí produce un build limpio** (0 errores) y una carpeta del
 mismo tipo que ya distribuye WinCue: más archivos (439 contra 24) pero
 menos peso (160 MB contra 324 MB), sin instalador. `settings.json` puede
-vivir junto al ejecutable sin problema. Lo que queda sin cerrar, y no es
-parte de esta pregunta pero hay que arrastrarlo, es que el `.exe` resultante
-no arranca todavía en esta máquina concreta (excepción `0xC000027B` en
-`Microsoft.UI.Xaml.dll`) — ver el epígrafe PENDIENTE.
+vivir junto al ejecutable sin problema **a nivel de propiedad del proyecto
+y de sistema de archivos** — la prueba dentro del propio proceso sigue
+pendiente, ver Paso 4 y el epígrafe PENDIENTE. Lo que queda sin cerrar, y no
+es parte de esta pregunta pero hay que arrastrarlo, es que el `.exe`
+resultante no arranca todavía en esta máquina concreta (excepción
+`0xC000027B` en `Microsoft.UI.Xaml.dll`, causa aislada del método de
+lanzamiento — ver Paso 4) — ver el epígrafe PENDIENTE.
 
 ## Pregunta 3 — mpv en un HWND hijo
 
@@ -468,7 +603,10 @@ dotnet build tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPa
 Termina en verde: 0 errores, 3 advertencias (la CA5392 ya conocida del
 paquete NuGet, y dos CA1806 nuevas porque `ProbarVideo` no usa el código de
 retorno de las dos llamadas a `mpv_set_option_string` — así es el encargo
-literal, no las toqué).
+literal, no las toqué). **Este número es de antes del control negativo de
+más abajo; ya no es el vigente** — ver la Pregunta 2 para el recuento
+actualizado (7 advertencias, 1 de WinUI 3 y 6 del propio lab) una vez
+`ProbarConWidAsync` añadió sus propias llamadas sin comprobar el retorno.
 
 **Carpeta de salida real, verificada antes de copiar nada** (el encargo
 decía `bin/x64/Release/...`, que no existe en este proyecto):
@@ -804,6 +942,14 @@ como aquí.
       VCLibs/Microsoft.UI.Xaml) para descartar la hipótesis de runtime de
       C++ ausente, o si se deja anotado como hallazgo de entorno sin
       bloquear el resto del hito 0.
+- [ ] (hallazgo de revisión, hito 0) **`settings.json` desde dentro del
+      proceso.** Una vez el `.exe` arranque de verdad (puntos anteriores de
+      este mismo epígrafe), lanzarlo, dejar que escriba o reescriba su
+      `settings.json` junto al propio ejecutable, y confirmar que lo lee de
+      vuelta sin que nada lo redirija. Es la única prueba que cierra la
+      Pregunta 1 con medición real y no solo con la propiedad del proyecto
+      (`WindowsPackageType=None`) — ver "Paso 4 — arranque en limpio y
+      `settings.json`" para el porqué.
 - [ ] (tarea 3, nueva) **Airspace.** Con la DLL ya copiada en
       `tools\winui3-lab\bin\Release\net8.0-windows10.0.19041.0\win-x64\` (ver
       Pregunta 3 para el porqué de esa ruta y no `bin\x64\Release\...`),

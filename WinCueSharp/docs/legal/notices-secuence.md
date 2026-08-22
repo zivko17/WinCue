@@ -18,11 +18,15 @@
 >
 > **Cómo se verificó cada licencia de abajo:** no se ha dado ninguna por MIT
 > "porque la mayoría de paquetes de Microsoft lo son". Se ha mirado el
-> `.nuspec` y el fichero de licencia real dentro de cada `.nupkg` en
-> `C:\Users\andre\.nuget\packages\`. El resultado, para quien lea esto sin
-> memoria del proceso: **una de las dos preguntas del encargo tenía trampa** —
-> `Microsoft.WindowsAppSDK` **no es MIT** como daba por hecho el borrador
-> inicial del encargo. Ver el detalle abajo.
+> `.nuspec` de cada paquete y, **cuando existía**, el fichero de licencia
+> real dentro del `.nupkg`, en `C:\Users\andre\.nuget\packages\` — no
+> siempre lo había: `Microsoft.Windows.SDK.BuildTools` y
+> `Microsoft.Windows.SDK.NET.Ref` (ver más abajo) solo traen una
+> `licenseUrl` a un `.rtf` que no se ha podido leer, y `Win2D` ni siquiera
+> tiene paquete restaurado todavía en esta máquina. El resultado, para quien
+> lea esto sin memoria del proceso: **una de las dos preguntas del encargo
+> tenía trampa** — `Microsoft.WindowsAppSDK` **no es MIT** como daba por
+> hecho el borrador inicial del encargo. Ver el detalle abajo.
 
 ---
 
@@ -58,12 +62,31 @@
   `licenses/MICROSOFT-WINDOWSAPPSDK-LICENSE.txt` junto al ejecutable.
   **Pendiente para `publish-secuence.ps1` (hito 2):** automatizar esa copia
   desde `$env:USERPROFILE\.nuget\packages\microsoft.windowsappsdk\<version>\license.txt`.
-- **NOTICE.txt propio del paquete:** el `.nupkg` de WindowsAppSDK incluye
-  además un `NOTICE.txt` de atribuciones de terceros que trae embebido
-  (p. ej. Newtonsoft.Json 13.0.1, MIT). Es la lista de terceros **dentro**
-  del propio SDK de Microsoft, no de código de Secuence — no genera una
-  obligación adicional para Secuence, pero se deja documentado por si hiciera
-  falta en una auditoría.
+- **NOTICE.txt propio del paquete — expuesto, no dictaminado.** El `.nupkg`
+  de WindowsAppSDK incluye, además del `license.txt` de arriba, un
+  `NOTICE.txt` (51 líneas) de atribuciones de terceros embebidas dentro del
+  propio SDK. No es una lista corta ni trivial: incluye **Newtonsoft.Json
+  13.0.1 (MIT)**, cuyo texto de licencia exige que el aviso "shall be
+  included in all copies or **substantial portions**" del software; una
+  **oferta escrita de código fuente** de Microsoft
+  (`3rdpartysource.microsoft.com`, o un cheque físico de 5 USD); y esta
+  cláusula, literal: *"you may reverse engineer this software to the extent
+  required to debug changes to any libraries licensed under the **GNU
+  Lesser General Public License**."* Es decir: material de terceros con
+  obligación de *pass-through* y una referencia LGPL, dentro de binarios que
+  Secuence sí redistribuye (todo el SDK, self-contained), en un producto de
+  código cerrado — el mismo tipo de situación para la que WinCue ya tiene un
+  guardián de LGPL en `publish.ps1`. **Este informe no concluye si eso
+  genera o no una obligación adicional para Secuence** — es una decisión de
+  negocio/legal, no algo que corresponda dictaminar aquí. Lo que sí queda
+  como tarea concreta:
+  1. `publish-secuence.ps1` (hito 2) tiene que copiar este `NOTICE.txt`
+     íntegro a `licenses/`, igual que ya hace con el `license.txt` de
+     arriba.
+  2. La decisión de si hace falta algo más (pass-through explícito del
+     aviso de Newtonsoft.Json, mención de la oferta de código fuente,
+     evaluación de la cláusula LGPL) queda registrada en
+     `docs/legal/checklist-distribucion.md`, no en este documento.
 
 ### Microsoft.Web.WebView2 1.0.2651.64 (dependencia transitiva de WindowsAppSDK)
 
@@ -80,17 +103,62 @@
   (`Microsoft.Web.WebView2.Core.dll` y `.Core.Projection.dll`) sí aparecen en
   la carpeta de salida porque WindowsAppSDK las arrastra.
 - **Texto:** licencia BSD-3-Clause (abajo).
+- **`NOTICE.txt` propio del paquete:** igual que WindowsAppSDK arriba, el
+  `.nupkg` de WebView2 trae su propio `NOTICE.txt` de atribuciones de
+  terceros — no se había mencionado en la primera versión de este
+  documento. Mismo tratamiento: se expone, no se dictamina; la copia a
+  `licenses/` y la decisión de si hace falta algo más quedan en
+  `docs/legal/checklist-distribucion.md`.
+
+### Microsoft.Windows.SDK.NET.Ref 10.0.19041.56 (runtime pack — invisible a `dotnet list package`)
+
+- **Este componente no lo encontró el método que pedía el encargo.**
+  `dotnet list package --include-transitive` no ve los runtime packs — son
+  un mecanismo del SDK de .NET distinto de una referencia NuGet normal.
+  Este en concreto aparece en `WinUi3Lab.deps.json` como
+  `runtimepack.Microsoft.Windows.SDK.NET.Ref/10.0.19041.56`, y de él salen
+  dos DLL que **sí están en la carpeta de salida real**
+  (`Microsoft.Windows.SDK.NET.dll` y `WinRT.Runtime.dll`, confirmadas con
+  `find` sobre
+  `tools/winui3-lab/bin/Release/net8.0-windows10.0.19041.0/win-x64/`) y que
+  WinCue no distribuye hoy.
+- **Licencia: no verificada, y no se da por buena por analogía.** El
+  `.nuspec` de este paquete
+  (`~/.nuget/packages/microsoft.windows.sdk.net.ref/10.0.19041.56/`) tiene
+  el mismo patrón que `Microsoft.Windows.SDK.BuildTools` de abajo: sin
+  `<license type="file">`, solo
+  `<licenseUrl>https://aka.ms/WinSDKLicenseURL</licenseUrl>` (el mismo
+  `.rtf` no legible desde aquí). La diferencia que importa con BuildTools es
+  que **este sí se distribuye** — las dos DLL viajan en la carpeta del
+  `.exe` — así que aquí la licencia sin verificar sí es relevante, y no se
+  puede cerrar como "no genera obligación por no distribuirse". No se
+  supone MIT solo porque `WinRT.Runtime.dll` venga del proyecto CsWinRT
+  (que sí es MIT en GitHub): la entrada de `Microsoft.WindowsAppSDK` de
+  arriba ya demuestra que código fuente MIT y paquete NuGet compilado
+  pueden llevar licencias distintas.
+- **No estaba en `THIRD-PARTY-NOTICES.md`, ni en `licencias-nuget.md`, ni en
+  este documento hasta ahora** — ninguno de los inventarios existentes de
+  WinCue cubre runtime packs porque WinCue no usa ninguno. Queda anotado
+  como pendiente de verificar antes de que el hito 2 publique nada.
 
 ### Microsoft.Windows.SDK.BuildTools 10.0.22621.756 / 10.0.22621.3233
 
 - **No se distribuye con la aplicación — verificado, no supuesto.** Es
   herramental de compilación (`makepri.exe`, `midl.exe`, `mc.exe`, etc., bajo
   `bin\<version>\{x86,x64,arm,arm64}\` dentro del propio paquete). Se comparó
-  la lista de DLL de la carpeta de salida real
-  (`tools/winui3-lab/bin/Release/net8.0-windows10.0.19041.0/win-x64/`, 57
-  archivos) contra el contenido de este paquete: **ningún archivo de
+  la lista de **archivos `.dll`** de la carpeta de salida real
+  (`tools/winui3-lab/bin/Release/net8.0-windows10.0.19041.0/win-x64/`, 56 en
+  total) contra el contenido de este paquete: **ningún archivo de
   `Microsoft.Windows.SDK.BuildTools` aparece en la salida.** Solo se usa en
   tiempo de build (targets de MSBuild), nunca en tiempo de ejecución.
+  **Corrección de alcance:** esa comparación cubrió las DLL, no la carpeta
+  entera — la carpeta de salida real tiene **86 ficheros en su raíz** (las
+  56 `.dll`, 19 `.winmd`, ficheros `.pri`/`.xbf`, dos `.exe`) más
+  `runtimes/` y **86 carpetas de idioma** (contadas con `find`, no de
+  memoria); no se auditó "una por una" esa
+  carpeta completa, solo las DLL de esta comparación concreta (ver también
+  la entrada de `Microsoft.Windows.SDK.NET.Ref` de arriba, que es
+  precisamente lo que se escapó de mirar solo DLL "obvias").
 - **Licencia: no se ha podido verificar el texto completo, y no se da por
   MIT ni por ninguna otra cosa sin comprobar.** El `.nuspec` no trae
   `<license type="file">` (a diferencia de WindowsAppSDK) — solo
