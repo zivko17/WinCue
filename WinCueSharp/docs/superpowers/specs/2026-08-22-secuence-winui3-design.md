@@ -223,7 +223,33 @@ Tres preguntas. Si alguna falla, se replantea todo antes de gastar un mes:
 3. HWND hijo bajo un `AppWindow` + mpv `--wid`. ¿Se ve vídeo?
 
 Sale además de aquí: el `THIRD-PARTY-NOTICES.md` de Secuence, con Windows
-App SDK y Win2D (ambos MIT) declarados.
+App SDK y Win2D declarados.
+
+> **CORREGIDO 2026-08-22 — aquí ponía "ambos MIT" y era falso.**
+> El hito 0 lo comprobó abriendo el paquete, y el resultado importa porque
+> Secuence se distribuye **cerrado**:
+>
+> - **`Microsoft.WindowsAppSDK` NO es MIT.** Su `.nuspec` declara
+>   `<license type="file">license.txt</license>` con
+>   `requireLicenseAcceptance=true`, y ese `license.txt` son los *MICROSOFT
+>   SOFTWARE LICENSE TERMS — MICROSOFT WINDOWS APP SDK*, sin una sola
+>   aparición de "MIT License". El **repositorio de GitHub** sí es MIT; el
+>   **paquete binario** no. Son instrumentos distintos, y el que vincula al
+>   distribuir es el del paquete. Su EULA contempla código redistribuible,
+>   así que repartirlo con la aplicación está previsto — pero **con
+>   condiciones que hay que leer**, y eso es materia de
+>   [checklist-distribucion.md](../../legal/checklist-distribucion.md), no de
+>   una nota al margen de un diseño.
+> - **`Microsoft.Windows.SDK.BuildTools`**: no se distribuye (es tooling de
+>   compilación), así que no genera obligación de aviso. Su EULA no se pudo
+>   leer del `.rtf`; queda anotado como no verificado.
+> - **`Microsoft.Graphics.Win2D`**: aún no integrado (entra en el hito 3). El
+>   repositorio es MIT, pero el `licenseUrl` del paquete está muerto.
+>   **Reverificar al integrarlo**, no dar por bueno esto.
+>
+> La lección, más allá del dato: la licencia de un repositorio de GitHub no
+> es la licencia del paquete que descargas. Para un producto cerrado hay que
+> abrir el `.nuspec`.
 
 ### Regla del hito 3
 
