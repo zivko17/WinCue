@@ -5,15 +5,20 @@
 *(Escrito para alguien que abra esto dentro de seis meses sin recordar nada
 del proceso.)*
 
-1. **¿Se puede empaquetar sin instalador, como WinCue hoy?** Sí, pero no como
-   un único `.exe`: `PublishSingleFile` choca con `WindowsPackageType=None`
-   (exige encender MSIX). La carpeta sí funciona — 439 archivos / 160 MB
-   frente a los 24 / 324 MB de WinCue — y `settings.json` vive junto al
-   ejecutable sin fricción, verificado de extremo a extremo.
-2. **¿Cuánto ruido de analizadores mete WinUI 3?** Casi ninguno: 1 solo
-   aviso (CA5392), y viene de código fuente que trae el propio paquete de
-   Microsoft, no de nada escrito por nosotros — confirmado sobre un build
-   completo, no sobre uno truncado.
+1. **¿Se puede empaquetar sin instalador, como WinCue hoy?** A medias. `PublishSingleFile`
+   choca con `WindowsPackageType=None` (exige encender MSIX). El build en
+   carpeta sí termina en verde — 439 archivos / 160 MB frente a los 24 / 324 MB
+   de WinCue — y `settings.json` vive junto al ejecutable sin fricción a nivel
+   de sistema de archivos. **Pero el `.exe` de esa misma carpeta no arranca
+   todavía en esta máquina** (excepción `0xC000027B` en `Microsoft.UI.Xaml.dll`,
+   ver Pregunta 1 y el hallazgo del hito 2 más abajo) — compila y arranca son
+   cosas distintas, y solo la primera está confirmada.
+2. **¿Cuánto ruido de analizadores mete WinUI 3?** Casi ninguno en este
+   banco de pruebas: 1 solo aviso (CA5392), y viene de código fuente que
+   trae el propio paquete de Microsoft, no de nada escrito por nosotros —
+   confirmado sobre un build completo, no sobre uno truncado. Es una muestra
+   de un proyecto de una ventana con un botón; hay que repetir la medición
+   cuando el código real de Secuence entre en `WinCueSharp.sln` (hito 2).
 3. **¿mpv pinta dentro de un HWND hijo de WinUI 3?** Sí, con evidencia que
    de verdad lo distingue de la alternativa (control negativo a cuatro
    bandas con `EnumChildWindows`: 0 descendientes en línea base, 1 con
