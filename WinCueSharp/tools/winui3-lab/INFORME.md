@@ -360,7 +360,125 @@ no arranca todavía en esta máquina concreta (excepción `0xC000027B` en
 
 ## Pregunta 3 — mpv en un HWND hijo
 
-(tarea 3)
+*Tarea 3, ejecutada 2026-08-22.*
+
+### Lo que no pude hacer
+
+No tengo ojos sobre esta máquina: no puedo confirmar a simple vista que se
+vea el vídeo, ni arrastrar la ventana entre dos monitores con DPI distinto.
+Ambas comprobaciones quedan en el epígrafe PENDIENTE de abajo, para Andrés.
+
+### Lo que sí pude instrumentar y medir
+
+`HwndHijo.cs` es literal al encargo: crea la ventana hija Win32 con
+`CreateWindowExW` (clase `"static"`, `WS_CHILD | WS_VISIBLE | WS_CLIPCHILDREN
+| WS_CLIPSIBLINGS`), mismo patrón que `src/WinCue.App/SwapChainHost.cs` sin
+la parte de `HwndHost` (que es de WPF).
+
+`MainWindow.xaml.cs` sigue el cuerpo literal del encargo (crear HWND hijo,
+`mpv_create`, `wid` antes de `mpv_initialize`, `loadfile`), con dos añadidos
+justificados por la resolución de la ambigüedad del propio encargo:
+
+1. **Se recogen y muestran los códigos de retorno** de `mpv_create` (por
+   `nint` distinto de 0), `mpv_initialize` y `mpv_command` — antes el
+   encargo literal ignoraba el de `mpv_command`.
+2. **Sondeo de `width`/`height` tras el `loadfile`** (que es asíncrono):
+   un bucle de hasta 15 intentos cada 400 ms (~6 s) que llama a
+   `mpv_get_property` con `MPV_FORMAT_INT64`. Si devuelve dimensiones > 0,
+   es evidencia de que mpv decodifica de verdad hacia la superficie del
+   `wid`, sin que nadie tenga que mirar la pantalla.
+3. **Disparo automático de la prueba al arrancar** cuando `LAB_MEDIA` ya
+   está definida (además del botón, que se deja intacto para la
+   verificación humana). Sin esto no había forma de generar evidencia sin
+   pulsar el botón a mano — cosa que tampoco puedo hacer.
+
+Todos los mensajes se escriben también a stdout con el prefijo
+`[winui3-lab]`.
+
+### Ejecución
+
+Build (Release, con el `AppxMSBuildToolsPath` de esta máquina):
+
+```
+dotnet build tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
+```
+
+Termina en verde: 0 errores, 3 advertencias (la CA5392 ya conocida del
+paquete NuGet, y dos CA1806 nuevas porque `ProbarVideo` no usa el código de
+retorno de las dos llamadas a `mpv_set_option_string` — así es el encargo
+literal, no las toqué).
+
+**Carpeta de salida real, verificada antes de copiar nada** (el encargo
+decía `bin/x64/Release/...`, que no existe en este proyecto):
+
+```
+tools/winui3-lab/bin/Release/net8.0-windows10.0.19041.0/win-x64/
+```
+
+Copiada ahí la DLL (98 MB, fuera del commit — ver Autorrevisión):
+
+```
+cp libmpv-lgpl/libmpv-2.dll tools/winui3-lab/bin/Release/net8.0-windows10.0.19041.0/win-x64/
+```
+
+Ejecución, con `LAB_MEDIA` apuntando a la media de prueba de esta máquina
+(no versionada, existe en `tests/show-prueba/`):
+
+```
+LAB_MEDIA="C:\Proyectos\ffmpeg-gui\WinCueSharp\tests\show-prueba\video-A-colores.mp4" \
+  dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release \
+  "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"
+```
+
+**El proceso `WinUi3Lab.exe` queda vivo** (confirmado con `tasklist`, PID
+visible varios segundos después de arrancar, hasta que lo cerré yo con
+`taskkill`). Salida real por stdout (redirigida a un log; el mojibake de
+"Vídeo" es solo la consola mostrando UTF-8 con la página de códigos
+equivocada, no un dato corrupto):
+
+```
+[winui3-lab] mpv en HWND 657218 (padre 1312620). create=OK, initialize=0, command=0.
+[winui3-lab] mpv en HWND 657218 (padre 1312620). create=OK, initialize=0, command=0. Vídeo decodificando: 1280x720.
+```
+
+Contrasté el `1280x720` con `ffprobe` sobre el propio archivo, **sin tocar
+mpv**:
+
+```
+ffprobe -v error -select_streams v:0 -show_entries stream=width,height -of csv=p=0 tests/show-prueba/video-A-colores.mp4
+→ 1280,720
+```
+
+**Coincide exacto.** No es un valor por defecto ni basura: es la resolución
+real del archivo, reportada por mpv después de haberlo cargado sobre el
+`wid` del HWND hijo.
+
+### Diagnóstico, siguiendo la guía del encargo para distinguir causas
+
+- `mpv_create` → HWND ≠ 0. **No es un problema de DLL** (`libmpv-2.dll` sí
+  carga y sí se resuelve el símbolo).
+- `mpv_initialize` → `0` (éxito; los códigos de error de libmpv son
+  negativos). **No es un problema de configuración de mpv ni del `wid`.**
+- `mpv_command("loadfile", ...)` → `0` (éxito, comando aceptado; que sea
+  asíncrono es normal en mpv).
+- `mpv_get_property("width"/"height")` → `0` (éxito) con `1280x720`, que
+  coincide con la resolución real del archivo por `ffprobe`. **Esto es el
+  caso "todo OK y mpv reporta dimensiones" que el propio encargo identifica
+  como el HWND hijo funcionando**, sin depender de que nadie mire.
+
+### Veredicto de la Pregunta 3
+
+**El HWND hijo de un `AppWindow` de WinUI 3 acepta vídeo.** mpv decodifica
+de verdad hacia la superficie que se le pasa por `wid` — la evidencia
+(`initialize=0`, `command=0`, `width`/`height` = resolución real del
+archivo verificada por partida doble contra `ffprobe`) es, para mí, tan
+sólida como es posible sin ojos sobre la pantalla. **Grado de certeza: alto
+para "mpv decodifica sobre el HWND hijo"**, que es la pregunta que podía
+parar el proyecto. **Certeza nula (por diseño) sobre las dos cosas que
+exigen ojo humano**: si el vídeo tapa al `TextBlock` (airspace) y qué pasa
+al arrastrar entre monitores con DPI distinto — ninguna de las dos se
+puede inferir desde código o desde `stdout`, y no las doy por buenas. Van
+al epígrafe PENDIENTE de abajo, con el comando exacto al lado.
 
 ## Notas del Paso 2 (build + arranque) — para que la tarea 2/3 no repita la investigación
 
@@ -434,6 +552,18 @@ como aquí.
   ninguno de los ajustes de la investigación (`AppxGeneratePriEnabled`,
   versión 1.5.x), que solo se probaron para diagnosticar y no dejaron
   rastro en el árbol final.
+- (tarea 3) `HwndHijo.cs` es copia literal del encargo. `MainWindow.xaml.cs`
+  lleva dos desvíos sobre el literal, ambos comentados en el propio archivo
+  y justificados en la Pregunta 3: recoger el código de `mpv_command` (el
+  encargo lo ignoraba) y el disparo automático + sondeo de `width`/`height`
+  cuando `LAB_MEDIA` está definida. Nada de eso toca `HwndHijo.Crear` ni el
+  orden `wid` → `mpv_initialize` → `loadfile`, que es lo que de verdad
+  responde a la pregunta del hito.
+- (tarea 3) El commit no incluye la copia de `libmpv-2.dll` (98 MB) dentro
+  de `tools/winui3-lab/bin/...` — cubierta por la regla global `bin/` de
+  `.gitignore` (y también por `libmpv-lgpl/*.dll`, que es de donde se
+  copió). Confirmado con `git status` antes del `git add` que esa carpeta
+  no aparece como pendiente de commitear.
 
 ## Dudas para Andrés
 
@@ -456,6 +586,15 @@ como aquí.
    los framework packages VCLibs/UI.Xaml en esta máquina), o lo dejamos
    anotado como hallazgo de entorno y seguimos con las tareas 3/4, que
    también van a necesitar arrancar este tipo de proyecto?
+4. (tarea 3, nueva) Ninguna duda de fondo sobre la pregunta del hito — el
+   HWND hijo acepta vídeo, con evidencia por partida doble (códigos de mpv
+   + `width`/`height` contrastados con `ffprobe`). La única duda es de
+   forma: el `cp` del encargo apuntaba a
+   `bin/x64/Release/net8.0-windows10.0.19041.0/win-x64/`, que no existe en
+   este proyecto (no hay carpeta `x64/` intermedia); la real es
+   `bin/Release/net8.0-windows10.0.19041.0/win-x64/`, y es donde copié la
+   DLL. Documentado en la Pregunta 3 para que la tarea equivalente del
+   hito 2 no repita el tropiezo.
 
 ## PENDIENTE — verificación en pantalla (Andrés)
 
@@ -485,3 +624,20 @@ como aquí.
       VCLibs/Microsoft.UI.Xaml) para descartar la hipótesis de runtime de
       C++ ausente, o si se deja anotado como hallazgo de entorno sin
       bloquear el resto del hito 0.
+- [ ] (tarea 3, nueva) **Airspace.** Con la DLL ya copiada en
+      `tools\winui3-lab\bin\Release\net8.0-windows10.0.19041.0\win-x64\` (ver
+      Pregunta 3 para el porqué de esa ruta y no `bin\x64\Release\...`),
+      ejecutar:
+      `LAB_MEDIA="C:\Proyectos\ffmpeg-gui\WinCueSharp\tests\show-prueba\video-A-colores.mp4" dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:/Program Files (x86)/Microsoft Visual Studio/2022/BuildTools/MSBuild/Microsoft/VisualStudio/v17.0/AppxPackage/"`
+      y confirmar **a ojo** que el vídeo se ve dentro de la ventana y que
+      tapa al `TextBlock` de arriba (el texto de estado) allí donde se
+      solapan — es el comportamiento esperado del airspace de una ventana
+      hija Win32, no un fallo.
+- [ ] (tarea 3, nueva) **DPI.** Con la app del punto anterior ya abierta y
+      el vídeo visible, arrastrar la ventana entre dos monitores con DPI
+      distinto (o, si solo hay uno, cambiar el "Cambiar el tamaño de texto,
+      aplicaciones y otros elementos" de ese monitor en Configuración de
+      Windows y reabrir) y confirmar **a ojo**: ¿el HWND hijo se redimensiona
+      junto con la ventana, o se queda con el tamaño/posición del monitor
+      anterior (descolocado)? Esto es evidencia solo visual — no hay forma
+      de instrumentarlo desde código sin más trabajo del que pide este hito.
