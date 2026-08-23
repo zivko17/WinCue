@@ -352,8 +352,13 @@ public static class Theme
     // ═════════════════════════ HERRAMIENTAS ═════════════════════════
 
     /// <summary>0xRRGGBB → Color opaco. Se escribe el hex tal cual, que es como
-    /// se piensa un color, en vez de tres bytes sueltos.</summary>
-    private static Color Hex(uint rgb) => Color.FromRgb(
+    /// se piensa un color, en vez de tres bytes sueltos.
+    ///
+    /// Pública (no solo de uso interno de este fichero): VuMeterControl la usa
+    /// para convertir los tokens uint de WinCue.Presentation.VuMeterPalette —
+    /// el cálculo compartido con Secuence, piloto del traslado a Win2D— sin
+    /// duplicar aquí la misma cuenta de bits.</summary>
+    public static Color Hex(uint rgb) => Color.FromRgb(
         (byte)((rgb >> 16) & 0xff), (byte)((rgb >> 8) & 0xff), (byte)(rgb & 0xff));
 
     /// <summary>Mismo color con otra opacidad (para velos y realces).</summary>
