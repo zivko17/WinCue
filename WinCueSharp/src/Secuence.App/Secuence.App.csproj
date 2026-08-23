@@ -66,9 +66,38 @@
     <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
     <ProjectReference Include="..\WinCue.Presentation\WinCue.Presentation.csproj" />
     <!-- Motor de audio real (NAudio, sin dependencias nativas): con él el GO
-         de esta tarea SUENA de verdad. WinCue.Video NO se añade — el vídeo es
-         el paso siguiente y NullVideoEngine.cs cubre el hueco por ahora. -->
+         SUENA de verdad. -->
     <ProjectReference Include="..\WinCue.Audio\WinCue.Audio.csproj" />
+    <!-- Motor de vídeo real (mpv por P/Invoke): con él GO también SE VE de
+         verdad, en VideoOutputWindow.xaml.cs. Referenciarlo NO exige la DLL
+         nativa en tiempo de compilación (MpvNative usa LibraryImport, que se
+         resuelve en RUNTIME) — por eso el CI, que no tiene libmpv-2.dll,
+         sigue compilando en verde; solo los tests marcados Requiere=libmpv
+         la necesitan, y esos ya se excluyen ahí (ver ci.yml). -->
+    <ProjectReference Include="..\WinCue.Video\WinCue.Video.csproj" />
+  </ItemGroup>
+
+  <!-- ==========================================================================
+       libmpv-2.dll junto al exe de Secuence — el encargo lo pide explícito,
+       aunque MpvNative.cs (WinCue.Video) YA encuentra la DLL sin esto: su
+       resolver sube desde AppContext.BaseDirectory buscando "libmpv-lgpl\
+       libmpv-2.dll" (ver la cabecera de ese archivo), y el bin\ de Secuence
+       cuelga de WinCueSharp\ dentro del mismo número de niveles que WinCue.App.
+       Eso basta para DESARROLLO, pero un paquete distribuido no tiene ese
+       árbol de repo alrededor — necesita la DLL AL LADO del exe, igual que
+       publish.ps1 hace para WinCue. Content con Condition="Exists(...)" para
+       no romper el CI: la DLL no está versionada (98 MB, LGPL, ver el
+       encargo) y no existe en el runner.
+       OJO — NO MOVER NI BORRAR EL ORIGEN (WinCueSharp\libmpv-lgpl\libmpv-2.dll):
+       si desaparece de ahí hay que redescargarla con
+       tools\libmpv-lgpl\obtener-libmpv-lgpl.ps1. Esto solo la COPIA.
+       ========================================================================== -->
+  <ItemGroup>
+    <Content Include="..\..\libmpv-lgpl\libmpv-2.dll"
+             Condition="Exists('..\..\libmpv-lgpl\libmpv-2.dll')"
+             Link="libmpv-2.dll">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
   </ItemGroup>
 
   <!-- El glifo de icono (E000-F8FF) se pinta con la fuente Phosphor cargada

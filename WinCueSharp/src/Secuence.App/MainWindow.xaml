@@ -101,6 +101,18 @@
                             <TextBlock Text="PANIC" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <!-- Blackout: oculta/muestra el HWND hijo de la salida de
+                         vídeo. Corte instantáneo (no un fundido) — ver el
+                         porqué en HwndHijo.Ocultar. -->
+                    <Button x:Name="BlackoutButton" Click="OnBlackoutClick" Height="44"
+                            Background="{x:Bind local:Theme.ControlBgBrush}"
+                            ToolTipService.ToolTip="Blackout de vídeo">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="BlackoutIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="BLACKOUT" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
 
                 <!-- Centro: reloj del show. El countdown POR CUE vive en el
@@ -161,10 +173,24 @@
         </Border>
 
         <!-- Barra de estado: qué show se cargó (o el motivo de que no), y los
-             FlashStatus del controlador (incluidos los fallos limpios de vídeo). -->
+             FlashStatus del controlador (incluidos los fallos limpios de vídeo).
+             A la derecha, el testigo de SALIDA (IShowView.SetOutputContent):
+             nombre del vídeo en pantalla o NEGRO — mismo reparto que
+             TallyLabel en WinCue.App (vive en la ventana de CONTROL, no en la
+             de salida: el operador no puede estar mirando el proyector). -->
         <Border Grid.Row="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
-            <TextBlock x:Name="EstadoTexto" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
-                       FontSize="13" TextWrapping="Wrap"/>
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock x:Name="EstadoTexto" Grid.Column="0"
+                           Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                           FontSize="13" TextWrapping="Wrap"/>
+                <TextBlock x:Name="TallyLabel" Grid.Column="1" Text="SALIDA: NEGRO"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}"
+                           FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
+            </Grid>
         </Border>
 
         <!-- Cabecera de columnas -->

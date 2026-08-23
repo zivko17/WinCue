@@ -1,14 +1,14 @@
 // =============================================================================
 // App.xaml.cs — arranque de Secuence.App.
 // =============================================================================
-// Esta tarea AÑADE el motor de audio real y MainController (el mismo
-// WinCue.Controller que usa WinCue, ni una línea copiada): construye
-// AudioEngine (WinCue.Audio, NAudio puro, sin DLL nativa) y un
-// NullVideoEngine (ver ese archivo — el vídeo es el paso siguiente del
-// roadmap, no este), arma el MainController con el CueModel y la ventana, y
+// Arranca el motor de audio real, el motor de vídeo real (WinCue.Video, con
+// mpv — sustituye aquí al NullVideoEngine provisional de la tarea anterior,
+// ya borrado) y MainController (el mismo WinCue.Controller que usa WinCue, ni
+// una línea copiada), arma el MainController con el CueModel y la ventana, y
 // conecta el tick de 100 ms que hace correr la secuencia. Al pulsar GO, el
-// controlador manda de verdad sobre el AudioEngine: los cues 4.1/4.2 del show
-// de pruebas (tonos de 440/880 Hz) SUENAN.
+// controlador manda de verdad sobre el AudioEngine y el VideoEngine: los
+// cues de audio SUENAN y un cue de vídeo se ve en la ventana de salida
+// (VideoOutputWindow.xaml.cs), a pantalla completa en el monitor de Settings.
 //
 // El show se carga con controller.LoadShow(ruta) — NUNCA con
 // CueModel.FromJson + ReplaceAll a mano (así arrancaba la primera versión de
@@ -48,6 +48,7 @@ using Microsoft.UI.Xaml;
 using WinCue.Audio;
 using WinCue.Controller;
 using WinCue.Core;
+using WinCue.Video;
 
 namespace Secuence.App;
 
@@ -60,6 +61,7 @@ public partial class App : Application
 #pragma warning restore CA1001
     private Window? _window;
     private AudioEngine? _audio;
+    private VideoEngine? _video;
     private MainController? _controller;
     private DispatcherQueueTimer? _tick;
 
@@ -111,10 +113,17 @@ public partial class App : Application
         _audio = audio;
         ApplyAudioDevice(settings);
 
-        // NullVideoEngine, NO WinCue.Video: el vídeo es el paso siguiente del
-        // roadmap de Secuence (ver NullVideoEngine.cs) — MainController exige
-        // un IVideoEngine no nulo, pero esta tarea no reproduce vídeo.
-        var video = new NullVideoEngine();
+        // VideoEngine real (WinCue.Video, con mpv): esta tarea rellena el
+        // hueco que el NullVideoEngine provisional de la tarea anterior
+        // dejaba a propósito (ya borrado — nada lo referenciaba). El provider
+        // de HWND arranca en 0, como en WinCue.App.App.xaml.cs: es
+        // MainController quien lo fija de verdad más abajo, en su propio
+        // constructor, llamando a window.GetVideoOutputHandle()
+        // (SetWindowHandleProvider, ver MainController.cs) — la ventana de
+        // salida no existe todavía y no tiene por qué existir hasta el primer
+        // cue de vídeo real.
+        var video = new VideoEngine(() => 0, dispatch);
+        _video = video;   // CA2000: el Dispose real llega en window.Closed, más abajo
 
         var scheduler = new TimerScheduler(dispatch);
         var controller = new MainController(model, window, audio, video, scheduler, settings);
@@ -140,6 +149,8 @@ public partial class App : Application
             tick.Stop();
             controller.Shutdown();
             audio.Dispose();
+            video.Dispose();
+            window.CloseVideoOutput();
         };
 
         _window.Activate();

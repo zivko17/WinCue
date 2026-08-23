@@ -26,8 +26,13 @@ public sealed partial class MainWindow : Window, IShowView
 {
     private readonly CueModel _model;
     private readonly ObservableCollection<CueRow> _rows = new();
+    private readonly SettingsManager _settings = SettingsManager.Instance;
     private MainController? _controller;
     private int _playheadIndex;
+
+    // ── Salida de vídeo (ver el bloque IShowView de más abajo) ──────────
+    private VideoOutputWindow? _videoOutput;
+    private bool _blackout;
 
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
@@ -53,6 +58,7 @@ public sealed partial class MainWindow : Window, IShowView
         StopAllIcon.Text = Icons.Stop;
         FadeAllIcon.Text = Icons.Fade;
         PanicIcon.Text = Icons.Warning;
+        BlackoutIcon.Text = Icons.BlackFrame;
 
         CueList.ItemsSource = _rows;
         ActiveCuesList.ItemsSource = Array.Empty<ActiveCueRow>();
@@ -82,6 +88,21 @@ public sealed partial class MainWindow : Window, IShowView
     private void OnStopAllClick(object sender, RoutedEventArgs e) => _controller?.OnStopPressed();
     private void OnFadeAllClick(object sender, RoutedEventArgs e) => _controller?.OnFadeAll();
     private void OnPanicClick(object sender, RoutedEventArgs e) => _controller?.OnPanic();
+    private void OnBlackoutClick(object sender, RoutedEventArgs e) => ToggleBlackout();
+
+    /// <summary>Blackout de operador: oculta/muestra el HWND hijo de la
+    /// salida (si existe todavía — un show sin vídeo abierto no tiene nada
+    /// que ocultar). Corte instantáneo, no un fundido — ver el porqué
+    /// (airspace, modo clásico sin compositor) en HwndHijo.Ocultar.</summary>
+    private void ToggleBlackout()
+    {
+        _blackout = !_blackout;
+        _videoOutput?.SetBlackout(_blackout);
+        BlackoutButton.Background = _blackout ? Theme.WarnBrush : Theme.ControlBgBrush;
+        FlashStatus(_blackout
+            ? $"{Icons.BlackFrame} Blackout activado."
+            : "Blackout levantado.");
+    }
 
     private void OnGoAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
@@ -244,25 +265,49 @@ public sealed partial class MainWindow : Window, IShowView
     public void UpdateCueVuMeter(int cueId, float left, float right) { }
 
     // ==================================================================
-    // IShowView — Salida de vídeo: STUBS PROVISIONALES
+    // IShowView — Salida de vídeo
     // ==================================================================
-    // El vídeo es el paso siguiente del roadmap de Secuence (ver el encargo),
-    // no esta tarea. NullVideoEngine.cs ya hace que un cue de VIDEO falle
-    // limpio (ErrorOccurred → MainController → _view.FlashStatus, ver
-    // OnVideoError en MainController.cs); estos tres miembros de IShowView
-    // son el lado "no hay ventana de vídeo que enseñar" del mismo hueco.
+    // WinCue.Video.VideoEngine (real, con mpv) sustituye a NullVideoEngine
+    // desde esta tarea (ver App.xaml.cs): un cue de vídeo ya tiene un HWND de
+    // verdad donde pintar. La ventana de salida (VideoOutputWindow.xaml.cs)
+    // nace la PRIMERA vez que se pide su HWND —igual que WinCue.App— y se
+    // coloca en el monitor de Settings (video_output_screen) a pantalla
+    // completa esa primera vez, no en cada Play (ver PlaceOnScreen).
 
-    /// <summary>Provisional: no existe ventana de salida en Secuence todavía,
-    /// así que no hay HWND que devolver. 0 = "no hay salida" para quien llame
-    /// (WinCue.Video no se referencia aquí — ver NullVideoEngine.cs).</summary>
-    public nint GetVideoOutputHandle() => 0;
+    /// <summary>HWND de la ventana hija donde mpv pinta. La crea y la coloca
+    /// en su monitor la PRIMERA vez que se pide (los Play siguientes solo
+    /// reciben el mismo handle, ya visible).</summary>
+    public nint GetVideoOutputHandle()
+    {
+        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
+        _videoOutput ??= new VideoOutputWindow();
+        nint handle = _videoOutput.EnsureVisibleHandle();
+        if (firstOpen)
+        {
+            _videoOutput.PlaceOnScreen(_settings.Get("video_output_screen", 0));
+            _videoOutput.SetBlackout(_blackout);   // una salida que nace durante un blackout, nace en negro
+        }
+        return handle;
+    }
 
-    /// <summary>Provisional: mismo valor por defecto que usa FakeView en los
-    /// tests del controlador (1920×1080) mientras no exista una ventana de
-    /// salida real de la que leer el tamaño.</summary>
-    public (double Width, double Height) SurfaceDimensions() => (1920.0, 1080.0);
+    /// <summary>Dimensiones reales de la salida ya abierta; 1920×1080 (mismo
+    /// valor por defecto que FakeView en los tests del controlador) mientras
+    /// no exista ventana — la geometría CUSTOM de un cue no depende de esto
+    /// hasta que Secuence tenga esa UI.</summary>
+    public (double Width, double Height) SurfaceDimensions() =>
+        _videoOutput is { IsVisible: true } w ? w.ClientSize : (1920.0, 1080.0);
 
-    /// <summary>Provisional: no hay testigo de vídeo en pantalla que
-    /// actualizar todavía.</summary>
-    public void SetOutputContent(string? videoName) { }
+    /// <summary>Testigo: nombre del vídeo en pantalla, o null = NEGRO. Vive
+    /// en la barra de estado de ESTA ventana (el operador), no en la salida
+    /// — mismo reparto que TallyLabel en WinCue.App.</summary>
+    public void SetOutputContent(string? videoName) =>
+        TallyLabel.Text = videoName is null
+            ? $"{Icons.BlackFrame} SALIDA: NEGRO"
+            : $"{Icons.Video} SALIDA: {videoName}";
+
+    /// <summary>Cierre real de la ventana de salida (llamado por
+    /// App.xaml.cs.OnLaunched, window.Closed — mismo momento que
+    /// audio.Dispose()). Antes de esto, VideoOutputWindow.Closing la oculta
+    /// en vez de destruirla: mpv puede seguir apuntando a su HWND hijo.</summary>
+    public void CloseVideoOutput() => _videoOutput?.CloseForShutdown();
 }

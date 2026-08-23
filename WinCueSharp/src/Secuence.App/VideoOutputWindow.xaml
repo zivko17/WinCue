@@ -1,0 +1,17 @@
+<Window
+    x:Class="Secuence.App.VideoOutputWindow"
+    xmlns="http://schemas.microsoft.com/winfx/2006/xaml/presentation"
+    xmlns:x="http://schemas.microsoft.com/winfx/2006/xaml">
+
+    <!-- ==========================================================================
+         VideoOutputWindow.xaml — ventana de salida de vídeo (destino de mpv).
+         ==========================================================================
+         Solo un Grid negro: la ventana hija Win32 que hospeda a mpv (HwndHijo.cs)
+         vive FUERA del árbol XAML (es un HWND crudo, no un control) y se pinta
+         siempre por encima de este Grid por el airspace de Win32 — ver el aviso
+         en HwndHijo.cs. Este fondo negro es lo único que se ve ANTES de que mpv
+         tenga wid, y lo que reaparece cuando el blackout oculta el HWND hijo.
+         ========================================================================== -->
+
+    <Grid x:Name="FondoNegro" Background="Black"/>
+</Window>
