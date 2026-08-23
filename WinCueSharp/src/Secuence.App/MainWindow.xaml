@@ -28,7 +28,230 @@
          los botones (ninguno se declara aquí en el propio GoButton).
          ========================================================================== -->
 
+    <!-- ==========================================================================
+         RootGrid.Resources — el RELIEVE de los controles (Button).
+         ==========================================================================
+         Mismo lenguaje que WinCue.App/MainWindow.xaml, Style TargetType="Button"
+         (y App.xaml, Style TargetType="TabItem" para las pestañas): «relieve =
+         lo tocas · hundido = lo contiene · plano = lo lees» (ver el encargo).
+
+         Van en Grid.Resources (del Grid raíz) y NO en Window.Resources porque
+         Microsoft.UI.Xaml.Window, a diferencia de System.Windows.Window en
+         WPF, NO tiene una propiedad Resources — Window no es un
+         FrameworkElement en WinUI 3. Un <Window.Resources> aquí no da un
+         error de XAML claro: el compilador de este SDK (el .exe net472 viejo
+         que usa `dotnet build`) revienta con MSB3073 sin mensaje útil. Así se
+         descubrió — costó bisecar el fichero entero para aislarlo.
+
+         Los CUATRO velos de abajo (BevelFace/BevelFacePressed/BevelEdge/
+         BevelHover) son los MISMOS bytes que WinCue.Presentation.BevelPalette
+         (y por tanto que WinCue.App.Theme): Face = Stops(0x2A, 0x30),
+         FacePressed = Stops(0x30, 0x2A, inverted: true), Edge = Stops(0x40,
+         0x58), Hover = alfa 0x14 blanco uniforme — ver BevelVeil.cs para el
+         porqué de cada uno.
+
+         OJO — están declarados como recursos LITERALES a propósito, no
+         inyectados desde C# como hace WPF (Theme.Install → DynamicResource):
+         el compilador de XAML de WinUI 3 resuelve {StaticResource} EN TIEMPO
+         DE COMPILACIÓN, así que un recurso que solo existiera porque
+         App.OnLaunched lo mete en Application.Resources en tiempo de
+         EJECUCIÓN es invisible para él. Por eso los números están copiados
+         aquí a mano, y por eso MainWindow.xaml.cs.VerifyBevelResources() los
+         compara byte a byte contra Theme.BevelFaceBrush/… (el cálculo real,
+         en C#) al arrancar: si BevelPalette cambia un día y esta copia no se
+         actualiza, el arranque revienta con un mensaje claro en vez de
+         quedarse callado — mismo espíritu que el guardián de A==0 en
+         WinCue.App.Theme.Install. -->
+
     <Grid x:Name="RootGrid" Background="{x:Bind local:Theme.WindowBgBrush}">
+        <Grid.Resources>
+            <LinearGradientBrush x:Key="BevelFace" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0.0" Color="#2AFFFFFF"/>
+                <GradientStop Offset="0.45" Color="#00FFFFFF"/>
+                <GradientStop Offset="0.55" Color="#00000000"/>
+                <GradientStop Offset="1.0" Color="#30000000"/>
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="BevelFacePressed" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0.0" Color="#2A000000"/>
+                <GradientStop Offset="0.45" Color="#00000000"/>
+                <GradientStop Offset="0.55" Color="#00FFFFFF"/>
+                <GradientStop Offset="1.0" Color="#30FFFFFF"/>
+            </LinearGradientBrush>
+            <LinearGradientBrush x:Key="BevelEdge" StartPoint="0,0" EndPoint="0,1">
+                <GradientStop Offset="0.0" Color="#40FFFFFF"/>
+                <GradientStop Offset="0.45" Color="#00FFFFFF"/>
+                <GradientStop Offset="0.55" Color="#00000000"/>
+                <GradientStop Offset="1.0" Color="#58000000"/>
+            </LinearGradientBrush>
+            <SolidColorBrush x:Key="BevelHover" Color="#14FFFFFF"/>
+
+            <!-- Tres tokens de vocabulario que la plantilla de Button necesita
+                 como valor POR DEFECTO (mismo motivo que arriba: StaticResource
+                 se resuelve en compilación, así que no pueden ser
+                 {x:Bind local:Theme.XxxBrush} dentro de un Setter — eso SÍ
+                 funciona en las propiedades normales de un elemento, como el
+                 resto de este fichero usa, pero no dentro de Style/Setter). Los
+                 números son WinCue.Presentation.Palette.ButtonBg/Standby/
+                 TextPrimary tal cual — el resto de la interfaz ya los usa por
+                 Theme.ButtonBgBrush/StandbyBrush/TextPrimaryBrush; aquí es la
+                 MISMA cifra, no una aproximación. -->
+            <SolidColorBrush x:Key="ButtonBg" Color="#3C3C3C"/>
+            <SolidColorBrush x:Key="Standby" Color="#E8C000"/>
+            <SolidColorBrush x:Key="TextPrimary" Color="#DDDDDD"/>
+            <!-- Estilo IMPLÍCITO (sin x:Key): se aplica a TODOS los Button de esta
+                 ventana — transporte (GO/PAUSE/STOP ALL/FADE ALL/PANIC/BLACKOUT/
+                 SALIDA VÍDEO), herramientas (ABRIR/GUARDAR/AÑADIR/IMPORTAR/
+                 ELIMINAR) y el botón de reproducir del previo. Un Background/
+                 BorderBrush puesto directamente en el elemento (GoButton,
+                 PanicButton…) sigue ganando al Setter de aquí — igual que en WPF —
+                 así que los botones de color mandan sobre el gris por defecto. -->
+            <Style TargetType="Button">
+                <Setter Property="Background" Value="{StaticResource ButtonBg}"/>
+                <Setter Property="Foreground" Value="{StaticResource TextPrimary}"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BevelEdge}"/>
+                <Setter Property="Padding" Value="10,4"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1" CornerRadius="4">
+                                <Grid>
+                                    <Border x:Name="face" CornerRadius="3"
+                                            Background="{StaticResource BevelFace}"/>
+                                    <Border x:Name="veil" CornerRadius="3"
+                                            Background="Transparent"/>
+                                    <ContentPresenter x:Name="cp"
+                                                      Content="{TemplateBinding Content}"
+                                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                      HorizontalAlignment="Center"
+                                                      VerticalAlignment="Center"
+                                                      Margin="{TemplateBinding Padding}">
+                                        <ContentPresenter.RenderTransform>
+                                            <TranslateTransform x:Name="cpShift" Y="0"/>
+                                        </ContentPresenter.RenderTransform>
+                                    </ContentPresenter>
+                                </Grid>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <!-- Grosor CONSTANTE (solo cambia el color),
+                                             igual que en WPF: el hover no debe
+                                             empujar el layout. -->
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="veil.Background" Value="{StaticResource BevelHover}"/>
+                                                <Setter Target="bd.BorderBrush" Value="{StaticResource Standby}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <!-- Hundido: degradado invertido y el
+                                             contenido baja 1 px — el desplazamiento,
+                                             más que el degradado, es lo que hace que
+                                             se sienta pulsado (mismo comentario que
+                                             WinCue.App/MainWindow.xaml). -->
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="face.Background" Value="{StaticResource BevelFacePressed}"/>
+                                                <Setter Target="bd.BorderBrush" Value="{StaticResource Standby}"/>
+                                                <Setter Target="cpShift.Y" Value="1"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Disabled">
+                                            <VisualState.Setters>
+                                                <Setter Target="bd.Opacity" Value="0.5"/>
+                                                <Setter Target="face.Opacity" Value="0.3"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Pestañas Timeline/Inspector/Mixer: MISMO trío que WinCue.App.App.xaml,
+                 Style TargetType="TabItem" — la INACTIVA sobresale (relieve de
+                 tecla) y la ACTIVA se queda plana y del color del panel: deja de
+                 ser un botón y pasa a ser el borde de la superficie que estás
+                 mirando. Aquí, sin TabItem.IsSelected, es SelectTab()
+                 (MainWindow.xaml.cs) quien intercambia el Style entero entre
+                 TabButtonRelief y TabButtonFlat — no hay «trigger» de por medio,
+                 pero el resultado pintado es el mismo. -->
+            <Style x:Key="TabButtonRelief" TargetType="Button">
+                <Setter Property="Padding" Value="14,5"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BevelEdge}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1,1,1,0" CornerRadius="4,4,0,0">
+                                <Grid>
+                                    <Border x:Name="face" CornerRadius="3,3,0,0"
+                                            Background="{StaticResource BevelFace}"/>
+                                    <Border x:Name="veil" CornerRadius="3,3,0,0"
+                                            Background="Transparent"/>
+                                    <ContentPresenter Content="{TemplateBinding Content}"
+                                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                      Margin="{TemplateBinding Padding}"/>
+                                </Grid>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="veil.Background" Value="{StaticResource BevelHover}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed">
+                                            <VisualState.Setters>
+                                                <Setter Target="face.Background" Value="{StaticResource BevelFacePressed}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+
+            <!-- Pestaña ACTIVA: SIN velo de cara (deja de ser un botón), pero
+                 conserva el canto y el hover — «plano = lo lees», no invisible. -->
+            <Style x:Key="TabButtonFlat" TargetType="Button">
+                <Setter Property="Padding" Value="14,5"/>
+                <Setter Property="BorderBrush" Value="{StaticResource BevelEdge}"/>
+                <Setter Property="Template">
+                    <Setter.Value>
+                        <ControlTemplate TargetType="Button">
+                            <Border x:Name="bd" Background="{TemplateBinding Background}"
+                                    BorderBrush="{TemplateBinding BorderBrush}"
+                                    BorderThickness="1,1,1,0" CornerRadius="4,4,0,0">
+                                <Grid>
+                                    <Border x:Name="veil" CornerRadius="3,3,0,0"
+                                            Background="Transparent"/>
+                                    <ContentPresenter Content="{TemplateBinding Content}"
+                                                      ContentTemplate="{TemplateBinding ContentTemplate}"
+                                                      Margin="{TemplateBinding Padding}"/>
+                                </Grid>
+                                <VisualStateManager.VisualStateGroups>
+                                    <VisualStateGroup x:Name="CommonStates">
+                                        <VisualState x:Name="Normal"/>
+                                        <VisualState x:Name="PointerOver">
+                                            <VisualState.Setters>
+                                                <Setter Target="veil.Background" Value="{StaticResource BevelHover}"/>
+                                            </VisualState.Setters>
+                                        </VisualState>
+                                        <VisualState x:Name="Pressed"/>
+                                    </VisualStateGroup>
+                                </VisualStateManager.VisualStateGroups>
+                            </Border>
+                        </ControlTemplate>
+                    </Setter.Value>
+                </Setter>
+            </Style>
+        </Grid.Resources>
         <Grid.KeyboardAccelerators>
             <KeyboardAccelerator Key="Space" Invoked="OnGoAccelerator"/>
             <KeyboardAccelerator Key="Escape" Invoked="OnStopAllAccelerator"/>
@@ -477,24 +700,28 @@
                  OnMixerTabClick, MainWindow.xaml.cs) — misma pestaña
                  SELECCIONADA = plana y del color del panel (WindowBg) + texto
                  ámbar (Warn); NO seleccionada = DeeperBg + texto atenuado
-                 (TextDim), mismos tokens que WinCue usa para lo mismo. -->
+                 (TextDim) Y CON RELIEVE (Style="TabButtonRelief"), mismos
+                 tokens y mismo relieve que WinCue usa para lo mismo (App.xaml,
+                 Style TargetType="TabItem"). El Style inicial de aquí es solo
+                 el de arranque — SelectTab() (MainWindow.xaml.cs) lo
+                 intercambia por TabButtonFlat en la pestaña que gane. -->
             <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="2" Margin="0,6,0,0">
                 <Button x:Name="TimelineTabButton" Click="OnTimelineTabClick"
-                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                        Style="{StaticResource TabButtonRelief}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="TimelineTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
                         <TextBlock x:Name="TimelineTabLabel" Text="Timeline"/>
                     </StackPanel>
                 </Button>
                 <Button x:Name="InspectorTabButton" Click="OnInspectorTabClick"
-                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                        Style="{StaticResource TabButtonRelief}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="InspectorTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
                         <TextBlock x:Name="InspectorTabLabel" Text="Inspector"/>
                     </StackPanel>
                 </Button>
                 <Button x:Name="MixerTabButton" Click="OnMixerTabClick"
-                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                        Style="{StaticResource TabButtonRelief}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="MixerTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
                         <TextBlock x:Name="MixerTabLabel" Text="Mixer"/>

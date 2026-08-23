@@ -14,6 +14,7 @@
 
 using Microsoft.UI;
 using Microsoft.UI.Xaml.Media;
+using Windows.Foundation;
 using Windows.UI;
 using WinCue.Core;
 using WinCue.Presentation;
@@ -78,6 +79,39 @@ public static class Theme
 
     // ── Fila del playhead (tabla de cues) ──────────────────────────────
     public static readonly Color PlayheadRow = Hex(Palette.PlayheadRow);
+
+    // ── Relieve de los botones (velo de relieve) ───────────────────────
+    // Mismo lenguaje que WinCue.App.Theme (ver su sección "RELIEVE DE LOS
+    // BOTONES"): un LinearGradientBrush translúcido va ENCIMA del Background
+    // del botón — «relieve = lo tocas · hundido = lo contiene · plano = lo
+    // lees» (ver el encargo). Las PARADAS salen de
+    // WinCue.Presentation.BevelPalette (el mismo cálculo que usa WinCue.App);
+    // aquí solo se convierten a Microsoft.UI.Xaml.Media.
+    //
+    // MainWindow.xaml NO los referencia con {StaticResource}: el compilador
+    // de XAML de WinUI 3 resuelve StaticResource EN TIEMPO DE COMPILACIÓN, así
+    // que no puede ver un recurso que solo existiría porque C# lo mete en el
+    // diccionario en caliente (eso SÍ vale en WPF con DynamicResource, no
+    // aquí — ver Window.Resources en MainWindow.xaml para el porqué exacto).
+    // Por eso MainWindow.xaml declara los mismos cuatro velos como recursos
+    // LITERALES, y estos brushes de aquí quedan para MainWindow.VerifyBevelResources()
+    // — la red de seguridad que compara los dos juegos byte a byte al
+    // arrancar, para que una deriva entre BevelPalette y el XAML reviente con
+    // un mensaje claro en vez de quedarse callada.
+
+    /// <summary>Cara en reposo: brillo arriba, sombra abajo.
+    /// = WinCue.App.Theme.BevelFace.</summary>
+    public static readonly LinearGradientBrush BevelFaceBrush = VeilBrush(BevelPalette.Face);
+    /// <summary>Cara pulsada: el degradado invertido es lo que hace que la
+    /// tecla parezca hundida. = WinCue.App.Theme.BevelFacePressed.</summary>
+    public static readonly LinearGradientBrush BevelFacePressedBrush = VeilBrush(BevelPalette.FacePressed);
+    /// <summary>Canto: filo claro arriba que se apaga hacia abajo.
+    /// = WinCue.App.Theme.BevelEdge.</summary>
+    public static readonly LinearGradientBrush BevelEdgeBrush = VeilBrush(BevelPalette.Edge);
+    /// <summary>Velo de «ratón encima»: blanco uniforme (NO degradado), aclara
+    /// la cara entera ~8 %. = WinCue.App.Theme.BevelHover.</summary>
+    public static readonly SolidColorBrush BevelHoverBrush =
+        Solid(Color.FromArgb(BevelPalette.HoverAlpha, 0xFF, 0xFF, 0xFF));
 
     // ── Tipos de cue ────────────────────────────────────────────────────
     public static readonly Color TypeAudio = Hex(Palette.TypeAudio);
@@ -182,4 +216,17 @@ public static class Theme
     }
 
     public static SolidColorBrush Solid(Color c) => new(c);
+
+    /// <summary>Convierte las paradas de WinCue.Presentation.BevelVeil en un
+    /// LinearGradientBrush vertical de WinUI 3 — mismo mecanismo que
+    /// WinCue.App.Theme.VeilBrush (WPF), con los tipos de este framework
+    /// (Windows.Foundation.Point en vez de System.Windows.Point; sin Freeze,
+    /// que en WinUI 3 no existe — los Brush no son Freezable aquí).</summary>
+    private static LinearGradientBrush VeilBrush(IReadOnlyList<VeilStop> stops)
+    {
+        var b = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
+        foreach (var s in stops)
+            b.GradientStops.Add(new GradientStop { Color = Color.FromArgb(s.A, s.R, s.G, s.B), Offset = s.Offset });
+        return b;
+    }
 }

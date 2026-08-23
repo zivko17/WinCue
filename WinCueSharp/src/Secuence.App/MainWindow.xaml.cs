@@ -19,6 +19,7 @@ using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Microsoft.UI.Xaml.Media;
 using Windows.Foundation;
 using Windows.Storage.Pickers;
 using WinCue.Controller;
@@ -109,6 +110,7 @@ public sealed partial class MainWindow : Window, IShowView
     public MainWindow(CueModel model)
     {
         InitializeComponent();
+        VerifyBevelResources();
 
         _model = model;
 
@@ -210,15 +212,74 @@ public sealed partial class MainWindow : Window, IShowView
         TextBlock[] labels = { TimelineTabLabel, InspectorTabLabel, MixerTabLabel };
         UIElement[] hosts = { TimelineHost, InspectorHost, MixerHost };
 
+        // El Style trae el RELIEVE (o su ausencia): mismo intercambio que el
+        // Trigger IsSelected de WinCue.App.App.xaml (Style TargetType="TabItem")
+        // — la activa se queda SIN velo (TabButtonFlat, «plano = lo lees»), la
+        // inactiva lo conserva (TabButtonRelief, «relieve = lo tocas»).
+        // RootGrid.Resources, no Resources: Microsoft.UI.Xaml.Window no tiene
+        // Resources propio (a diferencia de WPF) — ver el comentario de
+        // Grid.Resources en MainWindow.xaml para el porqué se declaró en el
+        // Grid raíz y no en la ventana.
+        var relief = (Style)RootGrid.Resources["TabButtonRelief"];
+        var flat = (Style)RootGrid.Resources["TabButtonFlat"];
+
         for (int i = 0; i < buttons.Length; i++)
         {
             bool selected = i == index;
+            buttons[i].Style = selected ? flat : relief;
             buttons[i].Background = selected ? Theme.WindowBgBrush : Theme.DeeperBgBrush;
             var fg = selected ? Theme.WarnBrush : Theme.TextDimBrush;
             icons[i].Foreground = fg;
             labels[i].Foreground = fg;
             hosts[i].Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
         }
+    }
+
+    /// <summary>Red de seguridad: MainWindow.xaml declara los cuatro velos de
+    /// relieve (BevelFace/BevelFacePressed/BevelEdge/BevelHover) como recursos
+    /// LITERALES en Grid.Resources, porque el compilador de XAML de WinUI 3
+    /// resuelve StaticResource en tiempo de compilación y no puede leerlos de
+    /// WinCue.Presentation.BevelPalette en caliente (ver el comentario de
+    /// Grid.Resources en el XAML). Aquí se comparan, byte a byte, contra
+    /// Theme.BevelFaceBrush/BevelFacePressedBrush/BevelEdgeBrush/
+    /// BevelHoverBrush — el cálculo REAL, en C# — para que un cambio futuro en
+    /// BevelPalette que no se copie a mano al XAML reviente aquí, con un
+    /// mensaje claro, en vez de dejar a los dos productos calladamente
+    /// descoordinados (mismo espíritu que el guardián de A==0 en
+    /// WinCue.App.Theme.Install).</summary>
+    private void VerifyBevelResources()
+    {
+        void CheckGradient(string key, LinearGradientBrush expected)
+        {
+            var actual = (LinearGradientBrush)RootGrid.Resources[key];
+            if (actual.GradientStops.Count != expected.GradientStops.Count)
+                throw new InvalidOperationException(
+                    $"MainWindow.xaml Grid.Resources['{key}'] tiene {actual.GradientStops.Count} " +
+                    $"paradas y Theme.{key}Brush tiene {expected.GradientStops.Count} — copia a mano " +
+                    "descoordinada de WinCue.Presentation.BevelPalette.");
+            for (int i = 0; i < actual.GradientStops.Count; i++)
+            {
+                var a = actual.GradientStops[i];
+                var e = expected.GradientStops[i];
+                if (a.Offset != e.Offset || a.Color != e.Color)
+                    throw new InvalidOperationException(
+                        $"MainWindow.xaml Grid.Resources['{key}'], parada {i}: " +
+                        $"{a.Offset}/{a.Color} en el XAML frente a {e.Offset}/{e.Color} en " +
+                        $"Theme.{key}Brush — copia a mano descoordinada de " +
+                        "WinCue.Presentation.BevelPalette.");
+            }
+        }
+
+        CheckGradient("BevelFace", Theme.BevelFaceBrush);
+        CheckGradient("BevelFacePressed", Theme.BevelFacePressedBrush);
+        CheckGradient("BevelEdge", Theme.BevelEdgeBrush);
+
+        var hover = (SolidColorBrush)RootGrid.Resources["BevelHover"];
+        if (hover.Color != Theme.BevelHoverBrush.Color)
+            throw new InvalidOperationException(
+                $"MainWindow.xaml Grid.Resources['BevelHover'] = {hover.Color} frente a " +
+                $"Theme.BevelHoverBrush = {Theme.BevelHoverBrush.Color} — copia a mano " +
+                "descoordinada de WinCue.Presentation.BevelPalette.");
     }
 
     /// <summary>Selector de archivo para el campo Archivo del inspector — sin
