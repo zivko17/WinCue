@@ -31,7 +31,14 @@ del proceso.)*
 3. **¿mpv pinta dentro de un HWND hijo de WinUI 3?** Sí, con evidencia que
    de verdad lo distingue de la alternativa (control negativo a cuatro
    bandas con `EnumChildWindows`: 0 descendientes en línea base, 1 con
-   nuestro HWND como `wid`, 0 sin `wid`, 0 con `wid` inválido).
+   nuestro HWND como `wid`, 0 sin `wid`, 0 con `wid` inválido) **y ahora
+   también confirmado a ojo por Andrés**: barras de color en movimiento con
+   el OSD propio de mpv encima, y el airspace es el esperado — el vídeo
+   tapa el botón donde se solapa, no el texto de estado, que va por encima
+   en la disposición. El bucle máquina↔ojo se cierra. Cruzar entre dos
+   monitores del mismo DPI no descoloca ni escala mal el vídeo, pero reveló
+   fricción real al arrastrar (ver el epígrafe PENDIENTE); la prueba con
+   DPI distinto de verdad no se pudo hacer en esta máquina y sigue abierta.
 4. **Recomendación: seguir.** Las tres preguntas del hito 0 tienen respuesta
    y ninguna es un tapón de arquitectura — son detalles de empaquetado y de
    entorno de build, no motivos para no construir Secuence sobre WinUI 3. El
@@ -40,15 +47,33 @@ del proceso.)*
    con un experimento que aísla el método de lanzamiento como variable, ver
    Pregunta 1, Paso 4, no solo sospechado—, no al motor de UI ni a la
    integración con mpv, y es investigable sin rehacer nada de lo ya
-   construido.
+   construido. La fricción al cruzar monitores que encontró Andrés (ver
+   PENDIENTE) es un indicio a vigilar en el hito 2, no un tapón de este
+   hito 0 — que no tiene código de selección de monitor ni de pantalla
+   completa, así que hoy no se puede probar lo que el producto hace de
+   verdad.
 
 **Lo que falta y de quién es:**
 
-- **De Andrés — pendiente, verificación en pantalla** (epígrafe PENDIENTE al
-  final de este informe): que la ventana se vea de verdad con texto legible,
-  que el `.exe` publicado abra o no con doble clic real, el airspace del
-  vídeo sobre el `TextBlock`, y el comportamiento al arrastrar entre
-  monitores con DPI distinto. Nada de esto se puede inferir desde código.
+- **De Andrés — verificación en pantalla, hecha, con matices** (epígrafe
+  PENDIENTE al final de este informe, con el detalle completo). Cerrado a
+  ojo: la ventana se ve con texto y botón legibles; el airspace es el
+  esperado; el vídeo decodifica de verdad, con el OSD propio de mpv encima;
+  y cruzar entre dos monitores del mismo DPI (96, 100% en los dos,
+  verificado con `GetDpiForMonitor`) no descoloca el vídeo. Pero apareció
+  fricción real al arrastrar entre esos dos monitores — ventana pegada,
+  negro momentáneo, vídeo cortado y recuperado — sin ningún cambio de DPI
+  que la explique. La prueba con **DPI distinto de verdad** (el motivo
+  original de esa casilla) **no se pudo hacer**: esta máquina no tiene dos
+  monitores a escalados distintos, y sigue sin respuesta. Siguen sin
+  tocar, y no forman parte de esta verificación: si el `.exe` publicado
+  abre con doble clic real, y si escribe/relee su propio `settings.json`
+  una vez arranque. Un hallazgo aparte, de plan y no de pantalla: la
+  casilla original de "arrastrar la ventana" medía algo que WinCue no hace
+  nunca — la ventana de salida se coloca a pantalla completa en el monitor
+  que Settings ya tiene elegido, nadie la arrastra ni en ensayo ni en
+  función — así que se sustituyó por las preguntas que sí tiene que
+  contestar el hito 2 (ver PENDIENTE).
 - **Del hito 2** (no contestado aquí, a propósito — este hito 0 es un lab
   aislado, la medición es indicativa, no definitiva):
   1. Por qué el `.exe` de `pub-carpeta` revienta con `0xC000027B` en
@@ -779,6 +804,50 @@ posibilidad. Queda descartada ahora, con el control negativo de arriba —
 pero **la duda era real y el "Ninguna duda de fondo" que escribí la
 primera vez estaba mal calibrado.**
 
+### Actualización — verificación en pantalla (Andrés)
+
+Cierra la laguna que dejaba abierta el veredicto de arriba: "certeza nula
+sobre las dos cosas que exigen ojo humano". Ya no es cero.
+
+- **Vídeo, confirmado a ojo.** Barras de color en movimiento, con el OSD
+  propio de mpv encima (el recuadro del timestamp en la esquina del
+  vídeo). Que sea el propio mpv el que dibuja ese OSD es lo que distingue
+  "mpv es dueño de esta superficie" de "algo enseña un fotograma suelto" —
+  y coincide exactamente con la instrumentación de más arriba (`create=OK,
+  initialize=0, command=0`, `1280x720`). El bucle máquina↔ojo se cierra.
+- **Airspace, confirmado a ojo.** El vídeo tapa el botón "Probar mpv en
+  HWND hijo" donde se solapan; el texto de estado, que en la disposición
+  va por encima del vídeo, se lee perfectamente. El vídeo no tapa "todo",
+  tapa lo que se le solapa — el comportamiento correcto de una ventana
+  hija Win32, el mismo que documenta `src/WinCue.App/SwapChainHost.cs`
+  para WPF.
+- **Cruce entre monitores del mismo DPI.** Al mover la ventana al monitor
+  de 1024x600, el vídeo mantiene su posición relativa y su tamaño
+  (~640x360) — no se descoloca ni escala mal, que era el miedo original.
+  Pero apareció un hallazgo nuevo, no buscado: la ventana **se resiste al
+  arrastrar** ("como pegada"), **se queda en negro** un instante al cruzar,
+  y **el vídeo se corta y vuelve**. No rebota al monitor de origen y no es
+  simple lentitud — es fricción real. Los dos monitores de esta máquina
+  están confirmados a **96 DPI, escalado 100%** (`GetDpiForMonitor`), así
+  que esta fricción **no** tiene un cambio de DPI que la explique.
+- **DPI distinto: no probado.** El cruce fue entre pantallas de escalado
+  idéntico, el caso fácil. Esta máquina no tiene dos monitores a
+  escalados distintos, así que la pregunta original — qué pasa al cruzar
+  con DPI distinto — **sigue sin respuesta**.
+
+**El defecto de plan que esto destapó.** La casilla original medía algo
+que el producto no hace nunca: nadie arrastra la ventana de salida de
+WinCue, ni en ensayo ni en función — se coloca a pantalla completa en el
+monitor que Settings ya tiene elegido y ahí se queda. Arrastrar una
+ventana entre monitores y que alguien desenchufe un proyector son, para
+Windows, la misma clase de evento (un cambio de topología de pantallas),
+así que la fricción de arriba es un **indicio**, no un veredicto, de que
+la combinación HWND hijo + WinUI 3 podría llevar mal esos eventos — algo
+que vigilar en el hito 2, no un tapón de este hito 0, que no tiene código
+de selección de monitor ni de pantalla completa. Las preguntas correctas
+para esa comprobación reemplazan a la casilla del arrastre en el epígrafe
+PENDIENTE.
+
 ## Notas del Paso 2 (build + arranque) — para que la tarea 2/3 no repita la investigación
 
 - El `.csproj` restaura sin problema (caché local: `microsoft.windowsappsdk`
@@ -921,10 +990,12 @@ como aquí.
       termina en verde de verdad (0 errores). **Confirmado en la tarea 2**
       sin necesidad de ojo humano: `dotnet publish` (Pregunta 1, Paso 2) con
       la misma propiedad termina con 0 errores, 1 advertencia.
-- [ ] Ejecutar `dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`
+- [x] Ejecutar `dotnet run --project tools/winui3-lab/WinUi3Lab.csproj -c Release "-p:AppxMSBuildToolsPath=C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\"`
       y confirmar **a ojo** que aparece una ventana real, con el texto
       "WinUi3Lab" y el botón "Probar mpv en HWND hijo" visibles y legibles
-      (tamaño, fuente, que no esté en blanco ni recortada).
+      (tamaño, fuente, que no esté en blanco ni recortada). **Confirmado
+      (Andrés):** aparece con el texto "WinUi3Lab" y el botón "Probar mpv
+      en HWND hijo", tamaño y fuente normales, nada recortado.
 - [ ] (tarea 2, nueva) Hacer doble clic en
       `tools\winui3-lab\pub-carpeta\WinUi3Lab.exe` (tras regenerarlo con el
       comando del Paso 2 de la Pregunta 1: `dotnet publish
@@ -950,7 +1021,7 @@ como aquí.
       Pregunta 1 con medición real y no solo con la propiedad del proyecto
       (`WindowsPackageType=None`) — ver "Paso 4 — arranque en limpio y
       `settings.json`" para el porqué.
-- [ ] (tarea 3, nueva) **Airspace.** Con la DLL ya copiada en
+- [x] (tarea 3, nueva) **Airspace.** Con la DLL ya copiada en
       `tools\winui3-lab\bin\Release\net8.0-windows10.0.19041.0\win-x64\` (ver
       Pregunta 3 para el porqué de esa ruta y no `bin\x64\Release\...`),
       ejecutar:
@@ -958,12 +1029,39 @@ como aquí.
       y confirmar **a ojo** que el vídeo se ve dentro de la ventana y que
       tapa al `TextBlock` de arriba (el texto de estado) allí donde se
       solapan — es el comportamiento esperado del airspace de una ventana
-      hija Win32, no un fallo.
-- [ ] (tarea 3, nueva) **DPI.** Con la app del punto anterior ya abierta y
-      el vídeo visible, arrastrar la ventana entre dos monitores con DPI
-      distinto (o, si solo hay uno, cambiar el "Cambiar el tamaño de texto,
-      aplicaciones y otros elementos" de ese monitor en Configuración de
-      Windows y reabrir) y confirmar **a ojo**: ¿el HWND hijo se redimensiona
-      junto con la ventana, o se queda con el tamaño/posición del monitor
-      anterior (descolocado)? Esto es evidencia solo visual — no hay forma
-      de instrumentarlo desde código sin más trabajo del que pide este hito.
+      hija Win32, no un fallo. **Confirmado (Andrés):** el vídeo se ve —
+      barras de color en movimiento con el OSD propio de mpv encima, prueba
+      de que mpv es dueño de esa superficie y no que algo enseñe un
+      fotograma suelto — y tapa el botón donde se solapa; el texto de
+      estado, que va por encima en la disposición, se lee perfectamente.
+      Comportamiento correcto; ver la Actualización al final de la
+      Pregunta 3.
+- [x] (tarea 3, cerrada parcialmente) **Cruce entre monitores.**
+      Confirmado (Andrés) que cruzar entre dos monitores **del mismo DPI**
+      (96, escalado 100% en los dos, verificado con `GetDpiForMonitor`) no
+      descoloca ni escala mal el vídeo: mantiene su posición relativa y su
+      tamaño (~640x360). Reveló, sin buscarlo, fricción real al arrastrar
+      — ventana pegada, negro momentáneo al cruzar, vídeo cortado y
+      recuperado — sin ninguna transición de DPI que la explique (ver la
+      Actualización al final de la Pregunta 3). **La prueba con DPI
+      distinto de verdad no se pudo hacer** — esta máquina no tiene dos
+      monitores a escalados distintos — y esa parte queda sin responder.
+- [ ] (hito 2, no de Andrés — requiere código que todavía no existe) La
+      casilla original de este punto pedía arrastrar la ventana de salida
+      entre monitores con DPI distinto, algo que WinCue **no hace nunca**:
+      la ventana de salida se coloca a pantalla completa en el monitor que
+      Settings ya tiene elegido y ahí se queda; nadie la arrastra, ni en
+      ensayo ni en función. Las preguntas correctas, para el hito 2:
+      1. ¿Puede WinUI 3 poner una ventana a **pantalla completa en un
+         monitor elegido por índice**, como hace hoy `PlaceOnScreen` en
+         `src/WinCue.App/VideoOutputWindow.xaml.cs`?
+      2. ¿Se queda ahí **sin perder el always-on-top** ni irse detrás de
+         la ventana de control en mitad de un GO?
+      3. **¿Qué pasa al cambiar la topología de pantallas con la app
+         corriendo** — proyector desenchufado, cambio de resolución,
+         monitor dormido? Arrastrar una ventana entre monitores y
+         desenchufar un proyector son, para Windows, la misma clase de
+         evento; la fricción del punto anterior es un **indicio**, no un
+         veredicto, de que la combinación HWND hijo + WinUI 3 podría llevar
+         mal esos eventos — en una función real eso no ocurre por
+         arrastrar, ocurre porque alguien toca un cable.
