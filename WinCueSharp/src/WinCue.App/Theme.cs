@@ -290,17 +290,22 @@ public static class Theme
     // en lugar de él. Por eso el mismo relieve sirve para el gris de la barra,
     // el verde de GO y el rojo de PANIC sin declarar un degradado por color; si
     // fueran opacos habría que mantener un juego para cada uno.
+    //
+    // Las PARADAS salen de WinCue.Presentation.BevelVeil/BevelPalette (sin WPF,
+    // para que Secuence las comparta) — este fichero solo las convierte en
+    // GradientStop/LinearGradientBrush. Ver BevelVeil.cs para el porqué del
+    // corte en el centro y del caso invertido.
 
     /// <summary>Cara en reposo: brillo arriba, sombra abajo.</summary>
-    public static readonly Brush BevelFace = Veil(0x2A, 0x30);
+    public static readonly Brush BevelFace = VeilBrush(BevelPalette.Face);
     /// <summary>Cara pulsada: el degradado invertido es lo que hace que la tecla
     /// parezca hundida (la sombra pasa arriba).</summary>
-    public static readonly Brush BevelFacePressed = Veil(0x30, 0x2A, inverted: true);
+    public static readonly Brush BevelFacePressed = VeilBrush(BevelPalette.FacePressed);
     /// <summary>Velo de «ratón encima»: aclara la cara entera ~8 %.</summary>
-    public static readonly Brush BevelHover = Solid(Color.FromArgb(0x14, 0xFF, 0xFF, 0xFF));
+    public static readonly Brush BevelHover = Solid(Color.FromArgb(BevelPalette.HoverAlpha, 0xFF, 0xFF, 0xFF));
     /// <summary>Canto: filo claro arriba que se apaga hacia abajo. Es lo que da
     /// el grosor; sin él el degradado de la cara se queda en un manchón.</summary>
-    public static readonly Brush BevelEdge = Veil(0x40, 0x58);
+    public static readonly Brush BevelEdge = VeilBrush(BevelPalette.Edge);
 
     // ═════════════════════════ PINCELES ═════════════════════════
     // Congelados (Freeze) → compartibles entre hilos y sin coste de render.
@@ -366,25 +371,16 @@ public static class Theme
     public static SolidColorBrush Solid(Color c, byte a) => Solid(Alpha(c, a));
 
     /// <summary>Velo vertical blanco→negro para el relieve de los botones:
-    /// <paramref name="light"/> es la opacidad del brillo y <paramref name="dark"/>
-    /// la de la sombra. Se corta en el centro con dos paradas a opacidad 0 para
-    /// que el brillo NO se degrade hasta la sombra pasando por un gris muerto:
-    /// así hay filo arriba, cara neutra en medio y sombra abajo, que es como se
-    /// comporta una tecla real. Con <paramref name="inverted"/> la sombra va
-    /// arriba, que es el estado pulsado.</summary>
-    private static LinearGradientBrush Veil(byte light, byte dark, bool inverted = false)
+    /// convierte en LinearGradientBrush de WPF las paradas que calcula
+    /// WinCue.Presentation.BevelVeil (sin framework, para que Secuence use el
+    /// mismo cálculo). El corte en el centro, el porqué del caso invertido y
+    /// el resto del razonamiento viven en BevelVeil.cs — aquí solo se traduce
+    /// VeilStop a GradientStop.</summary>
+    private static LinearGradientBrush VeilBrush(IReadOnlyList<VeilStop> stops)
     {
-        var top = Color.FromArgb(inverted ? dark : light,
-                                 (byte)(inverted ? 0 : 255), (byte)(inverted ? 0 : 255),
-                                 (byte)(inverted ? 0 : 255));
-        var bottom = Color.FromArgb(inverted ? light : dark,
-                                    (byte)(inverted ? 255 : 0), (byte)(inverted ? 255 : 0),
-                                    (byte)(inverted ? 255 : 0));
         var b = new LinearGradientBrush { StartPoint = new Point(0, 0), EndPoint = new Point(0, 1) };
-        b.GradientStops.Add(new GradientStop(top, 0.0));
-        b.GradientStops.Add(new GradientStop(Alpha(top, 0), 0.45));
-        b.GradientStops.Add(new GradientStop(Alpha(bottom, 0), 0.55));
-        b.GradientStops.Add(new GradientStop(bottom, 1.0));
+        foreach (var s in stops)
+            b.GradientStops.Add(new GradientStop(Color.FromArgb(s.A, s.R, s.G, s.B), s.Offset));
         b.Freeze();
         return b;
     }
