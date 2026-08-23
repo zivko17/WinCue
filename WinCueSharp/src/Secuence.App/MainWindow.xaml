@@ -44,6 +44,7 @@
             <RowDefinition Height="Auto"/> <!-- 2: estado -->
             <RowDefinition Height="Auto"/> <!-- 3: cabecera de columnas -->
             <RowDefinition Height="*"/>    <!-- 4: tabla -->
+            <RowDefinition Height="200"/>  <!-- 5: timeline (hitos-0-1, solo lectura) -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════ TRANSPORT ═══════════ -->
@@ -327,5 +328,18 @@
                 </DataTemplate>
             </ListView.ItemTemplate>
         </ListView>
+
+        <!-- ═══════════ TIMELINE (hitos-0-1, DE SOLO LECTURA) ═══════════ -->
+        <!-- TimelineCanvas.cs, en Win2D: regla, pistas, bloques con color y
+             etiqueta, playhead, aviso de solapamiento. Nada de arrastre, zoom
+             ni menú contextual en esta pasada (ver la cabecera del archivo) —
+             el control lo crea MainWindow.xaml.cs (mismo patrón que
+             PgmVuHost: no hay constructor útil sin parámetros para colgarlo
+             desde XAML con estado propio). -->
+        <Border Grid.Row="5" Background="{x:Bind local:Theme.PanelBgBrush}"
+                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
+            <ContentControl x:Name="TimelineHost" HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"/>
+        </Border>
     </Grid>
 </Window>

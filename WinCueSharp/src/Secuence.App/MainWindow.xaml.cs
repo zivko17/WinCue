@@ -57,6 +57,12 @@ public sealed partial class MainWindow : Window, IShowView
     private readonly VuMeterCanvas _pgmVuL = new(vertical: true) { Width = 9 };
     private readonly VuMeterCanvas _pgmVuR = new(vertical: true) { Width = 9 };
 
+    // ── Timeline del show (hitos-0-1, DE SOLO LECTURA) ──────────────────
+    // TimelineCanvas.cs, en Win2D: mismo cálculo compartido que
+    // src/WinCue.App/TimelinePanel.cs (WinCue.Presentation.TimelineLayout) —
+    // ver la cabecera de ese archivo para el alcance exacto de esta pasada.
+    private readonly TimelineCanvas _timeline = new();
+
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
     // timer, porque IShowView.UpdateCountdown no lo alimenta a él (ver más
@@ -122,6 +128,9 @@ public sealed partial class MainWindow : Window, IShowView
 
         PgmVuHost.Children.Add(_pgmVuL);
         PgmVuHost.Children.Add(_pgmVuR);
+
+        TimelineHost.Content = _timeline;
+        _timeline.SetModel(_model);
     }
 
     private void AddAccelerator(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers,
@@ -139,6 +148,7 @@ public sealed partial class MainWindow : Window, IShowView
         _controller = controller;
         RebuildHotkeys();
         UpdateTransport(controller.IsPaused);
+        _timeline.Clock = controller.Clock;
 
         _clockTimer = DispatcherQueue.CreateTimer();
         _clockTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -425,9 +435,14 @@ public sealed partial class MainWindow : Window, IShowView
         ReloadRowsFromModel();
         SetPlayhead(_playheadIndex);
         RebuildHotkeys();
+        _timeline.RefreshFromModel();
     }
 
-    public void AppendCueRow(Cue cue) => _rows.Add(new CueRow(cue, _model));
+    public void AppendCueRow(Cue cue)
+    {
+        _rows.Add(new CueRow(cue, _model));
+        _timeline.RefreshFromModel();
+    }
 
     /// <summary>WPF filtra visibilidad de fila por grupo colapsado
     /// (CueRowViewModel.RefreshAll → Visibility). Secuence todavía no tiene
@@ -469,6 +484,7 @@ public sealed partial class MainWindow : Window, IShowView
         for (int i = 0; i < rows.Count; i++)
             vm[i] = new ActiveCueRow(rows[i]);
         ActiveCuesList.ItemsSource = vm;
+        _timeline.SetActive(rows);
     }
 
     /// <summary>VU de programa, en Win2D (VuMeterCanvas — piloto del traslado
