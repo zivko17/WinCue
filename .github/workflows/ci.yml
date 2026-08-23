@@ -28,7 +28,9 @@ name: CI
 
 on:
   push:
-    branches: [pruebas-v2, main]
+    # secuence/**: la rama de Secuence vive fuera de pruebas-v2 hasta que se
+    # integre; sin esta entrada, sus empujones no ejecutaban el CI.
+    branches: [pruebas-v2, main, 'secuence/**']
     paths:
       - 'WinCueSharp/**'
       - '.github/workflows/ci.yml'
