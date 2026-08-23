@@ -93,6 +93,23 @@ public sealed class InspectorPanel : ContentControl
 
     private Cue? _cue;
     private bool _loading;   // suprime commits al repoblar (igual que en WPF)
+
+    /// <summary>false en modo SHOW: bloquea la edición de campos igual que
+    /// WinCue.App bloquea su toolbar entera (MainWindow.SetEditingEnabled).
+    /// El inspector es la ÚNICA superficie de edición de campos de Secuence
+    /// (no hay grid editable ni menú contextual todavía), así que este es el
+    /// candado equivalente de este producto. IsEnabled ya combinaba "hay cue
+    /// seleccionado"; aquí se le añade la segunda condición sin tocar esa.</summary>
+    private bool _editingAllowed = true;
+    public bool EditingAllowed
+    {
+        get => _editingAllowed;
+        set
+        {
+            _editingAllowed = value;
+            IsEnabled = _cue is not null && _editingAllowed;
+        }
+    }
     private readonly WaveformCanvas _wave = new();
     private string _waveLoadedPath = "";
 
@@ -247,7 +264,7 @@ public sealed class InspectorPanel : ContentControl
     public void SetCue(Cue? cue)
     {
         _cue = cue;
-        IsEnabled = cue is not null;
+        IsEnabled = cue is not null && _editingAllowed;
         if (cue is null)
         {
             _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");

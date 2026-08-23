@@ -197,6 +197,16 @@ public sealed partial class VideoOutputWindow : Window
         }
     }
 
+    /// <summary>Oculta la salida sin destruirla (botón «Salida vídeo» de
+    /// MainWindow, para apagarla entre cues sin perder el HWND hijo que mpv
+    /// ya tiene — igual que Closing, pero pedido a propósito en vez de por
+    /// un cierre de ventana).</summary>
+    public void Hide()
+    {
+        try { _appWindow.Hide(); }
+        catch (Exception ex) { LogAviso($"AppWindow.Hide() (botón Salida vídeo) falló: {ex.Message}"); }
+    }
+
     /// <summary>Blackout: oculta/muestra el HWND hijo. Corte instantáneo, no
     /// un fundido — ver el porqué (airspace) en HwndHijo.Ocultar.</summary>
     public void SetBlackout(bool on)

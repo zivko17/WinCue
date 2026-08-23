@@ -345,10 +345,11 @@
                         </StackPanel>
                     </Button>
                     <!-- SIGUIENTE: mismo sitio que WinCue.App.MainWindow.xaml
-                         (StackPanel Vertical, MaxWidth 240, tras PANIC). SIN
-                         función todavía (WinCue lo calcula con escala de
-                         fuente y visibilidad ligadas a Settings — ver el
-                         informe): placeholder estático, no un dato en vivo. -->
+                         (StackPanel Vertical, MaxWidth 240, tras PANIC).
+                         MainWindow.xaml.cs.UpdateNextCueLabel lo puebla desde
+                         MainController.Playhead — el mismo dato que WinCue,
+                         sin la escala de fuente/visibilidad de Settings (esa
+                         parte queda fuera de esta pasada, ver el informe). -->
                     <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
                         <TextBlock Text="SIGUIENTE" FontSize="9" Foreground="{x:Bind local:Theme.TextDimBrush}"/>
                         <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14" FontWeight="Bold"
@@ -373,20 +374,25 @@
                     </StackPanel>
                 </Border>
 
-                <!-- Derecha: Mode: EDIT + Salida vídeo — mismo sitio y mismo
-                     color que WinCue (Gold / PanicButton), pero SIN
-                     equivalente funcional en Secuence todavía (no hay modo
-                     EDIT/SHOW, y "Salida vídeo" en WinCue abre un menú de
-                     patrones de prueba por pantalla que Secuence no tiene):
-                     deshabilitados a propósito, ver el informe. -->
+                <!-- Derecha: Modo EDIT/SHOW + Salida vídeo — mismo sitio y
+                     mismo color que WinCue (Gold en EDIT, verde GO en SHOW).
+                     ModeToggle: SetEditingEnabled bloquea Abrir/Guardar/
+                     Añadir/Importar/Eliminar y la edición del inspector — el
+                     MISMO conjunto que WinCue.App.ToolbarSetEnabled bloquea
+                     (Open/Save viven en la MISMA barra que Add/Import/Delete
+                     en los dos productos, ver MainWindow.xaml.cs.
+                     SetEditingEnabled). VideoOutButton: a diferencia de
+                     WinCue (menú con patrones de prueba por pantalla),
+                     Secuence solo tiene una salida y la muestra/oculta —
+                     ver OnVideoOutButtonClick. -->
                 <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
-                    <ToggleButton x:Name="ModeToggle" IsEnabled="False" Height="44" Padding="10,4"
+                    <ToggleButton x:Name="ModeToggle" Height="44" Padding="10,4"
+                                  Checked="OnShowMode" Unchecked="OnEditMode"
                                   Background="{x:Bind local:Theme.GoldBrush}" Foreground="Black"
                                   FontWeight="Bold" Content="MODO: EDIT"
-                                  ToolTipService.ToolTip="Sin modo EDIT/SHOW todavía en Secuence"/>
-                    <Button x:Name="VideoOutButton" IsEnabled="False" Height="44"
-                            Background="{x:Bind local:Theme.PanicButtonBrush}"
-                            ToolTipService.ToolTip="Sin menú de salida de vídeo todavía en Secuence">
+                                  ToolTipService.ToolTip="Bloquea añadir/importar/eliminar/editar durante la función"/>
+                    <Button x:Name="VideoOutButton" Click="OnVideoOutButtonClick" Height="44"
+                            Background="{x:Bind local:Theme.PanicButtonBrush}">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock x:Name="VideoOutIcon" FontFamily="{x:Bind local:IconFont.Font}"
                                        FontSize="16" VerticalAlignment="Center"/>
@@ -416,29 +422,35 @@
                     </StackPanel>
                 </Button>
                 <Border Width="14" Background="Transparent"/>
-                <!-- Añadir / Importar / Eliminar: SIN equivalente todavía en
-                     Secuence (no hay menú de creación de cues ni importador
-                     de archivos en esta pasada — ver el informe). Mismo
-                     glifo y mismo texto que WinCue, deshabilitados. -->
-                <Button x:Name="AddButton" IsEnabled="False"
-                        ToolTipService.ToolTip="Sin creación de cues todavía en Secuence">
+                <!-- Añadir / Importar / Eliminar: enchufados a
+                     WinCue.Controller.CueListEditor (vía MainController), el
+                     MISMO motor que usa WinCue.App — ver MainWindow.xaml.cs
+                     (BuildAddMenu/OnImportFilesClick/OnDeleteCueClick). Añadir
+                     abre un MenuFlyout con los mismos nueve tipos de cue que
+                     el ContextMenu de WinCue.App.AddButton (WinUI 3 abre el
+                     Flyout solo con Click, así que aquí no hace falta el
+                     equivalente de OnAddMenuClick). -->
+                <Button x:Name="AddButton"
+                        ToolTipService.ToolTip="Añadir un cue nuevo">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="AddIcon" FontFamily="{x:Bind local:IconFont.Font}"
                                    FontSize="16" VerticalAlignment="Center"/>
                         <TextBlock Text="AÑADIR" VerticalAlignment="Center"/>
+                        <TextBlock x:Name="AddExpandedIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
                 <Border Width="14" Background="Transparent"/>
-                <Button x:Name="ImportButton" IsEnabled="False"
-                        ToolTipService.ToolTip="Sin importador de archivos todavía en Secuence">
+                <Button x:Name="ImportButton" Click="OnImportFilesClick"
+                        ToolTipService.ToolTip="Crea un cue por archivo elegido">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="ImportIcon" FontFamily="{x:Bind local:IconFont.Font}"
                                    FontSize="16" VerticalAlignment="Center"/>
                         <TextBlock Text="IMPORTAR ARCHIVOS…" VerticalAlignment="Center"/>
                     </StackPanel>
                 </Button>
-                <Button x:Name="DeleteButton" IsEnabled="False"
-                        ToolTipService.ToolTip="Sin eliminar cues todavía en Secuence">
+                <Button x:Name="DeleteButton" Click="OnDeleteCueClick"
+                        ToolTipService.ToolTip="Elimina el cue seleccionado">
                     <StackPanel Orientation="Horizontal" Spacing="6">
                         <TextBlock x:Name="DeleteIcon" FontFamily="{x:Bind local:IconFont.Font}"
                                    FontSize="16" VerticalAlignment="Center"/>

@@ -162,17 +162,19 @@ public sealed partial class MainWindow : Window, IShowView
         BlackoutIcon.Text = Icons.BlackFrame;
         OpenIcon.Text = Icons.Open;
         SaveIcon.Text = Icons.Save;
-        // Botones deshabilitados de la reorganización del hueco (ver
-        // secuence-shell-report.md): mismo glifo que WinCue para el mismo
-        // botón, aunque aquí no hagan nada todavía.
+        // Añadir / Importar / Eliminar / Salida vídeo / Modo: mismo glifo que
+        // WinCue para el mismo botón — ver BuildAddMenu para el desplegable
+        // de tipos de cue de AddButton.
         VideoOutIcon.Text = Icons.VideoOutput;
         AddIcon.Text = Icons.Add;
+        AddExpandedIcon.Text = Icons.Expanded;
         ImportIcon.Text = Icons.Import;
         DeleteIcon.Text = Icons.Delete;
         PreviewPlayIcon.Text = Icons.Play;
         TimelineTabIcon.Text = Icons.Timeline;
         InspectorTabIcon.Text = Icons.Inspector;
         MixerTabIcon.Text = Icons.Mixer;
+        BuildAddMenu();
 
         // Ctrl+O / Ctrl+S / Ctrl+Shift+S — en código, no en XAML: así no hace
         // falta adivinar la sintaxis exacta del atributo Modifiers en el
@@ -575,6 +577,181 @@ public sealed partial class MainWindow : Window, IShowView
     }
 
     // ==================================================================
+    // Lista — Añadir / Importar / Eliminar: WinCue.Controller.CueListEditor
+    // (vía MainController), el MISMO motor y la MISMA validación que
+    // WinCue.App — ni una línea de lógica de lista propia aquí. Modo EDIT/
+    // SHOW: bloquea estas tres acciones + Abrir/Guardar + la edición del
+    // inspector (ver SetEditingEnabled). Salida de vídeo: mostrar/ocultar la
+    // ventana que ya coloca VideoOutputWindow.PlaceOnScreen — sin el menú de
+    // patrones de prueba de WinCue (fuera de esta pasada).
+    // ==================================================================
+
+    /// <summary>Desplegable de AddButton: un MenuFlyoutItem por tipo de cue,
+    /// mismos nueve tipos y mismo orden que el ContextMenu de
+    /// WinCue.App.MainWindow.xaml (AddButton). Se construye en código, no en
+    /// XAML — mismo motivo que los aceleradores de teclado del constructor:
+    /// más fácil de leer que adivinar la sintaxis de MenuFlyoutItem en el
+    /// compilador de XAML de WinUI 3. Button.Flyout se abre solo con Click
+    /// en WinUI 3, así que no hace falta el equivalente de
+    /// WinCue.App.OnAddMenuClick (que sí tiene que abrir su ContextMenu a
+    /// mano).</summary>
+    private void BuildAddMenu()
+    {
+        var flyout = new MenuFlyout();
+        void Item(string cueTypeName, string label)
+        {
+            var mi = new MenuFlyoutItem { Text = label, Tag = cueTypeName };
+            mi.Click += OnAddCue;
+            flyout.Items.Add(mi);
+        }
+        Item(nameof(CueType.Audio), Loc.T("Audio", "Audio"));
+        Item(nameof(CueType.Video), Loc.T("Vídeo", "Video"));
+        Item(nameof(CueType.Wait), Loc.T("Espera", "Wait"));
+        Item(nameof(CueType.Fade), Loc.T("Fundido", "Fade"));
+        Item(nameof(CueType.Start), Loc.T("Iniciar", "Start"));
+        Item(nameof(CueType.Stop), Loc.T("Parar", "Stop"));
+        Item(nameof(CueType.Script), "Script");
+        Item(nameof(CueType.Memo), Loc.T("Nota", "Memo"));
+        Item(nameof(CueType.Group), Loc.T("Grupo", "Group"));
+        AddButton.Flyout = flyout;
+    }
+
+    /// <summary>Inserta el tipo de cue elegido bajo la fila seleccionada —
+    /// mismo contrato que WinCue.App.MainWindow.xaml.cs.OnAddCue: pasa por
+    /// OnInsertCue, no AddNewCue (WinCue.App tampoco llama a AddNewCue desde
+    /// su UI, solo desde tests).</summary>
+    private void OnAddCue(object sender, RoutedEventArgs e)
+    {
+        if (sender is MenuFlyoutItem { Tag: string tag } && Enum.TryParse<CueType>(tag, out var type))
+            _controller?.OnInsertCue(type, CueList.SelectedIndex);
+    }
+
+    /// <summary>Importar archivos: selector múltiple + un cue por archivo —
+    /// mismo contrato que WinCue.App.OnImportFiles (CueListEditor.
+    /// AddCuesFromFiles ya valida con MediaImporter y detecta audio/vídeo
+    /// por extensión, nada de eso se repite aquí). Mismo hwnd propio que
+    /// Abrir/Guardar — ver InitializeWithWindow en la cabecera del archivo.</summary>
+    private async void OnImportFilesClick(object sender, RoutedEventArgs e)
+    {
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, _hwndPropio);
+        foreach (string ext in new[]
+        {
+            ".wav", ".flac", ".aiff", ".aif", ".ogg", ".mp3", ".aac", ".m4a", ".opus",
+            ".mp4", ".mov", ".avi", ".mkv", ".webm",
+            ".jpg", ".jpeg", ".png", ".bmp", ".gif", ".webp",
+        })
+            picker.FileTypeFilter.Add(ext);
+        picker.FileTypeFilter.Add("*");   // "Todos" — mismo criterio que WPF
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+
+        var files = await picker.PickMultipleFilesAsync();
+        if (files.Count == 0)
+            return;
+        _controller?.AddCuesFromFiles(CueList.SelectedIndex, files.Select(f => f.Path).ToList());
+    }
+
+    /// <summary>Elimina el cue seleccionado — mismo contrato que
+    /// WinCue.App.OnDeleteCue (CueListEditor.OnDeleteCue ya para el cue si
+    /// estaba sonando antes de borrarlo).</summary>
+    private void OnDeleteCueClick(object sender, RoutedEventArgs e)
+    {
+        int row = CueList.SelectedIndex;
+        if (row >= 0)
+            _controller?.OnDeleteCue(row);
+    }
+
+    private bool _modeReverting;   // evita re-preguntar cuando ModeToggle.IsChecked se reasigna solo
+
+    private void OnShowMode(object sender, RoutedEventArgs e)
+    {
+        ModeToggle.Content = "MODO: SHOW";
+        ModeToggle.Background = Theme.GoButtonBrush;
+        ModeToggle.Foreground = new SolidColorBrush(Colors.White);
+        SetEditingEnabled(false);
+    }
+
+    /// <summary>Con cues sonando, salir de SHOW pide confirmación — mismo
+    /// motivo y mismo texto que WinCue.App.OnEditMode (un misclick en
+    /// directo no debería reabrir la edición en mitad de una función). WinUI
+    /// 3 no tiene MessageBox: mismo ContentDialog que
+    /// ConfirmDiscardChangesAsync usa para Abrir/cerrar con cambios sin
+    /// guardar.</summary>
+    private async void OnEditMode(object sender, RoutedEventArgs e)
+    {
+        if (!_modeReverting && _controller is not null && _controller.RunningCueIds.Count > 0)
+        {
+            var dialog = new ContentDialog
+            {
+                Title = "Modo SHOW",
+                Content = "Hay cues EN REPRODUCCIÓN.\n\n¿Salir del modo SHOW y volver a EDIT?",
+                PrimaryButtonText = "Sí",
+                CloseButtonText = "Cancelar",
+                DefaultButton = ContentDialogButton.Close,
+                XamlRoot = Content.XamlRoot,
+            };
+            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            {
+                _modeReverting = true;
+                ModeToggle.IsChecked = true;   // re-dispara OnShowMode (idempotente)
+                _modeReverting = false;
+                return;
+            }
+        }
+        ModeToggle.Content = "MODO: EDIT";
+        ModeToggle.Background = Theme.GoldBrush;
+        ModeToggle.Foreground = new SolidColorBrush(Colors.Black);
+        SetEditingEnabled(true);
+    }
+
+    /// <summary>Bloquea/desbloquea todo lo que puede tocar la lista por
+    /// accidente durante una función: el MISMO conjunto que WinCue.App.
+    /// SetEditingEnabled/ToolbarSetEnabled bloquea (Abrir, Guardar, Añadir,
+    /// Importar y Eliminar viven en la MISMA barra en los dos productos —
+    /// ver el comentario del XAML) más la edición de campos del inspector,
+    /// que en Secuence es la ÚNICA otra superficie de edición (no hay grid
+    /// editable ni menú contextual todavía). GO/transport/mezclador siguen
+    /// vivos: SHOW bloquea la LISTA, no el audio.</summary>
+    private void SetEditingEnabled(bool enabled)
+    {
+        _controller?.SetEditingLocked(!enabled);
+        OpenButton.IsEnabled = enabled;
+        SaveButton.IsEnabled = enabled;
+        AddButton.IsEnabled = enabled;
+        ImportButton.IsEnabled = enabled;
+        DeleteButton.IsEnabled = enabled;
+        _inspector.EditingAllowed = enabled;
+    }
+
+    /// <summary>Muestra/oculta la salida de vídeo — a diferencia de
+    /// WinCue.App (menú con mostrar/ocultar POR PANTALLA, patrones de
+    /// prueba, blackout e «identificar»), Secuence solo tiene una salida:
+    /// este botón es el equivalente reducido a lo que ya existe —
+    /// GetVideoOutputHandle crea/coloca/muestra por el MISMO camino que un
+    /// cue de vídeo, así que no hay lógica de colocación nueva aquí.</summary>
+    private void OnVideoOutButtonClick(object sender, RoutedEventArgs e)
+    {
+        if (_videoOutput is { IsVisible: true })
+            _videoOutput.Hide();
+        else
+            GetVideoOutputHandle();
+        UpdateVideoOutButton();
+    }
+
+    /// <summary>Verde con la salida visible, rojo sin ella — mismo criterio
+    /// de color que WinCue.App.UpdateVideoOutButton (sin sus estados de
+    /// patrón de prueba/blackout: aquí Blackout es un botón propio,
+    /// BlackoutButton). Se re-llama en cada tick del reloj del show
+    /// (RefreshShowClock) por si la salida cambia de visibilidad por otra
+    /// vía (Alt+F4 en la ventana de salida) — mismo idioma que el asterisco
+    /// del título.</summary>
+    private void UpdateVideoOutButton()
+    {
+        bool active = _videoOutput is { IsVisible: true };
+        VideoOutButton.Background = active ? Theme.GoButtonBrush : Theme.PanicButtonBrush;
+    }
+
+    // ==================================================================
     // Abrir / Guardar show — botones de la barra, Ctrl+O, Ctrl+S,
     // Ctrl+Shift+S. El JSON es sagrado: CueModel.ToJson()/FromJson() de
     // WinCue.Core tal cual (dentro de MainController.SaveShow/LoadShow, vía
@@ -604,22 +781,33 @@ public sealed partial class MainWindow : Window, IShowView
         Title = $"Secuence — {name}{(dirty ? " *" : "")}";
     }
 
+    /// <summary>true en modo SHOW: los aceleradores de teclado NO pasan por
+    /// Button.IsEnabled (van directos a RootGrid.KeyboardAccelerators), así
+    /// que Ctrl+O/Ctrl+S/Ctrl+Shift+S necesitan su propio candado — si no,
+    /// un despiste en directo abriría o pisaría el show sonando pese a que
+    /// OpenButton/SaveButton estén en gris. Mismo candado que OpenButton/
+    /// SaveButton (MainController.EditingLocked), no uno nuevo.</summary>
+    private bool EditingLocked => _controller?.EditingLocked == true;
+
     private void OnOpenAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        _ = OnOpenShowAsync();
+        if (!EditingLocked)
+            _ = OnOpenShowAsync();
     }
 
     private void OnSaveAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        _ = OnSaveShowAsync();
+        if (!EditingLocked)
+            _ = OnSaveShowAsync();
     }
 
     private void OnSaveAsAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
     {
         args.Handled = true;
-        _ = OnSaveShowAsAsync();
+        if (!EditingLocked)
+            _ = OnSaveShowAsAsync();
     }
 
     private void OnOpenClick(object sender, RoutedEventArgs e) => _ = OnOpenShowAsync();
@@ -732,8 +920,10 @@ public sealed partial class MainWindow : Window, IShowView
         // El asterisco del título se refresca aquí también (no solo tras
         // Abrir/Guardar): si algún día una edición en vivo marca el show
         // como modificado por una vía que no pasa por esta ventana, el
-        // título lo refleja igual, sin plumbing nuevo.
+        // título lo refleja igual, sin plumbing nuevo. Mismo idioma para el
+        // color del botón de salida de vídeo (ver UpdateVideoOutButton).
         UpdateTitle();
+        UpdateVideoOutButton();
 
         // Refrescar el color de GO con lo que hay sonando AHORA MISMO: un cue
         // puede terminar solo (sin que el operador toque nada) y el botón
@@ -794,6 +984,21 @@ public sealed partial class MainWindow : Window, IShowView
         if (index >= 0 && index < _rows.Count)
             CueList.ScrollIntoView(_rows[index]);
         UpdatePreviewMonitor();
+        UpdateNextCueLabel();
+    }
+
+    /// <summary>SIGUIENTE: el cue en el playhead — mismo dato que WinCue.App.
+    /// UpdateNextCueLabel, leído de MainController.Playhead (la MISMA fuente
+    /// que el índice que este método acaba de recibir) para no inventar un
+    /// segundo sitio donde se decide "el siguiente".</summary>
+    private void UpdateNextCueLabel()
+    {
+        if (_controller is null)
+            return;
+        var cue = _model.GetCue(_controller.Playhead);
+        NextCueLabel.Text = cue is null
+            ? Loc.T("— fin de la lista —", "— end of list —")
+            : $"{cue.DisplayNumber} · {cue.Name}";
     }
 
     public void RefreshRow(int index)
@@ -951,6 +1156,17 @@ public sealed partial class MainWindow : Window, IShowView
         }
         return handle;
     }
+
+    /// <summary>true si la salida ya está mostrada — mismo contrato que
+    /// WinCue.App.IsVideoOutputVisible(screen), pero Secuence solo tiene UNA
+    /// salida (sin el array _videoOutputs por pantalla de WinCue): el
+    /// parámetro screen se ignora a propósito, mismo criterio que
+    /// SurfaceDimensions. MainController.PrepareVideoStandby ya lo consulta
+    /// para decidir si prepara el standby GPU o solo precarga clásico — antes
+    /// de esto siempre devolvía false (la implementación por defecto de
+    /// IShowView), así que la ruta híbrida de vídeo nunca llegaba a
+    /// standby en Secuence.</summary>
+    public bool IsVideoOutputVisible(int screen) => _videoOutput is { IsVisible: true };
 
     /// <summary>Dimensiones reales de la salida ya abierta; 1920×1080 (mismo
     /// valor por defecto que FakeView en los tests del controlador) mientras
