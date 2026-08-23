@@ -113,29 +113,15 @@ foreach ($t in @('LGPL-3.0.txt', 'GPL-3.0.txt')) {
     }
 }
 
-# ── SMOKE DE LICENCIAS: el guardián que impide publicar una build GPL ────
-# Se verifica el CONTENIDO DEL PAQUETE (la carpeta recién copiada), no el árbol
-# de desarrollo: es lo que de verdad se le entrega a un cliente.
+# ── SMOKE DE LICENCIAS ───────────────────────────────────────────────────
+# El guardián vive en scripts\verificar-licencias.ps1 para que
+# publish-secuence.ps1 use EL MISMO y no una copia recortada.
 if ($SinVerificarLicencias) {
     Write-Warning "Verificación de licencias SALTADA (-SinVerificarLicencias). NO distribuyas este paquete."
-} elseif (Test-Path (Join-Path $ffDst 'bin')) {
-    Write-Host "`nVerificando la licencia de las DLL del PAQUETE..." -ForegroundColor Cyan
-    $verificador = Join-Path $root 'tools\verificar-ffmpeg\verificar-ffmpeg.csproj'
-    # La carpeta se pasa por la variable de entorno y NO como argumento: `dotnet
-    # run` no conoce `--nologo` y reenvía a la aplicación todo lo que no
-    # entiende, así que el verificador acababa mirando una carpeta equivocada y
-    # el guardián podía dar por bueno un paquete sin haberlo mirado. Con la
-    # variable no hay ambigüedad — y FFmpegLoader la trata de forma ESTRICTA:
-    # si esa carpeta no tiene avcodec, falla en vez de buscar en otro sitio.
-    $env:WINCUE_FFMPEG_DIR = Join-Path $ffDst 'bin'
-    try { & dotnet run --project $verificador -c Release } finally { $env:WINCUE_FFMPEG_DIR = $null }
-    if ($LASTEXITCODE -ne 0) {
-        Remove-Item (Join-Path $ffDst 'bin') -Recurse -Force
-        throw ("LICENCIA RECHAZADA: las DLL de FFmpeg del paquete no son LGPL. " +
-               "Se han borrado del paquete. NO se puede distribuir WinCue cerrado con ellas. " +
-               "Consigue una build 'lgpl-shared' con tools\ffmpeg-lgpl\obtener-ffmpeg-lgpl.ps1.")
-    }
-    Write-Host "Licencia de FFmpeg verificada: LGPL." -ForegroundColor Green
+} else {
+    & (Join-Path $root 'scripts\verificar-licencias.ps1') `
+        -CarpetaFfmpegBin (Join-Path $ffDst 'bin') `
+        -RaizRepo $root
 }
 
 # ── El mismo guardián, para libmpv ──────────────────────────────────────
