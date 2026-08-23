@@ -2,11 +2,12 @@
 // CueRow.cs — Fila de la tabla de cues (binding de WinUI 3).
 // =============================================================================
 // Equivalente de src/WinCue.App/CueRowViewModel.cs para esta interfaz, no una
-// copia: sin INotifyPropertyChanged (esta primera versión no tiene transporte,
-// así que una fila no cambia después de construida — se recalculará entera el
-// día que haya un controlador detrás) y sin el recuadro de grupo dibujado por
-// fila (eso es una decoración del hito 1 de WPF; aquí "grupos" significa, de
-// momento, SOLO la sangría que pide el encargo — CueModel.Depth).
+// copia. Con transporte ya conectado, SÍ hace falta INotifyPropertyChanged
+// para IsPlayhead (ver MainWindow.xaml.cs.SetPlayhead): x:Bind con Mode=OneWay
+// repinta la fila cuando cambia, sin recrear la lista entera.
+// Sin el recuadro de grupo dibujado por fila (eso es una decoración del hito 1
+// de WPF; aquí "grupos" significa, de momento, SOLO la sangría que pide el
+// encargo — CueModel.Depth).
 //
 // El icono del tipo y el de plegado de grupo van en columnas/celdas PROPIAS,
 // nunca mezclados en el mismo TextBlock que texto normal: así Phosphor se
@@ -14,6 +15,7 @@
 // IconFont.cs).
 // =============================================================================
 
+using System.ComponentModel;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using WinCue.Core;
@@ -21,10 +23,17 @@ using WinCue.Presentation;
 
 namespace Secuence.App;
 
-public sealed class CueRow
+public sealed class CueRow : INotifyPropertyChanged
 {
+    public event PropertyChangedEventHandler? PropertyChanged;
+
+    /// <summary>Id del cue (WinCue.Core.Cue.Id): con qué fila del modelo se
+    /// corresponde esta, para SetPlayhead/RefreshRow y el panel de activos.</summary>
+    public int CueId { get; }
+
     public CueRow(Cue cue, CueModel model)
     {
+        CueId = cue.Id;
         Number = cue.DisplayNumber;
         LabelBrush = Theme.BrushForLabelName(cue.Color);
         StateBrush = Theme.BrushForState(cue.State);
@@ -78,6 +87,29 @@ public sealed class CueRow
     public string PostWaitText { get; }
     public string ContinueIcon { get; }
     public string ContinueText { get; }
+
+    // ── Playhead (SetPlayhead/RefreshRow/ReloadTable de IShowView) ────────
+    private bool _isPlayhead;
+
+    /// <summary>true = GO disparará este cue a continuación. Lo fija
+    /// MainWindow.SetPlayhead recorriendo TODAS las filas (una sola vez
+    /// true, el resto false) — igual que CueRowViewModel.IsPlayhead en WPF.</summary>
+    public bool IsPlayhead
+    {
+        get => _isPlayhead;
+        set
+        {
+            if (_isPlayhead == value)
+                return;
+            _isPlayhead = value;
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPlayhead)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RowBrush)));
+        }
+    }
+
+    /// <summary>Fondo de la fila: resaltado en el cian-azulado del playhead
+    /// (Palette.PlayheadRow) cuando le toca a este cue, transparente si no.</summary>
+    public SolidColorBrush RowBrush => _isPlayhead ? Theme.PlayheadRowBrush : Theme.TransparentBrush;
 
     private static string TypeIconFor(CueType type) => type switch
     {

@@ -65,6 +65,10 @@
     <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
     <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
     <ProjectReference Include="..\WinCue.Presentation\WinCue.Presentation.csproj" />
+    <!-- Motor de audio real (NAudio, sin dependencias nativas): con él el GO
+         de esta tarea SUENA de verdad. WinCue.Video NO se añade — el vídeo es
+         el paso siguiente y NullVideoEngine.cs cubre el hueco por ahora. -->
+    <ProjectReference Include="..\WinCue.Audio\WinCue.Audio.csproj" />
   </ItemGroup>
 
   <!-- El glifo de icono (E000-F8FF) se pinta con la fuente Phosphor cargada

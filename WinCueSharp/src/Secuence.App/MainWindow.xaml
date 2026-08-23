@@ -5,37 +5,170 @@
     xmlns:local="using:Secuence.App">
 
     <!-- ==========================================================================
-         MainWindow.xaml — la tabla de cues, sin transporte ni inspector.
+         MainWindow.xaml — transport + panel de activos + tabla de cues.
          ==========================================================================
-         Los anchos de columna repiten los de src/WinCue.App/MainWindow.xaml
-         (DataGrid.Columns) A PROPÓSITO: es la misma información y el mismo
-         orden de lectura, para que quien conozca WinCue reconozca Secuence de
-         un vistazo. WinUI 3 no trae DataGrid: la cabecera y cada fila son un
-         Grid con las MISMAS ColumnDefinitions, repetidas — no hay agrupación
-         de columnas compartida como en WPF, así que si aquí se cambia un
-         ancho hay que cambiarlo en las dos plantillas.
+         Los anchos de columna de la TABLA repiten los de
+         src/WinCue.App/MainWindow.xaml (DataGrid.Columns) A PROPÓSITO: es la
+         misma información y el mismo orden de lectura, para que quien conozca
+         WinCue reconozca Secuence de un vistazo. WinUI 3 no trae DataGrid: la
+         cabecera y cada fila son un Grid con las MISMAS ColumnDefinitions,
+         repetidas — no hay agrupación de columnas compartida como en WPF, así
+         que si aquí se cambia un ancho hay que cambiarlo en las dos plantillas.
+
+         La disposición del TRANSPORT sí es deliberadamente la de WinCue
+         (src/WinCue.App/MainWindow.xaml, TopBar): GO grande a la izquierda,
+         PANIC en rojo, el countdown "SHOW · REMAINING" en ámbar a la derecha.
+         No es una copia de código — es un Grid propio de WinUI 3 — pero la
+         lectura de la barra tiene que ser la misma de un vistazo.
 
          Los colores van todos por {x:Bind local:Theme.XxxBrush} — propiedad
          ESTÁTICA, no de instancia: x:Bind admite referenciar directamente un
          miembro estático por Tipo.Propiedad, así que ni la ventana ni cada fila
          necesitan repetir "propiedades puente" solo para exponer la paleta.
+
+         ATAJOS: Espacio = GO, Esc = STOP ALL. Van como KeyboardAccelerator en
+         el Grid raíz (WinUI 3 no tiene PreviewKeyDown de ventana como WPF) —
+         funcionan tenga el foco quien lo tenga, sin pisar el espacio nativo de
+         los botones (ninguno se declara aquí en el propio GoButton).
          ========================================================================== -->
 
-    <Grid Background="{x:Bind local:Theme.WindowBgBrush}">
+    <Grid x:Name="RootGrid" Background="{x:Bind local:Theme.WindowBgBrush}">
+        <Grid.KeyboardAccelerators>
+            <KeyboardAccelerator Key="Space" Invoked="OnGoAccelerator"/>
+            <KeyboardAccelerator Key="Escape" Invoked="OnStopAllAccelerator"/>
+        </Grid.KeyboardAccelerators>
+
         <Grid.RowDefinitions>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="Auto"/>
-            <RowDefinition Height="*"/>
+            <RowDefinition Height="Auto"/> <!-- 0: transport -->
+            <RowDefinition Height="Auto"/> <!-- 1: activos -->
+            <RowDefinition Height="Auto"/> <!-- 2: estado -->
+            <RowDefinition Height="Auto"/> <!-- 3: cabecera de columnas -->
+            <RowDefinition Height="*"/>    <!-- 4: tabla -->
         </Grid.RowDefinitions>
 
-        <!-- Barra de estado: qué show se cargó (o el motivo de que no) -->
-        <Border Grid.Row="0" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
+        <!-- ═══════════ TRANSPORT ═══════════ -->
+        <Border Grid.Row="0" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="10,8">
+            <Grid>
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="Auto"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="Auto"/>
+                </Grid.ColumnDefinitions>
+
+                <!-- Izquierda: GO + resto de la fila de acción. Los glifos de
+                     los TextBlock x:Name="...Icon" se fijan en código
+                     (MainWindow.xaml.cs, constructor): son constantes de
+                     WinCue.Presentation.Icons y de un ensamblado distinto al
+                     de este XAML — más simple y sin sorpresas que un x:Bind
+                     a un tipo externo solo para un glifo que no cambia. -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                    <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
+                            Background="{x:Bind local:Theme.GoButtonBrush}"
+                            FontSize="20" FontWeight="Bold"
+                            ToolTipService.ToolTip="Espacio">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock Text="GO" VerticalAlignment="Center"/>
+                            <TextBlock x:Name="GoIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="18" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="PauseButton" Click="OnPauseClick" Height="44">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="PauseIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="16"
+                                       VerticalAlignment="Center"/>
+                            <TextBlock x:Name="PauseLabel" Text="PAUSE" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="StopAllButton" Click="OnStopAllClick" Height="44" ToolTipService.ToolTip="Esc">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="StopAllIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="STOP ALL" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="FadeAllButton" Click="OnFadeAllClick" Height="44">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="FadeAllIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="FADE ALL" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="PanicButton" Click="OnPanicClick" Height="44"
+                            Background="{x:Bind local:Theme.PanicButtonBrush}">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="PanicIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="PANIC" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
+
+                <!-- Centro: reloj del show. El countdown POR CUE vive en el
+                     panel de activos (fila 1), no aquí — igual reparto que
+                     WinCue (ShowClockBox central + tarjetas de activos). -->
+                <Border Grid.Column="2" Background="{x:Bind local:Theme.WindowBgBrush}" CornerRadius="4"
+                        Padding="16,2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                    <StackPanel>
+                        <TextBlock Text="SHOW · REMAINING" FontSize="10"
+                                   Foreground="{x:Bind local:Theme.TextDimBrush}"
+                                   HorizontalAlignment="Center"/>
+                        <TextBlock x:Name="ShowClockText" Text="0:00:00"
+                                   FontSize="32" FontWeight="Bold" FontFamily="Consolas"
+                                   Foreground="{x:Bind local:Theme.StandbyBrush}"
+                                   HorizontalAlignment="Center"/>
+                    </StackPanel>
+                </Border>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════ PANEL DE CUES ACTIVOS ═══════════ -->
+        <!-- Alimentado por IShowView.UpdateActiveCues. Una tarjeta por cue
+             sonando, con barra de progreso — basta para esta tarea (inspector
+             y VU real son de otra pieza). -->
+        <Border Grid.Row="1" Background="{x:Bind local:Theme.HeaderBgBrush}"
+                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,0,0,1"
+                Padding="8,6" MinHeight="0">
+            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
+                <ItemsControl x:Name="ActiveCuesList">
+                    <ItemsControl.ItemsPanel>
+                        <ItemsPanelTemplate>
+                            <StackPanel Orientation="Horizontal" Spacing="8"/>
+                        </ItemsPanelTemplate>
+                    </ItemsControl.ItemsPanel>
+                    <ItemsControl.ItemTemplate>
+                        <DataTemplate x:DataType="local:ActiveCueRow">
+                            <Border Background="{x:Bind local:Theme.ControlBgBrush}" CornerRadius="4"
+                                    Padding="8,6" Width="180">
+                                <StackPanel Spacing="3">
+                                    <StackPanel Orientation="Horizontal" Spacing="6">
+                                        <Border Background="{x:Bind ColorBrush}" Width="8" Height="8" CornerRadius="4"
+                                                VerticalAlignment="Center"/>
+                                        <TextBlock Text="{x:Bind Number}" FontWeight="Bold" FontSize="12"
+                                                   Foreground="{x:Bind local:Theme.TextPrimaryBrush}"/>
+                                        <TextBlock Text="{x:Bind Name}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                                   Foreground="{x:Bind local:Theme.TextTertiaryBrush}"/>
+                                    </StackPanel>
+                                    <ProgressBar Value="{x:Bind ProgressPercent}" Maximum="100" Height="6"
+                                                 Foreground="{x:Bind ProgressBrush}"/>
+                                    <TextBlock Text="{x:Bind RemainingText}" FontSize="11" FontFamily="Consolas"
+                                               Foreground="{x:Bind local:Theme.TextDimBrush}"/>
+                                </StackPanel>
+                            </Border>
+                        </DataTemplate>
+                    </ItemsControl.ItemTemplate>
+                </ItemsControl>
+            </ScrollViewer>
+        </Border>
+
+        <!-- Barra de estado: qué show se cargó (o el motivo de que no), y los
+             FlashStatus del controlador (incluidos los fallos limpios de vídeo). -->
+        <Border Grid.Row="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
             <TextBlock x:Name="EstadoTexto" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
                        FontSize="13" TextWrapping="Wrap"/>
         </Border>
 
         <!-- Cabecera de columnas -->
-        <Grid Grid.Row="1" Background="{x:Bind local:Theme.HeaderBgBrush}" Height="30">
+        <Grid Grid.Row="3" Background="{x:Bind local:Theme.HeaderBgBrush}" Height="30">
             <Grid.ColumnDefinitions>
                 <ColumnDefinition Width="26"/>
                 <ColumnDefinition Width="68"/>
@@ -63,7 +196,7 @@
         </Grid>
 
         <!-- Tabla -->
-        <ListView x:Name="CueList" Grid.Row="2" SelectionMode="None"
+        <ListView x:Name="CueList" Grid.Row="4" SelectionMode="None"
                   Background="{x:Bind local:Theme.WindowBgBrush}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
@@ -74,7 +207,10 @@
             </ListView.ItemContainerStyle>
             <ListView.ItemTemplate>
                 <DataTemplate x:DataType="local:CueRow">
-                    <Grid MinHeight="28" Padding="0,2">
+                    <!-- Fondo de la fila: RowBrush, Mode=OneWay porque CueRow
+                         SÍ implementa INotifyPropertyChanged ahora (playhead) -
+                         un x:Bind normal (OneTime) no repintaría al moverse. -->
+                    <Grid MinHeight="28" Padding="0,2" Background="{x:Bind RowBrush, Mode=OneWay}">
                         <Grid.ColumnDefinitions>
                             <ColumnDefinition Width="26"/>
                             <ColumnDefinition Width="68"/>

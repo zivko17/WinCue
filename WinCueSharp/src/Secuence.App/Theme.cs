@@ -41,7 +41,14 @@ public static class Theme
 
     // ── Acentos de estado (reutilizados en la columna de duración) ─────
     public static readonly Color Go = Hex(Palette.Go);
+    public static readonly Color GoButton = Hex(Palette.GoButton);
+    public static readonly Color Pgm = Hex(Palette.Pgm);
+    public static readonly Color PanicButton = Hex(Palette.PanicButton);
     public static readonly Color Standby = Hex(Palette.Standby);
+    public static readonly Color Warn = Hex(Palette.Warn);
+
+    // ── Fila del playhead (tabla de cues) ──────────────────────────────
+    public static readonly Color PlayheadRow = Hex(Palette.PlayheadRow);
 
     // ── Tipos de cue ────────────────────────────────────────────────────
     public static readonly Color TypeAudio = Hex(Palette.TypeAudio);
@@ -84,7 +91,12 @@ public static class Theme
     public static readonly SolidColorBrush BorderBrush = Solid(Border);
     public static readonly SolidColorBrush DividerBrush = Solid(Divider);
     public static readonly SolidColorBrush GoBrush = Solid(Go);
+    public static readonly SolidColorBrush GoButtonBrush = Solid(GoButton);
+    public static readonly SolidColorBrush PgmBrush = Solid(Pgm);
+    public static readonly SolidColorBrush PanicButtonBrush = Solid(PanicButton);
     public static readonly SolidColorBrush StandbyBrush = Solid(Standby);
+    public static readonly SolidColorBrush WarnBrush = Solid(Warn);
+    public static readonly SolidColorBrush PlayheadRowBrush = Solid(PlayheadRow);
     public static readonly SolidColorBrush TransparentBrush = Solid(Colors.Transparent);
 
     /// <summary>Pincel por tipo de cue, precalculado (mismo motivo que en WPF:
