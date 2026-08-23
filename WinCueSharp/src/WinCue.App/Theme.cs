@@ -6,6 +6,11 @@
 // Nada de eso se podía cambiar en un solo sitio, y ya había DERIVADO (el color
 // de tipo de cue del timeline y el de la tabla dejaron de coincidir).
 //
+// Los 94 NÚMEROS viven ahora en WinCue.Presentation.Palette (sin WPF, para que
+// Secuence los comparta): este fichero solo los convierte en Color y en Brush.
+// Cada campo pasó de literal (Hex(0x2ecc71)) a derivado (Hex(Palette.Go)), sin
+// tocar nombres ni tipos — el XAML y el resto de C# no se enteran del cambio.
+//
 // Reglas de uso:
 //   · C#   → Theme.Go, Theme.Pgm…  (Color) y Theme.GoBrush… (Brush congelado)
 //   · XAML → {DynamicResource Go}, {DynamicResource PanelBg}…
@@ -17,16 +22,17 @@
 // Los Pen siguen construyéndose en cada control (llevan grosor y guiones
 // propios), pero tomando el COLOR de aquí: FrozenPen(Theme.Playhead, 2).
 //
-// NOTA — grises casi duplicados: este fichero preserva los valores EXACTOS que
-// había, sin cambiar un píxel. Por eso conviven tonos casi idénticos
-// (WindowBg #1e1e1e vs TimelineLayerA #1e1e21, etc.). Están agrupados y
-// marcados con «≈» para que colapsarlos sea después una decisión consciente:
-// ahora es cambiar una línea, no rastrear 400.
+// NOTA — grises casi duplicados: este fichero (y Palette, de donde vienen los
+// números) preserva los valores EXACTOS que había, sin cambiar un píxel. Por
+// eso conviven tonos casi idénticos (WindowBg #1e1e1e vs TimelineLayerA
+// #1e1e21, etc.). Están agrupados y marcados con «≈» para que colapsarlos sea
+// después una decisión consciente: ahora es cambiar una línea, no rastrear 400.
 // =============================================================================
 
 using System.Windows;
 using System.Windows.Media;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
@@ -38,52 +44,52 @@ public static class Theme
     // deben tocarse sin pensar: el operador los lee de reojo en directo.
 
     /// <summary>Verde: reproduciendo / OK / marca de GO.</summary>
-    public static readonly Color Go = Hex(0x2ecc71);
+    public static readonly Color Go = Hex(Palette.Go);
     /// <summary>Verde oscuro: fondo del botón GO.</summary>
-    public static readonly Color GoButton = Hex(0x1e7e34);
+    public static readonly Color GoButton = Hex(Palette.GoButton);
     /// <summary>Verde medio (barra de audición).</summary>
-    public static readonly Color GoDeep = Hex(0x27865a);
+    public static readonly Color GoDeep = Hex(Palette.GoDeep);
 
     /// <summary>Rojo: programa en aire / playhead / corte duro.</summary>
-    public static readonly Color Pgm = Hex(0xc0392b);
+    public static readonly Color Pgm = Hex(Palette.Pgm);
     /// <summary>Rojo oscuro: fondo del botón PANIC.</summary>
-    public static readonly Color PanicButton = Hex(0x7e1e1e);
+    public static readonly Color PanicButton = Hex(Palette.PanicButton);
 
     /// <summary>Ámbar brillante: cursor de edición, pre-wait, hover, reloj.</summary>
-    public static readonly Color Standby = Hex(0xe8c000);
+    public static readonly Color Standby = Hex(Palette.Standby);
     /// <summary>Ámbar: aviso, fundido, caret de texto.</summary>
-    public static readonly Color Warn = Hex(0xe8a200);
+    public static readonly Color Warn = Hex(Palette.Warn);
     /// <summary>Ámbar quemado: reducción de ganancia del compresor.</summary>
-    public static readonly Color WarnDeep = Hex(0xe87a00);
+    public static readonly Color WarnDeep = Hex(Palette.WarnDeep);
 
     /// <summary>Oro: modo EDIT y cabecera de grupo.</summary>
-    public static readonly Color Gold = Hex(0xc9a227);
+    public static readonly Color Gold = Hex(Palette.Gold);
     /// <summary>Oro claro (variante de realce).</summary>
-    public static readonly Color GoldSoft = Hex(0xc9a84a);
+    public static readonly Color GoldSoft = Hex(Palette.GoldSoft);
 
     /// <summary>Rojo saturado: clip de nivel.</summary>
-    public static readonly Color Clip = Hex(0xff2020);
+    public static readonly Color Clip = Hex(Palette.Clip);
     /// <summary>Salmón: texto de error sobre fondo oscuro.</summary>
-    public static readonly Color Danger = Hex(0xff8a7a);
+    public static readonly Color Danger = Hex(Palette.Danger);
 
     /// <summary>Azul medio: marco de proyección y banda de agudos del EQ.
     /// Declarado AQUÍ (y no junto a los acentos auxiliares) porque los
     /// inicializadores static readonly corren en orden textual: GeometryFrame
     /// lo referencia más abajo y se quedaría en negro transparente.</summary>
-    public static readonly Color Blue = Hex(0x2a6fb0);
+    public static readonly Color Blue = Hex(Palette.Blue);
 
     // ═════════════════════════ TIPOS DE CUE ═════════════════════════
     // Espejo entre la columna «Tipo» de la tabla y los bloques del timeline.
     // Vivían duplicados en CueRowViewModel y TimelinePanel, y habían derivado.
 
-    public static readonly Color TypeAudio = Hex(0x4a86b8);
-    public static readonly Color TypeVideo = Hex(0x9b59b6);
-    public static readonly Color TypeWait = Hex(0x888888);
+    public static readonly Color TypeAudio = Hex(Palette.TypeAudio);
+    public static readonly Color TypeVideo = Hex(Palette.TypeVideo);
+    public static readonly Color TypeWait = Hex(Palette.TypeWait);
     public static readonly Color TypeFade = Warn;
     public static readonly Color TypeStart = Go;
     public static readonly Color TypeStop = Pgm;
-    public static readonly Color TypeScript = Hex(0x16a085);
-    public static readonly Color TypeMemo = Hex(0x777777);
+    public static readonly Color TypeScript = Hex(Palette.TypeScript);
+    public static readonly Color TypeMemo = Hex(Palette.TypeMemo);
     public static readonly Color TypeGroup = Standby;
 
     /// <summary>Color de un tipo de cue. ÚNICA definición: la comparten la
@@ -108,92 +114,92 @@ public static class Theme
     // ═════════════════════════ TEXTO ═════════════════════════
 
     /// <summary>Etiquetas sobre lienzo oscuro (timeline).</summary>
-    public static readonly Color TextBright = Hex(0xeeeeee);
+    public static readonly Color TextBright = Hex(Palette.TextBright);
     /// <summary>Cabeceras de Configuración. Era #e6e6e6: colapsado.</summary>
     public static readonly Color TextBrightAlt = TextBright;
     /// <summary>Texto principal de la interfaz.</summary>
-    public static readonly Color TextPrimary = Hex(0xdddddd);
+    public static readonly Color TextPrimary = Hex(Palette.TextPrimary);
     /// <summary>Texto de hover.</summary>
-    public static readonly Color TextSecondary = Hex(0xcccccc);
+    public static readonly Color TextSecondary = Hex(Palette.TextSecondary);
     /// <summary>Cabeceras de columna.</summary>
-    public static readonly Color TextTertiary = Hex(0xbbbbbb);
+    public static readonly Color TextTertiary = Hex(Palette.TextTertiary);
     /// <summary>Etiquetas atenuadas.</summary>
-    public static readonly Color TextMuted = Hex(0x999999);
+    public static readonly Color TextMuted = Hex(Palette.TextMuted);
     /// <summary>Era #9a9a9a: colapsado.</summary>
     public static readonly Color TextMutedAlt = TextMuted;
     /// <summary>Texto secundario/rótulos pequeños.</summary>
-    public static readonly Color TextDim = Hex(0x888888);
+    public static readonly Color TextDim = Hex(Palette.TextDim);
     /// <summary>Rejilla y unidades.</summary>
-    public static readonly Color TextDimmer = Hex(0x777777);
+    public static readonly Color TextDimmer = Hex(Palette.TextDimmer);
     /// <summary>Mensajes de «vacío» y marcadores de posición.</summary>
-    public static readonly Color TextFaint = Hex(0x666666);
+    public static readonly Color TextFaint = Hex(Palette.TextFaint);
     /// <summary>Texto oscuro SOBRE un acento claro (caja de duración).</summary>
-    public static readonly Color TextOnAccent = Hex(0x101010);
+    public static readonly Color TextOnAccent = Hex(Palette.TextOnAccent);
     /// <summary>Notas en cursiva y marcadores «sin valor». Es el gris del
     /// sistema (Brushes.Gray), que estaba suelto por el inspector.</summary>
-    public static readonly Color TextNote = Hex(0x808080);
+    public static readonly Color TextNote = Hex(Palette.TextNote);
 
-    public static readonly Color White = Hex(0xffffff);
-    public static readonly Color Black = Hex(0x000000);
+    public static readonly Color White = Hex(Palette.White);
+    public static readonly Color Black = Hex(Palette.Black);
 
     // ═════════════════════════ FONDOS ═════════════════════════
 
     /// <summary>Fondo de ventana.</summary>
-    public static readonly Color WindowBg = Hex(0x1e1e1e);
+    public static readonly Color WindowBg = Hex(Palette.WindowBg);
     /// <summary>Paneles laterales y barras.</summary>
-    public static readonly Color PanelBg = Hex(0x252526);
+    public static readonly Color PanelBg = Hex(Palette.PanelBg);
     /// <summary>Fondo de control (TextBox, ComboBox).</summary>
-    public static readonly Color ControlBg = Hex(0x2a2a2a);
+    public static readonly Color ControlBg = Hex(Palette.ControlBg);
     /// <summary>Barra de herramientas. Era #2a2a2b: colapsado.</summary>
     public static readonly Color ToolbarBg = ControlBg;
     /// <summary>Cabecera de la tabla de cues.</summary>
-    public static readonly Color HeaderBg = Hex(0x2d2d30);
+    public static readonly Color HeaderBg = Hex(Palette.HeaderBg);
     /// <summary>Fondo de botón.</summary>
-    public static readonly Color ButtonBg = Hex(0x3c3c3c);
+    public static readonly Color ButtonBg = Hex(Palette.ButtonBg);
     /// <summary>Separador y borde de strip del mezclador. Era #3a3a3a: colapsado.</summary>
     public static readonly Color ButtonBgAlt = ButtonBg;
     /// <summary>Tarjeta de «en reproducción».</summary>
-    public static readonly Color CardBg = Hex(0x333333);
+    public static readonly Color CardBg = Hex(Palette.CardBg);
     /// <summary>Campo hundido (búsqueda).</summary>
-    public static readonly Color SunkenBg = Hex(0x1a1a1a);
+    public static readonly Color SunkenBg = Hex(Palette.SunkenBg);
     /// <summary>Caja del reloj del show.</summary>
-    public static readonly Color DeepBg = Hex(0x151515);
+    public static readonly Color DeepBg = Hex(Palette.DeepBg);
     /// <summary>Pestañas no seleccionadas.</summary>
-    public static readonly Color DeeperBg = Hex(0x111111);
+    public static readonly Color DeeperBg = Hex(Palette.DeeperBg);
     /// <summary>Fondo de lista (desplegables).</summary>
-    public static readonly Color ListBg = Hex(0x262626);
+    public static readonly Color ListBg = Hex(Palette.ListBg);
     /// <summary>Carril vacío de una barra de progreso.</summary>
-    public static readonly Color TrackBg = Hex(0x222222);
+    public static readonly Color TrackBg = Hex(Palette.TrackBg);
     /// <summary>Fondo de medidor (VU, GR). Vive aquí y no en la sección del
     /// mezclador porque el EQ lo aliasa y los static readonly se inicializan
     /// en orden textual.</summary>
-    public static readonly Color MeterBg = Hex(0x202020);
+    public static readonly Color MeterBg = Hex(Palette.MeterBg);
 
     // ═════════════════════════ BORDES Y SEPARADORES ═════════════════════════
 
-    public static readonly Color Border = Hex(0x555555);
+    public static readonly Color Border = Hex(Palette.Border);
     /// <summary>≈ Border — marco de medidor.</summary>
-    public static readonly Color BorderMeter = Hex(0x4a4a4a);
+    public static readonly Color BorderMeter = Hex(Palette.BorderMeter);
     /// <summary>≈ Border — borde de control.</summary>
-    public static readonly Color BorderControl = Hex(0x444444);
+    public static readonly Color BorderControl = Hex(Palette.BorderControl);
     /// <summary>Separadores y splitters.</summary>
-    public static readonly Color Divider = Hex(0x333333);
+    public static readonly Color Divider = Hex(Palette.Divider);
 
     // ═════════════════════════ SELECCIÓN ═════════════════════════
 
     /// <summary>Fila del playhead.</summary>
-    public static readonly Color PlayheadRow = Hex(0x264f78);
+    public static readonly Color PlayheadRow = Hex(Palette.PlayheadRow);
     /// <summary>Celda seleccionada.</summary>
-    public static readonly Color SelectionBg = Hex(0x37527a);
+    public static readonly Color SelectionBg = Hex(Palette.SelectionBg);
     /// <summary>Borde de celda seleccionada.</summary>
-    public static readonly Color SelectionBorder = Hex(0x5a80c0);
+    public static readonly Color SelectionBorder = Hex(Palette.SelectionBorder);
 
     // ═════════════════════════ TIMELINE ═════════════════════════
     // Los grises del lienzo llevaban un punto de azul propio (…21, …25, …29,
     // …58) imperceptible al ojo. Colapsados a los tonos generales: lo que sí
     // importa —el contraste ENTRE pista par e impar— se conserva (1e vs 22).
 
-    public static readonly Color TimelineBg = Hex(0x18181a);
+    public static readonly Color TimelineBg = Hex(Palette.TimelineBg);
     /// <summary>Pista par. Era #1e1e21: colapsado.</summary>
     public static readonly Color TimelineLayerA = WindowBg;
     /// <summary>Pista impar. Era #222225: colapsado.</summary>
@@ -203,39 +209,39 @@ public static class Theme
     /// <summary>Marca mayor de la regla. Era #555558: colapsado.</summary>
     public static readonly Color TimelineTick = Border;
     /// <summary>Marca menor de la regla.</summary>
-    public static readonly Color TimelineTickMinor = Hex(0x303033);
+    public static readonly Color TimelineTickMinor = Hex(Palette.TimelineTickMinor);
 
     // ═════════════════════════ EDITOR DE EQ / COMPRESOR ═════════════════════════
 
-    public static readonly Color EqBg = Hex(0x141416);
-    public static readonly Color EqGrid = Hex(0x2c2c30);
+    public static readonly Color EqBg = Hex(Palette.EqBg);
+    public static readonly Color EqGrid = Hex(Palette.EqGrid);
     /// <summary>Línea de 0 dB. Era #4a4a50: colapsado.</summary>
     public static readonly Color EqZero = BorderMeter;
     /// <summary>Fondo del medidor de reducción de ganancia. Era #202024: colapsado.</summary>
     public static readonly Color EqGrBg = MeterBg;
     /// <summary>Centro oscuro del manejador de banda. NO se colapsa con EqBg:
     /// es lo que da cuerpo al punto sobre el fondo del lienzo.</summary>
-    public static readonly Color EqHandleCore = Hex(0x161619);
+    public static readonly Color EqHandleCore = Hex(Palette.EqHandleCore);
     /// <summary>Curva de EQ desactivada.</summary>
-    public static readonly Color EqCurveOff = Hex(0x665e30);
+    public static readonly Color EqCurveOff = Hex(Palette.EqCurveOff);
     /// <summary>Curva de compresor desactivada.</summary>
-    public static readonly Color CompCurveOff = Hex(0x6e5828);
+    public static readonly Color CompCurveOff = Hex(Palette.CompCurveOff);
     /// <summary>Relleno del analizador (RTA), verde claro.</summary>
-    public static readonly Color RtaLine = Hex(0x5ff29e);
+    public static readonly Color RtaLine = Hex(Palette.RtaLine);
     /// <summary>Pico del analizador, casi blanco verdoso.</summary>
-    public static readonly Color RtaPeak = Hex(0xd9ffe9);
+    public static readonly Color RtaPeak = Hex(Palette.RtaPeak);
 
     // ═════════════════════════ FORMA DE ONDA ═════════════════════════
 
-    public static readonly Color WaveBg = Hex(0x0e0e0e);
+    public static readonly Color WaveBg = Hex(Palette.WaveBg);
     /// <summary>Onda (= TypeAudio: es el color del cue de audio).</summary>
     public static readonly Color Wave = TypeAudio;
     /// <summary>Onda fuera de la región activa.</summary>
-    public static readonly Color WaveDim = Hex(0x243038);
+    public static readonly Color WaveDim = Hex(Palette.WaveDim);
     /// <summary>≈ WaveDim — barra de vídeo (degradado).</summary>
-    public static readonly Color VideoBarA = Hex(0x2a3540);
+    public static readonly Color VideoBarA = Hex(Palette.VideoBarA);
     /// <summary>≈ WaveDim — barra de vídeo (degradado).</summary>
-    public static readonly Color VideoBarB = Hex(0x1a222a);
+    public static readonly Color VideoBarB = Hex(Palette.VideoBarB);
 
     // ═════════════════════════ MEDIDOR VU / MEZCLADOR ═════════════════════════
 
@@ -249,35 +255,35 @@ public static class Theme
     public static readonly Color GeometryBg = EqBg;
     /// <summary>Marco del área de proyección (= Blue).</summary>
     public static readonly Color GeometryFrame = Blue;
-    public static readonly Color GeometryGrid = Hex(0x666666);
-    public static readonly Color GeometryCross = Hex(0x888888);
+    public static readonly Color GeometryGrid = Hex(Palette.GeometryGrid);
+    public static readonly Color GeometryCross = Hex(Palette.GeometryCross);
 
     // ═════════════════════════ ACENTOS AUXILIARES ═════════════════════════
 
-    public static readonly Color Info = Hex(0x3598db);
+    public static readonly Color Info = Hex(Palette.Info);
     /// <summary>≈ Info.</summary>
-    public static readonly Color InfoAlt = Hex(0x2e86de);
-    public static readonly Color Magenta = Hex(0xc95ed6);
+    public static readonly Color InfoAlt = Hex(Palette.InfoAlt);
+    public static readonly Color Magenta = Hex(Palette.Magenta);
     /// <summary>≈ Magenta.</summary>
-    public static readonly Color MagentaAlt = Hex(0xbe2ede);
-    public static readonly Color Teal = Hex(0x2f6f4f);
+    public static readonly Color MagentaAlt = Hex(Palette.MagentaAlt);
+    public static readonly Color Teal = Hex(Palette.Teal);
 
     // ═════════════════════════ PANEL DE NOTAS ═════════════════════════
 
-    public static readonly Color NotesBg = Hex(0x2d2a1e);
-    public static readonly Color NotesLabel = Hex(0xa89968);
-    public static readonly Color NotesText = Hex(0xe8dcb8);
+    public static readonly Color NotesBg = Hex(Palette.NotesBg);
+    public static readonly Color NotesLabel = Hex(Palette.NotesLabel);
+    public static readonly Color NotesText = Hex(Palette.NotesText);
 
     // ═════════════════════════ BOTONES DE ACCIÓN ═════════════════════════
 
     /// <summary>Botón «Relocalizar» (medios no encontrados).</summary>
-    public static readonly Color RelocateBg = Hex(0x7e5a1e);
+    public static readonly Color RelocateBg = Hex(Palette.RelocateBg);
     /// <summary>Botón «detener este cue» de las tarjetas de EN REPRODUCCIÓN.
     /// Era un granate (#5a2a2a) que sobre la tarjeta (#333) se leía como un
     /// trozo muerto: ahora es el ROJO de programa, con un cuadrado blanco
     /// dentro (el símbolo universal de parada).</summary>
     public static readonly Color StopSmallBg = Pgm;
-    public static readonly Color StopSmallBorder = Hex(0xe05a4a);
+    public static readonly Color StopSmallBorder = Hex(Palette.StopSmallBorder);
 
     /// <summary>Fondo de los desplegables de flecha pegados a «Abrir» y
     /// «Guardar». Es EL MISMO gris del botón principal a propósito: hundirlo
