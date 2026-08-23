@@ -32,12 +32,23 @@ public static class Theme
     public static readonly Color TextPrimary = Hex(Palette.TextPrimary);
     public static readonly Color TextTertiary = Hex(Palette.TextTertiary);
     public static readonly Color TextDim = Hex(Palette.TextDim);
+    // Sumado para el mixer (MixerPanel.cs, hitos-0-1): el gris de la
+    // botonera en reposo y de la información secundaria (dispositivo,
+    // tooltips) — un tono más apagado que TextDim.
+    public static readonly Color TextDimmer = Hex(Palette.TextDimmer);
     public static readonly Color TextFaint = Hex(Palette.TextFaint);
     public static readonly Color TextOnAccent = Hex(Palette.TextOnAccent);
 
     // ── Bordes ──────────────────────────────────────────────────────────
     public static readonly Color Border = Hex(Palette.Border);
     public static readonly Color Divider = Hex(Palette.Divider);
+
+    // ── Controles / mixer (sumado para MixerPanel.cs, hitos-0-1) ───────
+    public static readonly Color ButtonBg = Hex(Palette.ButtonBg);
+    public static readonly Color SunkenBg = Hex(Palette.SunkenBg);
+    public static readonly Color ToolbarBg = Hex(Palette.ToolbarBg);
+    public static readonly Color InfoAlt = Hex(Palette.InfoAlt);
+    public static readonly Color MagentaAlt = Hex(Palette.MagentaAlt);
 
     // ── Acentos de estado (reutilizados en la columna de duración) ─────
     public static readonly Color Go = Hex(Palette.Go);
@@ -86,10 +97,16 @@ public static class Theme
     public static readonly SolidColorBrush TextPrimaryBrush = Solid(TextPrimary);
     public static readonly SolidColorBrush TextTertiaryBrush = Solid(TextTertiary);
     public static readonly SolidColorBrush TextDimBrush = Solid(TextDim);
+    public static readonly SolidColorBrush TextDimmerBrush = Solid(TextDimmer);
     public static readonly SolidColorBrush TextFaintBrush = Solid(TextFaint);
     public static readonly SolidColorBrush TextOnAccentBrush = Solid(TextOnAccent);
     public static readonly SolidColorBrush BorderBrush = Solid(Border);
     public static readonly SolidColorBrush DividerBrush = Solid(Divider);
+    public static readonly SolidColorBrush ButtonBgBrush = Solid(ButtonBg);
+    public static readonly SolidColorBrush SunkenBgBrush = Solid(SunkenBg);
+    public static readonly SolidColorBrush ToolbarBgBrush = Solid(ToolbarBg);
+    public static readonly SolidColorBrush InfoAltBrush = Solid(InfoAlt);
+    public static readonly SolidColorBrush MagentaAltBrush = Solid(MagentaAlt);
     public static readonly SolidColorBrush GoBrush = Solid(Go);
     public static readonly SolidColorBrush GoButtonBrush = Solid(GoButton);
     public static readonly SolidColorBrush PgmBrush = Solid(Pgm);

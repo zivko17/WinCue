@@ -69,6 +69,18 @@ public sealed partial class MainWindow : Window, IShowView
     // alcance exacto.
     private readonly InspectorPanel _inspector = new();
 
+    // ── Mixer (hitos-0-1) ────────────────────────────────────────────────
+    // MixerPanel.cs, en WinUI 3 + Win2D: strip MASTER, strip CUE (audición) y
+    // un strip por cada cue de audio/vídeo — ver la cabecera de ese archivo
+    // para el cálculo compartido con WinCue.App.AudioMixerPanel.
+    private readonly MixerPanel _mixer = new();
+
+    /// <summary>Últimos cues activos recibidos — la mesa se sincroniza
+    /// también fuera de UpdateActiveCues (Attach, ReloadTable), y para eso
+    /// necesita saber qué suena. Mismo reparto que WinCue.App.MainWindow.
+    /// xaml.cs._lastActive / SyncMixer.</summary>
+    private IReadOnlyList<ActiveCueInfo> _lastActive = Array.Empty<ActiveCueInfo>();
+
     /// <summary>CueId del cue seleccionado en la tabla, o -1. Se guarda
     /// aparte de CueList.SelectedItem porque RefreshRow REEMPLAZA la
     /// instancia CueRow de la fila editada en cada commit del inspector (ver
@@ -156,6 +168,8 @@ public sealed partial class MainWindow : Window, IShowView
         // OnSaveShowAsAsync): el inspector no tiene por qué saber de eso, así
         // que MainWindow resuelve el archivo y el inspector solo recibe la ruta.
         _inspector.BrowseFile = BrowseFileAsync;
+
+        MixerHost.Content = _mixer;
     }
 
     /// <summary>Selector de archivo para el campo Archivo del inspector — sin
@@ -221,11 +235,67 @@ public sealed partial class MainWindow : Window, IShowView
                     new Dictionary<string, object?> { [key] = value });
         };
 
+        // Mesa AUDIO (mixer): faders master/audición/cues + VU + GR limitador
+        // — mismo cableado que WinCue.App.MainWindow.xaml.cs.Attach.
+        _mixer.MasterGainReductionProvider = () => controller.GetMasterGainReduction();
+        _mixer.MasterVolumeChanged = (v, final) =>
+        {
+            controller.OnMasterVolume(v);            // en vivo a cada cambio
+            if (final)
+                _settings.Set("master_volume", v);    // persistir con debounce
+        };
+        _mixer.AuditionVolumeChanged = (v, final) => controller.OnAuditionVolume(v, persist: final);
+        _mixer.CueVolumeCommitted = (cueId, vol) =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                controller.OnCueEditCommitted(row,
+                    new Dictionary<string, object?> { ["volume"] = vol });
+        };
+        _mixer.CueStripActivated = cueId =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row < 0)
+                return;
+            // Selecciona la fila: dispara OnCueSelectionChanged, que puebla
+            // el inspector — mismo efecto que WPF (CueGrid.SelectedIndex),
+            // sin pestaña de inspector que cambiar (Secuence lo enseña
+            // siempre, en la columna de la derecha).
+            CueList.SelectedIndex = row;
+        };
+        // CUE = PFL: pinchar la señal VIVA de ese cue en los cascos.
+        void PedirCue(int cueId) => controller.PflToggle(cueId);
+        _mixer.CueRequested = PedirCue;
+        _mixer.AuditionSourceId = () => controller.AuditionSourceCueId;
+        // Sin dispositivo de cascos NO hay preescucha posible: el botón CUE
+        // se deshabilita en vez de encenderse y no sonar.
+        _mixer.CueAvailable = () => _settings.Get("audition_device_name", "").Length > 0;
+        _mixer.CueBusSourceNow = () => controller.CueBusNow;
+        // StripsRepainted queda sin conectar a propósito: el inspector de
+        // Secuence todavía no tiene botones de mute/solo que sincronizar
+        // (ver InspectorPanel.cs, "FUERA de esta pasada: el rack de audio").
+
+        _mixer.SetMasterFader(_settings.Get("master_volume", 100));
+        _mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
+
         _clockTimer = DispatcherQueue.CreateTimer();
         _clockTimer.Interval = TimeSpan.FromMilliseconds(250);
         _clockTimer.Tick += (_, _) => RefreshShowClock();
         _clockTimer.Start();
+
+        SyncMixer();   // los canales del show cargado, ya visibles al arrancar
     }
+
+    /// <summary>Pone al día la mesa con TODO el show — mismo reparto que
+    /// WinCue.App.MainWindow.xaml.cs.SyncMixer: MixerPanel.SyncActive hace la
+    /// reconciliación (crear/actualizar/quitar strips) con el cálculo
+    /// compartido WinCue.Presentation.MixerLayout.</summary>
+    private void SyncMixer() =>
+        _mixer.SyncActive(_lastActive, cueId =>
+        {
+            int r = _model.IndexOfId(cueId);
+            return r >= 0 ? _model.GetCue(r) : null;
+        }, _model.Cues);
 
     // ==================================================================
     // Transport — clics y atajos (Espacio = GO, Esc = STOP ALL)
@@ -527,12 +597,17 @@ public sealed partial class MainWindow : Window, IShowView
         // adivinar si el mismo CueId de antes sigue significando lo mismo.
         _selectedCueId = -1;
         _inspector.SetCue(null);
+
+        // Show nuevo: los canales de la mesa cambian con él (mismo motivo
+        // que WPF.SyncMixer tras ReloadTable).
+        SyncMixer();
     }
 
     public void AppendCueRow(Cue cue)
     {
         _rows.Add(new CueRow(cue, _model));
         _timeline.RefreshFromModel();
+        SyncMixer();   // importar medios ya deja su canal en la mesa
     }
 
     /// <summary>WPF filtra visibilidad de fila por grupo colapsado
@@ -576,6 +651,11 @@ public sealed partial class MainWindow : Window, IShowView
             vm[i] = new ActiveCueRow(rows[i]);
         ActiveCuesList.ItemsSource = vm;
         _timeline.SetActive(rows);
+
+        // Strips del panel de mezclador (misma cadencia; reconcilia sin
+        // recrear) — mismo reparto que WinCue.App.MainWindow.xaml.cs.
+        _lastActive = rows;
+        SyncMixer();
     }
 
     /// <summary>VU de programa, en Win2D (VuMeterCanvas — piloto del traslado
@@ -586,11 +666,24 @@ public sealed partial class MainWindow : Window, IShowView
     {
         _pgmVuL.SetLevel(left);
         _pgmVuR.SetLevel(right);
+        _mixer.SetMasterLevel(left, right);
     }
 
-    /// <summary>Mismo motivo que UpdateVuMeter: sin strip de mezclador ni
-    /// inspector, no hay dónde pintar el VU de un cue concreto.</summary>
-    public void UpdateCueVuMeter(int cueId, float left, float right) { }
+    /// <summary>VU por cue, al strip de mezclador correspondiente (mismo
+    /// reparto que WinCue.App.MainWindow.xaml.cs.UpdateCueVuMeter): la
+    /// audición local es el "preview" de audio → VU del strip CUE; el resto,
+    /// al strip de su propio cue. El inspector sigue sin rack de audio en
+    /// esta pasada (ver InspectorPanel.cs), así que aquí no hay nada más que
+    /// alimentar.</summary>
+    public void UpdateCueVuMeter(int cueId, float left, float right)
+    {
+        if (cueId == MainController.AuditionCueId)
+        {
+            _mixer.SetAuditionLevel(left, right);
+            return;
+        }
+        _mixer.UpdateCueLevel(cueId, left, right);
+    }
 
     // ==================================================================
     // IShowView — Salida de vídeo

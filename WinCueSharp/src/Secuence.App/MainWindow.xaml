@@ -56,6 +56,7 @@
             <RowDefinition Height="Auto"/> <!-- 3: cabecera de columnas -->
             <RowDefinition Height="*"/>    <!-- 4: tabla -->
             <RowDefinition Height="200"/>  <!-- 5: timeline (hitos-0-1, solo lectura) -->
+            <RowDefinition Height="Auto"/> <!-- 6: mixer (hitos-0-1) -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════ TRANSPORT ═══════════ -->
@@ -354,14 +355,27 @@
                             VerticalContentAlignment="Stretch"/>
         </Border>
 
+        <!-- ═══════════ MIXER (hitos-0-1) ═══════════ -->
+        <!-- MixerPanel.cs: strip MASTER, strip CUE (audición) y un strip por
+             cada cue de audio/vídeo — ver la cabecera de ese archivo para el
+             cálculo compartido con WinCue.App.AudioMixerPanel (WinCue.
+             Presentation.MixerLayout/FaderScaleLayout). Altura Auto: el
+             strip mide lo que miden sus piezas (UiMetrics.StripHeight), no
+             lo que sobre del panel — mismo motivo que en WPF. -->
+        <Border Grid.Row="6" Background="{x:Bind local:Theme.PanelBgBrush}"
+                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
+            <ContentControl x:Name="MixerHost" HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"/>
+        </Border>
+
         <!-- ═══════════ INSPECTOR (primera pasada, hitos-0-1) ═══════════ -->
         <!-- InspectorPanel.cs: identidad, temporización, fundidos y
              reproducción de la Cue seleccionada en la tabla — ver la
              cabecera de ese archivo para el alcance exacto y lo que queda
              fuera (rack de audio, geometría, canvas, disparadores remotos).
-             RowSpan cubre las seis filas: es la única columna de la derecha
-             de toda la ventana, de arriba abajo. -->
-        <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="6"
+             RowSpan cubre las SIETE filas (con el mixer, fila 6): es la
+             única columna de la derecha de toda la ventana, de arriba abajo. -->
+        <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="7"
                 Background="{x:Bind local:Theme.PanelBgBrush}"
                 BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="1,0,0,0">
             <ContentControl x:Name="InspectorHost" HorizontalContentAlignment="Stretch"
