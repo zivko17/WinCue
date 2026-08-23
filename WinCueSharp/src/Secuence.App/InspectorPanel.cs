@@ -33,6 +33,13 @@
 // dispare. Replicar esa política exactamente es la instrucción del encargo:
 // "mira qué hace WinCue y haz lo mismo".
 //
+// BARRA DE TRIM CON ONDA (WaveformCanvas, Win2D): igual que en WPF, mover el
+// trim en los campos numéricos mueve los manejadores de la onda (SetMarkers
+// en Commit) y arrastrar los manejadores de la onda comete "trim_start"/
+// "trim_end" y repuebla los campos (MarkersChanged) — dos direcciones, ver
+// UpdateWave más abajo. Solo cues de AUDIO en esta pasada (ver la cabecera
+// de WaveformCanvas.cs para el porqué de dejar fuera vídeo).
+//
 // FORMATO Y VALIDACIÓN: el formato/parseo del campo de tiempo editable
 // (CueTimeField) y el rango/ley del fader de volumen (AudioLevels) viven en
 // WinCue.Presentation / WinCue.Core — código COMPARTIDO con WinCue, no
@@ -69,6 +76,8 @@ public sealed class InspectorPanel : ContentControl
 
     private Cue? _cue;
     private bool _loading;   // suprime commits al repoblar (igual que en WPF)
+    private readonly WaveformCanvas _wave = new();
+    private string _waveLoadedPath = "";
 
     private readonly TextBlock _header = new()
     {
@@ -127,6 +136,7 @@ public sealed class InspectorPanel : ContentControl
         Int("play_count", Loc.T("Repeticiones (play count):", "Repeats (play count):"), c => c.PlayCount);
         TimeF("trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
         TimeF("trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
+        WaveformRow();
         VolumeField();
 
         IsEnabled = false;   // sin cue seleccionado
@@ -143,6 +153,8 @@ public sealed class InspectorPanel : ContentControl
         if (cue is null)
         {
             _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
+            _wave.Clear();
+            _waveLoadedPath = "";
             return;
         }
 
@@ -154,6 +166,7 @@ public sealed class InspectorPanel : ContentControl
                 loader(cue);
             foreach (var (el, visibleIf) in _conditional)
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
+            UpdateWave(cue);
         }
         finally
         {
@@ -174,6 +187,58 @@ public sealed class InspectorPanel : ContentControl
         // el MISMO objeto que el modelo acaba de mutar, así que basta con
         // releerlo — no hace falta repoblar el resto del formulario.
         _header.Text = HeaderText(_cue);
+
+        // Sincronía barra de trim ↔ campos numéricos / archivo (mismo reparto
+        // que WinCue.App.InspectorPanel.Commit).
+        if (key is "trim_start" or "trim_end")
+            _wave.SetMarkers(_cue.TrimStart, _cue.TrimEnd);
+        else if (key == "file_path")
+            UpdateWave(_cue, force: true);
+    }
+
+    /// <summary>Carga la barra de trim (decodifica solo si cambia el
+    /// archivo). Solo AUDIO en esta pasada — ver la cabecera de
+    /// WaveformCanvas.cs.</summary>
+    private void UpdateWave(Cue cue, bool force = false)
+    {
+        if (cue.Type != CueType.Audio || cue.FilePath.Length == 0)
+        {
+            _wave.Clear();
+            _waveLoadedPath = "";
+            return;
+        }
+        if (!force && cue.FilePath == _waveLoadedPath)
+        {
+            _wave.SetMarkers(cue.TrimStart, cue.TrimEnd);
+            return;
+        }
+        _waveLoadedPath = cue.FilePath;
+        _wave.LoadAudio(cue.FilePath, cue.TrimStart, cue.TrimEnd);
+    }
+
+    /// <summary>Barra de trim con onda: arrastrar sus manejadores comete
+    /// trim_start/trim_end y repuebla los campos numéricos, igual que
+    /// WinCue.App.InspectorPanel hace con MarkersChanged.</summary>
+    private void WaveformRow()
+    {
+        Header(Loc.T("BARRA DE TRIM — arrastra los manejadores", "TRIM BAR — drag the handles"));
+        _wave.Margin = new Thickness(10, 2, 10, 6);
+        _wave.Height = UiMetrics.TrimBarHeight;
+        _root.Children.Add(_wave);
+        _wave.MarkersChanged += (start, end) =>
+        {
+            if (_cue is null) return;
+            Commit("trim_start", Math.Round(start, 3));
+            Commit("trim_end", Math.Round(end, 3));
+            // Reflejar en los campos numéricos sin re-commitear
+            _loading = true;
+            try
+            {
+                _loaders["trim_start"](_cue);
+                _loaders["trim_end"](_cue);
+            }
+            finally { _loading = false; }
+        };
     }
 
     // ==================================================================
