@@ -5,26 +5,22 @@
     xmlns:local="using:Secuence.App">
 
     <!-- ==========================================================================
-         MainWindow.xaml — transport + panel de activos + tabla de cues.
+         MainWindow.xaml — disposición general de la ventana.
          ==========================================================================
-         Los anchos de columna de la TABLA repiten los de
-         src/WinCue.App/MainWindow.xaml (DataGrid.Columns) A PROPÓSITO: es la
-         misma información y el mismo orden de lectura, para que quien conozca
-         WinCue reconozca Secuence de un vistazo. WinUI 3 no trae DataGrid: la
-         cabecera y cada fila son un Grid con las MISMAS ColumnDefinitions,
-         repetidas — no hay agrupación de columnas compartida como en WPF, así
-         que si aquí se cambia un ancho hay que cambiarlo en las dos plantillas.
-
-         La disposición del TRANSPORT sí es deliberadamente la de WinCue
-         (src/WinCue.App/MainWindow.xaml, TopBar): GO grande a la izquierda,
-         PANIC en rojo, el countdown "SHOW · REMAINING" en ámbar a la derecha.
-         No es una copia de código — es un Grid propio de WinUI 3 — pero la
-         lectura de la barra tiene que ser la misma de un vistazo.
+         Reorganización "hitos-0-1, aspecto" (ver secuence-shell-report.md): la
+         disposición copia la de src/WinCue.App/MainWindow.xaml elemento a
+         elemento — barra de transporte arriba, fila de herramientas debajo,
+         columna izquierda con los previos PGM/PVW y el panel de EN
+         REPRODUCCIÓN, centro con la tabla y las pestañas Timeline/Inspector/
+         Mixer, barra de estado abajo. Es una tarea de SITIO Y COLOR, no de
+         función nueva: lo que en WinCue tiene un botón sin equivalente aquí
+         todavía queda deshabilitado con el mismo aspecto (ver más abajo, uno a
+         uno), no se inventa el comportamiento.
 
          Los colores van todos por {x:Bind local:Theme.XxxBrush} — propiedad
-         ESTÁTICA, no de instancia: x:Bind admite referenciar directamente un
-         miembro estático por Tipo.Propiedad, así que ni la ventana ni cada fila
-         necesitan repetir "propiedades puente" solo para exponer la paleta.
+         ESTÁTICA, no de instancia — usando el MISMO token que usa WinCue para
+         cada elemento (Theme.cs, comentario junto a cada campo nuevo señala de
+         qué botón/caja de WinCue viene).
 
          ATAJOS: Espacio = GO, Esc = STOP ALL. Van como KeyboardAccelerator en
          el Grid raíz (WinUI 3 no tiene PreviewKeyDown de ventana como WPF) —
@@ -38,29 +34,26 @@
             <KeyboardAccelerator Key="Escape" Invoked="OnStopAllAccelerator"/>
         </Grid.KeyboardAccelerators>
 
-        <!-- Columna 0: todo lo de siempre (transport, activos, tabla,
-             timeline). Columna 1: el INSPECTOR, ancho fijo, a la derecha de
-             todo — mismo sitio relativo que WPF (BottomTabs, pestaña
-             Inspector), aunque aquí no hay pestañas: con el conjunto de
-             campos de esta pasada (ver InspectorPanel.cs) un panel fijo
-             entero, no compartido con otra cosa. -->
+        <!-- Columna 0: previos PGM/PVW + EN REPRODUCCIÓN (equivalente al panel
+             izquierdo de WinCue, MonitorHost + ActiveList). Columna 1: tabla +
+             pestañas — mismo reparto que el Grid de 3 columnas de WinCue
+             (aquí en 2: el GridSplitter arrastrable no tiene equivalente
+             razonable en WinUI 3 sin traer una dependencia nueva — ver el
+             informe — así que la columna izquierda queda de ancho FIJO). -->
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="*"/>
             <ColumnDefinition Width="380"/>
+            <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- 0: transport -->
-            <RowDefinition Height="Auto"/> <!-- 1: activos -->
-            <RowDefinition Height="Auto"/> <!-- 2: estado -->
-            <RowDefinition Height="Auto"/> <!-- 3: cabecera de columnas -->
-            <RowDefinition Height="*"/>    <!-- 4: tabla -->
-            <RowDefinition Height="200"/>  <!-- 5: timeline (hitos-0-1, solo lectura) -->
-            <RowDefinition Height="Auto"/> <!-- 6: mixer (hitos-0-1) -->
+            <RowDefinition Height="Auto"/> <!-- 1: herramientas (Abrir/Guardar/Añadir/Importar/Eliminar) -->
+            <RowDefinition Height="*"/>    <!-- 2: cuerpo (columna izq | tabla+pestañas) -->
+            <RowDefinition Height="Auto"/> <!-- 3: estado -->
         </Grid.RowDefinitions>
 
         <!-- ═══════════ TRANSPORT ═══════════ -->
-        <Border Grid.Row="0" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="10,8">
+        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="10,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -68,33 +61,12 @@
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
 
-                <!-- Izquierda: GO + resto de la fila de acción. Los glifos de
-                     los TextBlock x:Name="...Icon" se fijan en código
-                     (MainWindow.xaml.cs, constructor): son constantes de
-                     WinCue.Presentation.Icons y de un ensamblado distinto al
-                     de este XAML — más simple y sin sorpresas que un x:Bind
-                     a un tipo externo solo para un glifo que no cambia. -->
+                <!-- Izquierda: GO + resto de la fila de acción + SIGUIENTE.
+                     Los glifos de los TextBlock x:Name="...Icon" se fijan en
+                     código (MainWindow.xaml.cs, constructor): son constantes
+                     de WinCue.Presentation.Icons y de un ensamblado distinto
+                     al de este XAML. -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
-                    <!-- Abrir / Guardar: Ctrl+O, Ctrl+S van por KeyboardAccelerator
-                         en código (MainWindow.xaml.cs, constructor) — Guardar como…
-                         solo por Ctrl+Shift+S, sin botón propio (ver el encargo). -->
-                    <Button x:Name="OpenButton" Click="OnOpenClick" Height="44"
-                            ToolTipService.ToolTip="Ctrl+O">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock x:Name="OpenIcon" FontFamily="{x:Bind local:IconFont.Font}"
-                                       FontSize="16" VerticalAlignment="Center"/>
-                            <TextBlock Text="ABRIR" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Button x:Name="SaveButton" Click="OnSaveClick" Height="44"
-                            ToolTipService.ToolTip="Ctrl+S (Ctrl+Shift+S: guardar como…)">
-                        <StackPanel Orientation="Horizontal" Spacing="6">
-                            <TextBlock x:Name="SaveIcon" FontFamily="{x:Bind local:IconFont.Font}"
-                                       FontSize="16" VerticalAlignment="Center"/>
-                            <TextBlock Text="GUARDAR" VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Button>
-                    <Border Width="1" Margin="4,6" Background="{x:Bind local:Theme.DividerBrush}"/>
                     <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
                             Background="{x:Bind local:Theme.GoButtonBrush}"
                             FontSize="20" FontWeight="Bold"
@@ -134,34 +106,39 @@
                             <TextBlock Text="PANIC" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
-                    <!-- Blackout: oculta/muestra el HWND hijo de la salida de
-                         vídeo. Corte instantáneo (no un fundido) — ver el
-                         porqué en HwndHijo.Ocultar. -->
+                    <!-- Blackout: SIN equivalente como botón propio en WinCue
+                         (allí vive dentro del menú de "Salida vídeo", tecla B
+                         — ver el informe). Se queda aquí porque YA funciona
+                         (HwndHijo.Ocultar) y quitarlo sería restar función, no
+                         solo aspecto — al lado de PANIC es donde vivía antes
+                         de esta reorganización. -->
                     <Button x:Name="BlackoutButton" Click="OnBlackoutClick" Height="44"
                             Background="{x:Bind local:Theme.ControlBgBrush}"
-                            ToolTipService.ToolTip="Blackout de vídeo">
+                            ToolTipService.ToolTip="Blackout de vídeo (sin equivalente en botón en WinCue)">
                         <StackPanel Orientation="Horizontal" Spacing="6">
                             <TextBlock x:Name="BlackoutIcon" FontFamily="{x:Bind local:IconFont.Font}"
                                        FontSize="16" VerticalAlignment="Center"/>
                             <TextBlock Text="BLACKOUT" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <!-- SIGUIENTE: mismo sitio que WinCue.App.MainWindow.xaml
+                         (StackPanel Vertical, MaxWidth 240, tras PANIC). SIN
+                         función todavía (WinCue lo calcula con escala de
+                         fuente y visibilidad ligadas a Settings — ver el
+                         informe): placeholder estático, no un dato en vivo. -->
+                    <StackPanel VerticalAlignment="Center" Margin="10,0,0,0" MaxWidth="240">
+                        <TextBlock Text="SIGUIENTE" FontSize="9" Foreground="{x:Bind local:Theme.TextDimBrush}"/>
+                        <TextBlock x:Name="NextCueLabel" Text="—" FontSize="14" FontWeight="Bold"
+                                   TextTrimming="CharacterEllipsis"
+                                   Foreground="{x:Bind local:Theme.StandbyBrush}"/>
+                    </StackPanel>
                 </StackPanel>
 
-                <!-- PGM: VU de programa (piloto Win2D del encargo hitos-0-1).
-                     Las dos barras (L/R) las crea MainWindow.xaml.cs en código,
-                     igual que WinCue.App crea sus VuMeterControl — no hay
-                     constructor sin parámetros útil para "vertical=true", así
-                     que aquí solo va el hueco donde colgarlas. -->
-                <StackPanel x:Name="PgmVuHost" Grid.Column="1" Orientation="Horizontal" Spacing="3"
-                            HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,0,16,0"
-                            ToolTipService.ToolTip="PGM"/>
-
-                <!-- Centro: reloj del show. El countdown POR CUE vive en el
-                     panel de activos (fila 1), no aquí — igual reparto que
-                     WinCue (ShowClockBox central + tarjetas de activos). -->
-                <Border Grid.Column="2" Background="{x:Bind local:Theme.WindowBgBrush}" CornerRadius="4"
-                        Padding="16,2" HorizontalAlignment="Right" VerticalAlignment="Center">
+                <!-- Centro: reloj del show. Mismo token de fondo que WinCue
+                     (DeepBg, no WindowBg — ver Theme.cs). El countdown POR CUE
+                     vive en las tarjetas de EN REPRODUCCIÓN, no aquí. -->
+                <Border Grid.Column="1" Background="{x:Bind local:Theme.DeepBgBrush}" CornerRadius="4"
+                        Padding="16,2" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel>
                         <TextBlock Text="SHOW · REMAINING" FontSize="10"
                                    Foreground="{x:Bind local:Theme.TextDimBrush}"
@@ -172,55 +149,382 @@
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
                 </Border>
+
+                <!-- Derecha: Mode: EDIT + Salida vídeo — mismo sitio y mismo
+                     color que WinCue (Gold / PanicButton), pero SIN
+                     equivalente funcional en Secuence todavía (no hay modo
+                     EDIT/SHOW, y "Salida vídeo" en WinCue abre un menú de
+                     patrones de prueba por pantalla que Secuence no tiene):
+                     deshabilitados a propósito, ver el informe. -->
+                <StackPanel Grid.Column="2" Orientation="Horizontal" Spacing="6" VerticalAlignment="Center">
+                    <ToggleButton x:Name="ModeToggle" IsEnabled="False" Height="44" Padding="10,4"
+                                  Background="{x:Bind local:Theme.GoldBrush}" Foreground="Black"
+                                  FontWeight="Bold" Content="MODO: EDIT"
+                                  ToolTipService.ToolTip="Sin modo EDIT/SHOW todavía en Secuence"/>
+                    <Button x:Name="VideoOutButton" IsEnabled="False" Height="44"
+                            Background="{x:Bind local:Theme.PanicButtonBrush}"
+                            ToolTipService.ToolTip="Sin menú de salida de vídeo todavía en Secuence">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="VideoOutIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="SALIDA VÍDEO" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                </StackPanel>
             </Grid>
         </Border>
 
-        <!-- ═══════════ PANEL DE CUES ACTIVOS ═══════════ -->
-        <!-- Alimentado por IShowView.UpdateActiveCues. Una tarjeta por cue
-             sonando, con barra de progreso — basta para esta tarea (inspector
-             y VU real son de otra pieza). -->
-        <Border Grid.Row="1" Background="{x:Bind local:Theme.HeaderBgBrush}"
-                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,0,0,1"
-                Padding="8,6" MinHeight="0">
-            <ScrollViewer HorizontalScrollBarVisibility="Auto" VerticalScrollBarVisibility="Disabled">
-                <ItemsControl x:Name="ActiveCuesList">
-                    <ItemsControl.ItemsPanel>
-                        <ItemsPanelTemplate>
-                            <StackPanel Orientation="Horizontal" Spacing="8"/>
-                        </ItemsPanelTemplate>
-                    </ItemsControl.ItemsPanel>
-                    <ItemsControl.ItemTemplate>
-                        <DataTemplate x:DataType="local:ActiveCueRow">
-                            <Border Background="{x:Bind local:Theme.ControlBgBrush}" CornerRadius="4"
-                                    Padding="8,6" Width="180">
-                                <StackPanel Spacing="3">
-                                    <StackPanel Orientation="Horizontal" Spacing="6">
-                                        <Border Background="{x:Bind ColorBrush}" Width="8" Height="8" CornerRadius="4"
-                                                VerticalAlignment="Center"/>
-                                        <TextBlock Text="{x:Bind Number}" FontWeight="Bold" FontSize="12"
-                                                   Foreground="{x:Bind local:Theme.TextPrimaryBrush}"/>
-                                        <TextBlock Text="{x:Bind Name}" FontSize="12" TextTrimming="CharacterEllipsis"
-                                                   Foreground="{x:Bind local:Theme.TextTertiaryBrush}"/>
-                                    </StackPanel>
-                                    <ProgressBar Value="{x:Bind ProgressPercent}" Maximum="100" Height="6"
-                                                 Foreground="{x:Bind ProgressBrush}"/>
-                                    <TextBlock Text="{x:Bind RemainingText}" FontSize="11" FontFamily="Consolas"
-                                               Foreground="{x:Bind local:Theme.TextDimBrush}"/>
-                                </StackPanel>
-                            </Border>
-                        </DataTemplate>
-                    </ItemsControl.ItemTemplate>
-                </ItemsControl>
-            </ScrollViewer>
+        <!-- ═══════════ HERRAMIENTAS: Abrir · Guardar · Añadir · Importar · Eliminar ═══════════ -->
+        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.ToolbarBgBrush}" Padding="8,4">
+            <StackPanel Orientation="Horizontal" Spacing="6">
+                <Button x:Name="OpenButton" Click="OnOpenClick" ToolTipService.ToolTip="Ctrl+O">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="OpenIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="ABRIR" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="SaveButton" Click="OnSaveClick"
+                        ToolTipService.ToolTip="Ctrl+S (Ctrl+Shift+S: guardar como…)">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="SaveIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="GUARDAR" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Border Width="14" Background="Transparent"/>
+                <!-- Añadir / Importar / Eliminar: SIN equivalente todavía en
+                     Secuence (no hay menú de creación de cues ni importador
+                     de archivos en esta pasada — ver el informe). Mismo
+                     glifo y mismo texto que WinCue, deshabilitados. -->
+                <Button x:Name="AddButton" IsEnabled="False"
+                        ToolTipService.ToolTip="Sin creación de cues todavía en Secuence">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="AddIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="AÑADIR" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Border Width="14" Background="Transparent"/>
+                <Button x:Name="ImportButton" IsEnabled="False"
+                        ToolTipService.ToolTip="Sin importador de archivos todavía en Secuence">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="ImportIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="IMPORTAR ARCHIVOS…" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="DeleteButton" IsEnabled="False"
+                        ToolTipService.ToolTip="Sin eliminar cues todavía en Secuence">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="DeleteIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                   FontSize="16" VerticalAlignment="Center"/>
+                        <TextBlock Text="ELIMINAR" VerticalAlignment="Center"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
         </Border>
 
-        <!-- Barra de estado: qué show se cargó (o el motivo de que no), y los
-             FlashStatus del controlador (incluidos los fallos limpios de vídeo).
-             A la derecha, el testigo de SALIDA (IShowView.SetOutputContent):
-             nombre del vídeo en pantalla o NEGRO — mismo reparto que
-             TallyLabel en WinCue.App (vive en la ventana de CONTROL, no en la
-             de salida: el operador no puede estar mirando el proyector). -->
-        <Border Grid.Row="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
+        <!-- ═══════════ IZQUIERDA: previos PGM/PVW + EN REPRODUCCIÓN ═══════════
+             Equivalente de WinCue.App.MainWindow.xaml, columna 0 (MonitorHost +
+             ActiveList). Los previos PGM/PVW son solo el HUECO — marco, borde
+             de color y etiqueta — SIN vídeo en vivo: eso es LiveMonitorControl
+             (561 líneas), la SIGUIENTE tarea (ver el encargo). El VU de
+             programa (PgmVuHost) SÍ es funcional (ya lo era) y se muda aquí,
+             al lado del previo PGM — mismo sitio relativo que WinCue.App.
+             MainWindow.xaml.cs.MonitorRow. -->
+        <Border Grid.Row="2" Grid.Column="0" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="10">
+            <Grid>
+                <Grid.RowDefinitions>
+                    <RowDefinition Height="Auto"/> <!-- PGM -->
+                    <RowDefinition Height="Auto"/> <!-- PVW -->
+                    <RowDefinition Height="Auto"/> <!-- tira de transporte del PVW -->
+                    <RowDefinition Height="Auto"/> <!-- etiqueta EN REPRODUCCIÓN -->
+                    <RowDefinition Height="*"/>    <!-- tarjetas activas -->
+                </Grid.RowDefinitions>
+
+                <!-- PGM: borde ROJO (Theme.Pgm — mismo token que
+                     WinCue.App._pgm = new LiveMonitorControl("PGM", Theme.Pgm)),
+                     con el VU de programa a la derecha. -->
+                <Grid Grid.Row="0" Margin="0,0,0,6">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border x:Name="PgmBox" Grid.Column="0" Background="Black"
+                            BorderBrush="{x:Bind local:Theme.PgmBrush}" BorderThickness="1" Height="152">
+                        <Grid>
+                            <Grid.RowDefinitions>
+                                <RowDefinition Height="Auto"/>
+                                <RowDefinition Height="*"/>
+                            </Grid.RowDefinitions>
+                            <Border Grid.Row="0" Background="{x:Bind local:Theme.PgmBrush}" Padding="6,1">
+                                <TextBlock Text="PGM" FontSize="10" FontWeight="Bold" Foreground="Black"/>
+                            </Border>
+                            <TextBlock Grid.Row="1" Text="NEGRO"
+                                       Foreground="{x:Bind local:Theme.BorderBrush}"
+                                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                        </Grid>
+                    </Border>
+                    <StackPanel x:Name="PgmVuHost" Grid.Column="1" Orientation="Horizontal" Spacing="3"
+                                Margin="3,18,0,0" ToolTipService.ToolTip="PGM"/>
+                </Grid>
+
+                <!-- PVW: borde VERDE (Theme.GoDeep — mismo token que
+                     WinCue.App._pvw = new LiveMonitorControl("PVW", Theme.GoDeep)). -->
+                <Border Grid.Row="1" x:Name="PvwBox" Background="Black"
+                        BorderBrush="{x:Bind local:Theme.GoDeepBrush}" BorderThickness="1" Height="152">
+                    <Grid>
+                        <Grid.RowDefinitions>
+                            <RowDefinition Height="Auto"/>
+                            <RowDefinition Height="*"/>
+                        </Grid.RowDefinitions>
+                        <Border Grid.Row="0" Background="{x:Bind local:Theme.GoDeepBrush}" Padding="6,1">
+                            <TextBlock Text="PVW" FontSize="10" FontWeight="Bold" Foreground="Black"/>
+                        </Border>
+                        <TextBlock Grid.Row="1" Text="—" Foreground="{x:Bind local:Theme.BorderBrush}"
+                                   HorizontalAlignment="Center" VerticalAlignment="Center"/>
+                    </Grid>
+                </Border>
+
+                <!-- Tira de transporte del PVW (equivalente a
+                     MonitorTransportBar): reproducir/pausar, barra y reloj
+                     posición/duración. SIN mpv detrás todavía — deshabilitada,
+                     mismo formato de reloj (mm:ss,d) que Mmss() en WPF. -->
+                <Grid Grid.Row="2" Margin="0,4,0,10">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="Auto"/>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Button Grid.Column="0" x:Name="PreviewPlayButton" IsEnabled="False"
+                            Width="30" Height="22" Padding="0" FontSize="12" VerticalAlignment="Center"
+                            ToolTipService.ToolTip="Reproducir / pausar el previo (sin mpv todavía)">
+                        <TextBlock x:Name="PreviewPlayIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="12"/>
+                    </Button>
+                    <Slider Grid.Column="1" x:Name="PreviewSeekSlider" IsEnabled="False"
+                            Margin="6,0,6,0" VerticalAlignment="Center"/>
+                    <TextBlock Grid.Column="2" x:Name="PreviewTimeText" Text="0:00,0 / 0:00,0"
+                               FontFamily="Consolas" FontSize="11" Width="92" TextAlignment="Right"
+                               Foreground="{x:Bind local:Theme.TextDimBrush}" VerticalAlignment="Center"/>
+                </Grid>
+
+                <!-- EN REPRODUCCIÓN — mismo texto y sitio que WinCue
+                     (TextBlock DockPanel.Dock=Top, antes de ActiveList). -->
+                <TextBlock Grid.Row="3" Text="EN REPRODUCCIÓN" FontWeight="Bold"
+                           Foreground="{x:Bind local:Theme.TextDimBrush}" Margin="0,0,0,6"/>
+
+                <!-- Panel de cues activos, ahora en VERTICAL (era una tira
+                     horizontal antes de esta reorganización) — mismo apilado
+                     que WinCue.App.MainWindow.xaml (ItemsControl.ItemsPanel
+                     StackPanel, una tarjeta debajo de otra). -->
+                <ScrollViewer Grid.Row="4" VerticalScrollBarVisibility="Auto" HorizontalScrollBarVisibility="Disabled">
+                    <ItemsControl x:Name="ActiveCuesList">
+                        <ItemsControl.ItemsPanel>
+                            <ItemsPanelTemplate>
+                                <StackPanel Orientation="Vertical" Spacing="6"/>
+                            </ItemsPanelTemplate>
+                        </ItemsControl.ItemsPanel>
+                        <ItemsControl.ItemTemplate>
+                            <DataTemplate x:DataType="local:ActiveCueRow">
+                                <Border Background="{x:Bind local:Theme.CardBgBrush}" CornerRadius="4"
+                                        Padding="8,6" HorizontalAlignment="Stretch">
+                                    <StackPanel Spacing="3">
+                                        <StackPanel Orientation="Horizontal" Spacing="6">
+                                            <Border Background="{x:Bind ColorBrush}" Width="8" Height="8" CornerRadius="4"
+                                                    VerticalAlignment="Center"/>
+                                            <TextBlock Text="{x:Bind Number}" FontWeight="Bold" FontSize="12"
+                                                       Foreground="{x:Bind local:Theme.TextPrimaryBrush}"/>
+                                            <TextBlock Text="{x:Bind Name}" FontSize="12" TextTrimming="CharacterEllipsis"
+                                                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}"/>
+                                        </StackPanel>
+                                        <ProgressBar Value="{x:Bind ProgressPercent}" Maximum="100" Height="6"
+                                                     Foreground="{x:Bind ProgressBrush}"/>
+                                        <TextBlock Text="{x:Bind RemainingText}" FontSize="11" FontFamily="Consolas"
+                                                   Foreground="{x:Bind local:Theme.TextDimBrush}"/>
+                                    </StackPanel>
+                                </Border>
+                            </DataTemplate>
+                        </ItemsControl.ItemTemplate>
+                    </ItemsControl>
+                </ScrollViewer>
+            </Grid>
+        </Border>
+
+        <!-- ═══════════ CENTRO: tabla + pestañas Timeline/Inspector/Mixer ═══════════ -->
+        <Grid Grid.Row="2" Grid.Column="1">
+            <Grid.RowDefinitions>
+                <RowDefinition Height="Auto"/> <!-- cabecera de columnas -->
+                <RowDefinition Height="*"/>    <!-- tabla -->
+                <RowDefinition Height="Auto"/> <!-- pestañas -->
+                <RowDefinition Height="330"/>  <!-- contenido de la pestaña (mismo alto inicial que WinCue.App.MainWindow.xaml, BottomPaneRow) -->
+            </Grid.RowDefinitions>
+
+            <!-- Cabecera de columnas -->
+            <Grid Grid.Row="0" Background="{x:Bind local:Theme.HeaderBgBrush}" Height="30">
+                <Grid.ColumnDefinitions>
+                    <ColumnDefinition Width="26"/>
+                    <ColumnDefinition Width="68"/>
+                    <ColumnDefinition Width="92"/>
+                    <ColumnDefinition Width="*"/>
+                    <ColumnDefinition Width="56"/>
+                    <ColumnDefinition Width="64"/>
+                    <ColumnDefinition Width="56"/>
+                    <ColumnDefinition Width="72"/>
+                </Grid.ColumnDefinitions>
+                <TextBlock Grid.Column="1" Text="Nº" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="2" Text="Tipo" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="3" Text="Nombre" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="4" Text="Pre" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="5" Text="Dur" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="6" Text="Post" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <TextBlock Grid.Column="7" Text="Sigue" Margin="8,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+            </Grid>
+
+            <!-- Tabla -->
+            <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Single"
+                      SelectionChanged="OnCueSelectionChanged"
+                      Background="{x:Bind local:Theme.WindowBgBrush}">
+                <ListView.ItemContainerStyle>
+                    <Style TargetType="ListViewItem">
+                        <Setter Property="Padding" Value="0"/>
+                        <Setter Property="MinHeight" Value="30"/>
+                        <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
+                    </Style>
+                </ListView.ItemContainerStyle>
+                <ListView.ItemTemplate>
+                    <DataTemplate x:DataType="local:CueRow">
+                        <!-- Fondo de la fila: RowBrush, Mode=OneWay porque CueRow
+                             SÍ implementa INotifyPropertyChanged ahora (playhead) -
+                             un x:Bind normal (OneTime) no repintaría al moverse. -->
+                        <Grid MinHeight="28" Padding="0,2" Background="{x:Bind RowBrush, Mode=OneWay}">
+                            <Grid.ColumnDefinitions>
+                                <ColumnDefinition Width="26"/>
+                                <ColumnDefinition Width="68"/>
+                                <ColumnDefinition Width="92"/>
+                                <ColumnDefinition Width="*"/>
+                                <ColumnDefinition Width="56"/>
+                                <ColumnDefinition Width="64"/>
+                                <ColumnDefinition Width="56"/>
+                                <ColumnDefinition Width="72"/>
+                            </Grid.ColumnDefinitions>
+
+                            <!-- Punto de estado -->
+                            <Ellipse Grid.Column="0" Width="9" Height="9" Fill="{x:Bind StateBrush}"
+                                     HorizontalAlignment="Center" VerticalAlignment="Center"/>
+
+                            <!-- Nº: pastilla del color de etiqueta -->
+                            <Border Grid.Column="1" Background="{x:Bind LabelBrush}" CornerRadius="3"
+                                    Padding="5,1" Margin="0,0,6,0" HorizontalAlignment="Left" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind Number}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                            </Border>
+
+                            <!-- Tipo: icono Phosphor + etiqueta, coloreados por tipo -->
+                            <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind TypeIcon}" FontFamily="{x:Bind local:IconFont.Font}"
+                                           Foreground="{x:Bind TypeBrush}" FontSize="14" Margin="8,0,4,0"
+                                           VerticalAlignment="Center"/>
+                                <TextBlock Text="{x:Bind TypeName}" Foreground="{x:Bind TypeBrush}"
+                                           FontWeight="SemiBold" VerticalAlignment="Center"
+                                           TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+
+                            <!-- Nombre: icono de plegado (solo GROUP) + sangría por profundidad -->
+                            <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="{x:Bind NameIndent}"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind GroupToggleIcon}" FontFamily="{x:Bind local:IconFont.Font}"
+                                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontSize="12"
+                                           Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{x:Bind Name}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                                           VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
+                            </StackPanel>
+
+                            <TextBlock Grid.Column="4" Text="{x:Bind PreWaitText}" Margin="8,0,0,0"
+                                       Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="5" Text="{x:Bind DurationText}" Margin="8,0,0,0"
+                                       FontFamily="Consolas" FontWeight="SemiBold"
+                                       Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="6" Text="{x:Bind PostWaitText}" Margin="8,0,0,0"
+                                       Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
+                            <StackPanel Grid.Column="7" Orientation="Horizontal" Margin="8,0,0,0"
+                                        VerticalAlignment="Center">
+                                <TextBlock Text="{x:Bind ContinueIcon}" FontFamily="{x:Bind local:IconFont.Font}"
+                                           Foreground="{x:Bind local:Theme.TextPrimaryBrush}" FontSize="12"
+                                           Margin="0,0,4,0" VerticalAlignment="Center"/>
+                                <TextBlock Text="{x:Bind ContinueText}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                                           VerticalAlignment="Center"/>
+                            </StackPanel>
+                        </Grid>
+                    </DataTemplate>
+                </ListView.ItemTemplate>
+            </ListView>
+
+            <!-- Pestañas: mismo trío y mismo orden que WinCue.App.MainWindow.xaml
+                 BottomTabs (Timeline primero — es el que se fuerza en modo SHOW
+                 allí; aquí, sin modo SHOW, es solo el que abre por defecto).
+                 WinUI 3 no tiene TabControl retemplado con el mismo look de
+                 "tecla" que WPF (ver el informe): son tres botones que
+                 intercambian Visibility entre TimelineHost/InspectorHost/
+                 MixerHost (OnTimelineTabClick/OnInspectorTabClick/
+                 OnMixerTabClick, MainWindow.xaml.cs) — misma pestaña
+                 SELECCIONADA = plana y del color del panel (WindowBg) + texto
+                 ámbar (Warn); NO seleccionada = DeeperBg + texto atenuado
+                 (TextDim), mismos tokens que WinCue usa para lo mismo. -->
+            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="2" Margin="0,6,0,0">
+                <Button x:Name="TimelineTabButton" Click="OnTimelineTabClick"
+                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="TimelineTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
+                        <TextBlock x:Name="TimelineTabLabel" Text="Timeline"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="InspectorTabButton" Click="OnInspectorTabClick"
+                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="InspectorTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
+                        <TextBlock x:Name="InspectorTabLabel" Text="Inspector"/>
+                    </StackPanel>
+                </Button>
+                <Button x:Name="MixerTabButton" Click="OnMixerTabClick"
+                        Padding="14,5" CornerRadius="4,4,0,0" BorderThickness="0">
+                    <StackPanel Orientation="Horizontal" Spacing="6">
+                        <TextBlock x:Name="MixerTabIcon" FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
+                        <TextBlock x:Name="MixerTabLabel" Text="Mixer"/>
+                    </StackPanel>
+                </Button>
+            </StackPanel>
+
+            <!-- Contenido de la pestaña activa: TimelineHost/InspectorHost/
+                 MixerHost EN LA MISMA celda, apilados — solo uno visible cada
+                 vez (SelectTab, MainWindow.xaml.cs). Mismo fondo de panel que
+                 WinCue.App usa para las tres pestañas (PanelBg). -->
+            <Border Grid.Row="3" Background="{x:Bind local:Theme.PanelBgBrush}"
+                    BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
+                <Grid>
+                    <ContentControl x:Name="TimelineHost" HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch"/>
+                    <ContentControl x:Name="InspectorHost" HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch" Visibility="Collapsed"/>
+                    <ContentControl x:Name="MixerHost" HorizontalContentAlignment="Stretch"
+                                    VerticalContentAlignment="Stretch" Visibility="Collapsed"/>
+                </Grid>
+            </Border>
+        </Grid>
+
+        <!-- ═══════════ BARRA DE ESTADO ═══════════ -->
+        <!-- Qué show se cargó (o el motivo de que no) y los FlashStatus del
+             controlador. A la derecha, el testigo de SALIDA — mismo reparto
+             que TallyLabel en WinCue.App (vive en la ventana de CONTROL, no
+             en la de salida). -->
+        <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
@@ -233,153 +537,6 @@
                            Foreground="{x:Bind local:Theme.TextTertiaryBrush}"
                            FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
             </Grid>
-        </Border>
-
-        <!-- Cabecera de columnas -->
-        <Grid Grid.Row="3" Background="{x:Bind local:Theme.HeaderBgBrush}" Height="30">
-            <Grid.ColumnDefinitions>
-                <ColumnDefinition Width="26"/>
-                <ColumnDefinition Width="68"/>
-                <ColumnDefinition Width="92"/>
-                <ColumnDefinition Width="*"/>
-                <ColumnDefinition Width="56"/>
-                <ColumnDefinition Width="64"/>
-                <ColumnDefinition Width="56"/>
-                <ColumnDefinition Width="72"/>
-            </Grid.ColumnDefinitions>
-            <TextBlock Grid.Column="1" Text="Nº" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="2" Text="Tipo" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="3" Text="Nombre" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="4" Text="Pre" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="5" Text="Dur" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="6" Text="Post" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-            <TextBlock Grid.Column="7" Text="Sigue" Margin="8,0,0,0" VerticalAlignment="Center"
-                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
-        </Grid>
-
-        <!-- Tabla -->
-        <ListView x:Name="CueList" Grid.Row="4" SelectionMode="Single"
-                  SelectionChanged="OnCueSelectionChanged"
-                  Background="{x:Bind local:Theme.WindowBgBrush}">
-            <ListView.ItemContainerStyle>
-                <Style TargetType="ListViewItem">
-                    <Setter Property="Padding" Value="0"/>
-                    <Setter Property="MinHeight" Value="30"/>
-                    <Setter Property="HorizontalContentAlignment" Value="Stretch"/>
-                </Style>
-            </ListView.ItemContainerStyle>
-            <ListView.ItemTemplate>
-                <DataTemplate x:DataType="local:CueRow">
-                    <!-- Fondo de la fila: RowBrush, Mode=OneWay porque CueRow
-                         SÍ implementa INotifyPropertyChanged ahora (playhead) -
-                         un x:Bind normal (OneTime) no repintaría al moverse. -->
-                    <Grid MinHeight="28" Padding="0,2" Background="{x:Bind RowBrush, Mode=OneWay}">
-                        <Grid.ColumnDefinitions>
-                            <ColumnDefinition Width="26"/>
-                            <ColumnDefinition Width="68"/>
-                            <ColumnDefinition Width="92"/>
-                            <ColumnDefinition Width="*"/>
-                            <ColumnDefinition Width="56"/>
-                            <ColumnDefinition Width="64"/>
-                            <ColumnDefinition Width="56"/>
-                            <ColumnDefinition Width="72"/>
-                        </Grid.ColumnDefinitions>
-
-                        <!-- Punto de estado -->
-                        <Ellipse Grid.Column="0" Width="9" Height="9" Fill="{x:Bind StateBrush}"
-                                 HorizontalAlignment="Center" VerticalAlignment="Center"/>
-
-                        <!-- Nº: pastilla del color de etiqueta -->
-                        <Border Grid.Column="1" Background="{x:Bind LabelBrush}" CornerRadius="3"
-                                Padding="5,1" Margin="0,0,6,0" HorizontalAlignment="Left" VerticalAlignment="Center">
-                            <TextBlock Text="{x:Bind Number}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
-                                       VerticalAlignment="Center"/>
-                        </Border>
-
-                        <!-- Tipo: icono Phosphor + etiqueta, coloreados por tipo -->
-                        <StackPanel Grid.Column="2" Orientation="Horizontal" VerticalAlignment="Center">
-                            <TextBlock Text="{x:Bind TypeIcon}" FontFamily="{x:Bind local:IconFont.Font}"
-                                       Foreground="{x:Bind TypeBrush}" FontSize="14" Margin="8,0,4,0"
-                                       VerticalAlignment="Center"/>
-                            <TextBlock Text="{x:Bind TypeName}" Foreground="{x:Bind TypeBrush}"
-                                       FontWeight="SemiBold" VerticalAlignment="Center"
-                                       TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-
-                        <!-- Nombre: icono de plegado (solo GROUP) + sangría por profundidad -->
-                        <StackPanel Grid.Column="3" Orientation="Horizontal" Margin="{x:Bind NameIndent}"
-                                    VerticalAlignment="Center">
-                            <TextBlock Text="{x:Bind GroupToggleIcon}" FontFamily="{x:Bind local:IconFont.Font}"
-                                       Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontSize="12"
-                                       Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{x:Bind Name}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
-                                       VerticalAlignment="Center" TextTrimming="CharacterEllipsis"/>
-                        </StackPanel>
-
-                        <TextBlock Grid.Column="4" Text="{x:Bind PreWaitText}" Margin="8,0,0,0"
-                                   Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="5" Text="{x:Bind DurationText}" Margin="8,0,0,0"
-                                   FontFamily="Consolas" FontWeight="SemiBold"
-                                   Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
-                        <TextBlock Grid.Column="6" Text="{x:Bind PostWaitText}" Margin="8,0,0,0"
-                                   Foreground="{x:Bind local:Theme.TextPrimaryBrush}" VerticalAlignment="Center"/>
-                        <StackPanel Grid.Column="7" Orientation="Horizontal" Margin="8,0,0,0"
-                                    VerticalAlignment="Center">
-                            <TextBlock Text="{x:Bind ContinueIcon}" FontFamily="{x:Bind local:IconFont.Font}"
-                                       Foreground="{x:Bind local:Theme.TextPrimaryBrush}" FontSize="12"
-                                       Margin="0,0,4,0" VerticalAlignment="Center"/>
-                            <TextBlock Text="{x:Bind ContinueText}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
-                                       VerticalAlignment="Center"/>
-                        </StackPanel>
-                    </Grid>
-                </DataTemplate>
-            </ListView.ItemTemplate>
-        </ListView>
-
-        <!-- ═══════════ TIMELINE (hitos-0-1, DE SOLO LECTURA) ═══════════ -->
-        <!-- TimelineCanvas.cs, en Win2D: regla, pistas, bloques con color y
-             etiqueta, playhead, aviso de solapamiento. Nada de arrastre, zoom
-             ni menú contextual en esta pasada (ver la cabecera del archivo) —
-             el control lo crea MainWindow.xaml.cs (mismo patrón que
-             PgmVuHost: no hay constructor útil sin parámetros para colgarlo
-             desde XAML con estado propio). -->
-        <Border Grid.Row="5" Background="{x:Bind local:Theme.PanelBgBrush}"
-                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
-            <ContentControl x:Name="TimelineHost" HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch"/>
-        </Border>
-
-        <!-- ═══════════ MIXER (hitos-0-1) ═══════════ -->
-        <!-- MixerPanel.cs: strip MASTER, strip CUE (audición) y un strip por
-             cada cue de audio/vídeo — ver la cabecera de ese archivo para el
-             cálculo compartido con WinCue.App.AudioMixerPanel (WinCue.
-             Presentation.MixerLayout/FaderScaleLayout). Altura Auto: el
-             strip mide lo que miden sus piezas (UiMetrics.StripHeight), no
-             lo que sobre del panel — mismo motivo que en WPF. -->
-        <Border Grid.Row="6" Background="{x:Bind local:Theme.PanelBgBrush}"
-                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
-            <ContentControl x:Name="MixerHost" HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch"/>
-        </Border>
-
-        <!-- ═══════════ INSPECTOR (primera pasada, hitos-0-1) ═══════════ -->
-        <!-- InspectorPanel.cs: identidad, temporización, fundidos y
-             reproducción de la Cue seleccionada en la tabla — ver la
-             cabecera de ese archivo para el alcance exacto y lo que queda
-             fuera (rack de audio, geometría, canvas, disparadores remotos).
-             RowSpan cubre las SIETE filas (con el mixer, fila 6): es la
-             única columna de la derecha de toda la ventana, de arriba abajo. -->
-        <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="7"
-                Background="{x:Bind local:Theme.PanelBgBrush}"
-                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="1,0,0,0">
-            <ContentControl x:Name="InspectorHost" HorizontalContentAlignment="Stretch"
-                            VerticalContentAlignment="Stretch"/>
         </Border>
     </Grid>
 </Window>

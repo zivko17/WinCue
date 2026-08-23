@@ -27,6 +27,14 @@ public static class Theme
     public static readonly Color PanelBg = Hex(Palette.PanelBg);
     public static readonly Color HeaderBg = Hex(Palette.HeaderBg);
     public static readonly Color ControlBg = Hex(Palette.ControlBg);
+    // Sumados para la reorganización del hueco (MainWindow.xaml, secuence-
+    // shell-report.md): caja del reloj del show (DeepBg, igual que WinCue),
+    // pestaña NO seleccionada de Timeline/Inspector/Mixer (DeeperBg) y
+    // tarjeta de «en reproducción» (CardBg) — mismos tokens que WinCue.App
+    // para los mismos elementos.
+    public static readonly Color DeepBg = Hex(Palette.DeepBg);
+    public static readonly Color DeeperBg = Hex(Palette.DeeperBg);
+    public static readonly Color CardBg = Hex(Palette.CardBg);
 
     // ── Texto ───────────────────────────────────────────────────────────
     public static readonly Color TextPrimary = Hex(Palette.TextPrimary);
@@ -53,6 +61,9 @@ public static class Theme
     // ── Acentos de estado (reutilizados en la columna de duración) ─────
     public static readonly Color Go = Hex(Palette.Go);
     public static readonly Color GoButton = Hex(Palette.GoButton);
+    // Sumado para el borde/etiqueta del previo PVW (MainWindow.xaml): mismo
+    // token que WinCue.App._pvw = new LiveMonitorControl("PVW", Theme.GoDeep).
+    public static readonly Color GoDeep = Hex(Palette.GoDeep);
     public static readonly Color Pgm = Hex(Palette.Pgm);
     public static readonly Color PanicButton = Hex(Palette.PanicButton);
     public static readonly Color Standby = Hex(Palette.Standby);
@@ -60,6 +71,10 @@ public static class Theme
     // Sumado para el editor de EQ (InspectorPanel.cs, hitos-0-1): el punto
     // de color de la 4ª banda paramétrica (agudos).
     public static readonly Color Blue = Hex(Palette.Blue);
+    // Sumado para el interruptor «Modo: EDIT» de la barra de transporte
+    // (deshabilitado en esta pasada, ver el informe): mismo token que
+    // WinCue.App.MainWindow.xaml, ModeToggle Background="{DynamicResource Gold}".
+    public static readonly Color Gold = Hex(Palette.Gold);
 
     // ── Fila del playhead (tabla de cues) ──────────────────────────────
     public static readonly Color PlayheadRow = Hex(Palette.PlayheadRow);
@@ -97,6 +112,9 @@ public static class Theme
     public static readonly SolidColorBrush PanelBgBrush = Solid(PanelBg);
     public static readonly SolidColorBrush HeaderBgBrush = Solid(HeaderBg);
     public static readonly SolidColorBrush ControlBgBrush = Solid(ControlBg);
+    public static readonly SolidColorBrush DeepBgBrush = Solid(DeepBg);
+    public static readonly SolidColorBrush DeeperBgBrush = Solid(DeeperBg);
+    public static readonly SolidColorBrush CardBgBrush = Solid(CardBg);
     public static readonly SolidColorBrush TextPrimaryBrush = Solid(TextPrimary);
     public static readonly SolidColorBrush TextTertiaryBrush = Solid(TextTertiary);
     public static readonly SolidColorBrush TextDimBrush = Solid(TextDim);
@@ -112,11 +130,13 @@ public static class Theme
     public static readonly SolidColorBrush MagentaAltBrush = Solid(MagentaAlt);
     public static readonly SolidColorBrush GoBrush = Solid(Go);
     public static readonly SolidColorBrush GoButtonBrush = Solid(GoButton);
+    public static readonly SolidColorBrush GoDeepBrush = Solid(GoDeep);
     public static readonly SolidColorBrush PgmBrush = Solid(Pgm);
     public static readonly SolidColorBrush PanicButtonBrush = Solid(PanicButton);
     public static readonly SolidColorBrush StandbyBrush = Solid(Standby);
     public static readonly SolidColorBrush WarnBrush = Solid(Warn);
     public static readonly SolidColorBrush BlueBrush = Solid(Blue);
+    public static readonly SolidColorBrush GoldBrush = Solid(Gold);
     public static readonly SolidColorBrush PlayheadRowBrush = Solid(PlayheadRow);
     public static readonly SolidColorBrush TransparentBrush = Solid(Colors.Transparent);
 

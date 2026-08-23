@@ -143,6 +143,17 @@ public sealed partial class MainWindow : Window, IShowView
         BlackoutIcon.Text = Icons.BlackFrame;
         OpenIcon.Text = Icons.Open;
         SaveIcon.Text = Icons.Save;
+        // Botones deshabilitados de la reorganización del hueco (ver
+        // secuence-shell-report.md): mismo glifo que WinCue para el mismo
+        // botón, aunque aquí no hagan nada todavía.
+        VideoOutIcon.Text = Icons.VideoOutput;
+        AddIcon.Text = Icons.Add;
+        ImportIcon.Text = Icons.Import;
+        DeleteIcon.Text = Icons.Delete;
+        PreviewPlayIcon.Text = Icons.Play;
+        TimelineTabIcon.Text = Icons.Timeline;
+        InspectorTabIcon.Text = Icons.Inspector;
+        MixerTabIcon.Text = Icons.Mixer;
 
         // Ctrl+O / Ctrl+S / Ctrl+Shift+S — en código, no en XAML: así no hace
         // falta adivinar la sintaxis exacta del atributo Modifiers en el
@@ -170,6 +181,44 @@ public sealed partial class MainWindow : Window, IShowView
         _inspector.BrowseFile = BrowseFileAsync;
 
         MixerHost.Content = _mixer;
+
+        // Pestaña por defecto: Timeline — mismo criterio que WinCue.App
+        // (WPF TabControl sin SelectedIndex explícito = la primera, que allí
+        // también es Timeline).
+        SelectTab(0);
+    }
+
+    // ==================================================================
+    // Pestañas Timeline / Inspector / Mixer (reorganización del hueco, ver
+    // secuence-shell-report.md). WinUI 3 no tiene un TabControl retemplado
+    // con el mismo aspecto de "tecla" que WinCue.App.App.xaml (Style
+    // TargetType="TabItem"): tres botones seleccionan cuál de los tres
+    // ContentControl (TimelineHost/InspectorHost/MixerHost, superpuestos en
+    // la misma celda de MainWindow.xaml) se enseña, con el mismo par de
+    // colores que usa WinCue para pestaña activa/inactiva (Theme.WindowBg +
+    // Theme.Warn vs. Theme.DeeperBg + Theme.TextDim).
+    // ==================================================================
+
+    private void OnTimelineTabClick(object sender, RoutedEventArgs e) => SelectTab(0);
+    private void OnInspectorTabClick(object sender, RoutedEventArgs e) => SelectTab(1);
+    private void OnMixerTabClick(object sender, RoutedEventArgs e) => SelectTab(2);
+
+    private void SelectTab(int index)
+    {
+        Button[] buttons = { TimelineTabButton, InspectorTabButton, MixerTabButton };
+        TextBlock[] icons = { TimelineTabIcon, InspectorTabIcon, MixerTabIcon };
+        TextBlock[] labels = { TimelineTabLabel, InspectorTabLabel, MixerTabLabel };
+        UIElement[] hosts = { TimelineHost, InspectorHost, MixerHost };
+
+        for (int i = 0; i < buttons.Length; i++)
+        {
+            bool selected = i == index;
+            buttons[i].Background = selected ? Theme.WindowBgBrush : Theme.DeeperBgBrush;
+            var fg = selected ? Theme.WarnBrush : Theme.TextDimBrush;
+            icons[i].Foreground = fg;
+            labels[i].Foreground = fg;
+            hosts[i].Visibility = selected ? Visibility.Visible : Visibility.Collapsed;
+        }
     }
 
     /// <summary>Selector de archivo para el campo Archivo del inspector — sin
