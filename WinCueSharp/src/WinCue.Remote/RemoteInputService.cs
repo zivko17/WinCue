@@ -14,7 +14,7 @@ using NAudio.Midi;
 using WinCue.Controller;
 using WinCue.Core;
 
-namespace WinCue.App;
+namespace WinCue.Remote;
 
 public sealed class RemoteInputService : IDisposable
 {

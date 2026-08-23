@@ -17,6 +17,7 @@ using WinCue.Audio;
 using WinCue.Controller;
 using WinCue.Core;
 using WinCue.Presentation;
+using WinCue.Remote;
 using WinCue.Video;
 
 namespace WinCue.App;

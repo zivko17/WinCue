@@ -1,0 +1,29 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       WinCue.Remote — disparo remoto: escucha OSC (UDP) y MIDI IN y remite al
+       controlador. Vive aparte por dos motivos:
+
+       · No es interfaz. Estaba en WinCue.App por accidente y copiarlo al
+         segundo producto habría sido la primera grieta entre los dos.
+       · No puede ir en WinCue.Controller. Necesita NAudio.Midi, y Controller
+         es la capa de los 391 tests deterministas con motores falsos y reloj
+         virtual: meterle un paquete de dispositivos la ensucia.
+       ========================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="NAudio" Version="2.3.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
+    <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
+  </ItemGroup>
+
+</Project>
