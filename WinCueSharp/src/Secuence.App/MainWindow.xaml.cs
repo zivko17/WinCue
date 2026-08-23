@@ -235,6 +235,15 @@ public sealed partial class MainWindow : Window, IShowView
                     new Dictionary<string, object?> { [key] = value });
         };
 
+        // Rack de audio del inspector (EQ + compresor): RTA, medidor GR y el
+        // aviso de "sin analizador" por cue — MISMO cableado que
+        // WinCue.App.MainWindow.xaml.cs.Attach (GetAudioSpectrum/
+        // GetAudioGainReduction/CueHasAudioAnalysis ya son públicos y no
+        // piden nada nuevo del motor).
+        _inspector.SpectrumProvider = cueId => controller.GetAudioSpectrum(cueId);
+        _inspector.GainReductionProvider = cueId => controller.GetAudioGainReduction(cueId);
+        _inspector.AudioAnalysisProvider = cueId => controller.CueHasAudioAnalysis(cueId);
+
         // Mesa AUDIO (mixer): faders master/audición/cues + VU + GR limitador
         // — mismo cableado que WinCue.App.MainWindow.xaml.cs.Attach.
         _mixer.MasterGainReductionProvider = () => controller.GetMasterGainReduction();

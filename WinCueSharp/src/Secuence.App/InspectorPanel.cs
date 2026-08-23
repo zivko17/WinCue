@@ -18,10 +18,18 @@
 //   - Fundidos: fade in, fade out.
 //   - Reproducción: loop, play count, trim (inicio/fin), volumen.
 //
-// FUERA de esta pasada, a propósito: el rack de audio (EQ, compresor, VU por
-// cue) y los disparadores remotos (hotkey/MIDI/wall-clock). Eso pide
-// controles pintados a mano que Secuence no tiene todavía — entran en una
-// pasada posterior, cuando esos controles existan.
+// FUERA de esta pasada, a propósito: los disparadores remotos (hotkey/MIDI/
+// wall-clock) — sin equivalente en Secuence todavía.
+//
+// RACK DE AUDIO (sumado en la tarea "editor de EQ", séptimo y último control
+// pintado a mano, hitos-0-1): ganancia de clip + EQ paramétrica de 4 bandas
+// (HPF/LPF) + compresor, con RTA y medidor GR EN VIVO, para cues de AUDIO y
+// de VÍDEO — mismo alcance que WinCue.App.EqEditorControl (WPF). El CÁLCULO
+// (ejes, respuesta de los filtros —biquads RBJ, la MISMA fórmula que aplica
+// el motor de audio—, balística del RTA, transferencia del compresor) es
+// compartido: WinCue.Presentation.EqCurveLayout/CompCurveLayout/EqResponse.
+// Ver EqSection() más abajo y EqCurveCanvas.cs/CompCurveCanvas.cs (Win2D)
+// para el detalle.
 //
 // GEOMETRÍA DE VÍDEO (sumada en la tarea "canvas de geometría", hitos-0-1):
 // modo FULL/CUSTOM, aspecto, escala, posición y rotación, con el mismo
@@ -60,7 +68,9 @@ using System.Globalization;
 using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Shapes;
 using Windows.System;
+using Windows.UI;
 using WinCue.Core;
 using WinCue.Presentation;
 
@@ -85,6 +95,40 @@ public sealed class InspectorPanel : ContentControl
     private bool _loading;   // suprime commits al repoblar (igual que en WPF)
     private readonly WaveformCanvas _wave = new();
     private string _waveLoadedPath = "";
+
+    // ── Rack de audio: ganancia + EQ + compresor ────────────────────────
+    /// <summary>Espectro (~12 Hz) del cue dado, o null si no suena — mismo
+    /// contrato que WinCue.App.InspectorPanel.SpectrumProvider.</summary>
+    public Func<int, float[]?>? SpectrumProvider;
+    /// <summary>Reducción de ganancia del compresor (dB ≥ 0) del cue dado.</summary>
+    public Func<int, float>? GainReductionProvider;
+    /// <summary>true si el audio de este cue pasa por el rack nativo (RTA/GR
+    /// reales) — false = vídeo cuyo audio sale por mpv sin espejo.</summary>
+    public Func<int, bool>? AudioAnalysisProvider;
+
+    private readonly EqCurveCanvas _eqCanvas = new();
+    private readonly CompCurveCanvas _compCanvas = new();
+    private readonly TextBlock _eqReadout = new()
+    {
+        Foreground = Theme.TextDimmerBrush,
+        FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+        FontSize = 10,
+        Margin = new Thickness(10, 2, 10, 0),
+        TextWrapping = TextWrapping.Wrap,
+        Text = Loc.T("arrastrar punto = frec/gan · rueda = Q", "drag point = freq/gain · wheel = Q"),
+    };
+    private readonly TextBlock _noAnalyzerNote = new()
+    {
+        Text = Loc.T(
+            "Sin analizador (RTA/GR): el audio de este vídeo lo saca mpv. La ganancia, la EQ y el compresor SÍ actúan, pero solo hay medidores cuando el audio va por el rack (AUDIO ESPEJO).",
+            "No analyzer (RTA/GR): this video's audio is played by mpv. Gain, EQ and compressor DO work, but there are meters only when audio goes through the rack (MIRRORED AUDIO)."),
+        Foreground = Theme.WarnBrush,
+        FontSize = 10,
+        Margin = new Thickness(10, 4, 10, 0),
+        TextWrapping = TextWrapping.Wrap,
+        Visibility = Visibility.Collapsed,
+    };
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _eqTimer;
 
     // ── Geometría de vídeo ──────────────────────────────────────────────
     private readonly GeometryCanvas _geoCanvas = new();
@@ -161,9 +205,40 @@ public sealed class InspectorPanel : ContentControl
         VolumeField();
 
         GeometrySection();
+        EqSection();
 
         IsEnabled = false;   // sin cue seleccionado
         _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
+
+        // RTA + medidor GR ~12 Hz mientras haya un cue de audio/vídeo
+        // seleccionado — mismo periodo que el DispatcherTimer de
+        // WinCue.App.EqEditorControl. Se arma al cargar (mismo motivo que
+        // MixerPanel.StartGrTimer: el DispatcherQueue de este control no
+        // existe hasta que está en el árbol visual).
+        Loaded += (_, _) => StartEqTimer();
+        Unloaded += (_, _) => _eqTimer?.Stop();
+    }
+
+    private void StartEqTimer()
+    {
+        if (_eqTimer is not null)
+            return;
+        _eqTimer = DispatcherQueue.CreateTimer();
+        _eqTimer.Interval = TimeSpan.FromMilliseconds(80);
+        _eqTimer.Tick += (_, _) =>
+        {
+            if (_cue is not { Type: CueType.Audio or CueType.Video } cue)
+                return;
+            // Sin analizador (vídeo por mpv) no se pide nada: la curva de la
+            // EQ sigue viva porque es matemática de los parámetros — mismo
+            // criterio que WinCue.App.EqEditorControl.
+            if (AudioAnalysisProvider?.Invoke(cue.Id) ?? cue.Type == CueType.Audio)
+            {
+                _eqCanvas.SetSpectrum(SpectrumProvider?.Invoke(cue.Id));
+                _compCanvas.SetGainReduction(GainReductionProvider?.Invoke(cue.Id) ?? 0f);
+            }
+        };
+        _eqTimer.Start();
     }
 
     /// <summary>Muestra (y edita) el cue dado. null → inspector deshabilitado.
@@ -178,6 +253,8 @@ public sealed class InspectorPanel : ContentControl
             _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
             _wave.Clear();
             _waveLoadedPath = "";
+            _eqCanvas.SetCue(null);
+            _compCanvas.SetCue(null);
             return;
         }
 
@@ -231,7 +308,23 @@ public sealed class InspectorPanel : ContentControl
             }
             finally { _loading = was; }
         }
+        else if (IsEqKey(key))
+        {
+            // Repintar las dos gráficas (el campo numérico ya cambió el cue;
+            // el lienzo lee el MISMO objeto, solo hace falta invalidar) —
+            // mismo motivo por el que MakeNumBox/MakeCheck invalidaban en
+            // WinCue.App.EqEditorControl.
+            _eqCanvas.Refresh();
+            _compCanvas.Refresh();
+        }
     }
+
+    /// <summary>Mismo criterio que MainController.IsEqKey (privado allí): qué
+    /// claves pertenecen al rack de audio.</summary>
+    private static bool IsEqKey(string key) =>
+        key is "gain_db" or "eq_enabled" or "hpf_on" or "hpf_freq" or "lpf_on" or "lpf_freq"
+        || key.StartsWith("eq", StringComparison.Ordinal)
+        || key.StartsWith("comp", StringComparison.Ordinal);
 
     /// <summary>Carga la barra de trim (decodifica solo si cambia el
     /// archivo). Solo AUDIO en esta pasada — ver la cabecera de
@@ -662,4 +755,209 @@ public sealed class InspectorPanel : ContentControl
 
         _geoCanvas.SetValues(custom, c.Scale, c.PreserveAspect, c.ScaleX, c.TranslateX, c.TranslateY, rot);
     }
+
+    // ==================================================================
+    // Rack de audio: ganancia + EQ paramétrica (4 bandas + HPF/LPF) +
+    // compresor, con RTA y medidor GR en vivo. Vale para cues de AUDIO y de
+    // VÍDEO — mismo alcance que WinCue.App.EqEditorControl. Layout en
+    // columna única (Secuence no tiene aún el reparto "parámetros a la
+    // izquierda de su gráfica" de WPF — mismo motivo que GeometrySection):
+    // los campos van encima, el lienzo debajo, igual que la barra de trim.
+    // ==================================================================
+
+    private void EqSection()
+    {
+        bool AudioOrVideo(Cue c) => c.Type is CueType.Audio or CueType.Video;
+
+        var header = LastAdded(() => Header(Loc.T("GANANCIA / EQ", "GAIN / EQ")));
+        _conditional.Add((header, AudioOrVideo));
+
+        // Ganancia de clip (dB, pre-EQ) — aparte del fader de VOLUMEN de arriba.
+        var gainRow = LabeledRow(Loc.T("Ganancia (dB):", "Gain (dB):"));
+        gainRow.Children.Add(EqNumBox("gain_db", c => c.GainDb, -24, 12, 80));
+        _conditional.Add((gainRow, AudioOrVideo));
+
+        var eqOnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        eqOnRow.Children.Add(EqCheck("eq_enabled", Loc.T("EQ activa", "EQ active"), c => c.EqEnabled));
+        _root.Children.Add(eqOnRow);
+        _conditional.Add((eqOnRow, AudioOrVideo));
+
+        var hpfRow = HpfLpfRow("HPF", "hpf_on", "hpf_freq", c => c.HpfOn, c => c.HpfFreq, EqCurveLayout.ClampHpfFreq);
+        _conditional.Add((hpfRow, AudioOrVideo));
+        var lpfRow = HpfLpfRow("LPF", "lpf_on", "lpf_freq", c => c.LpfOn, c => c.LpfFreq, EqCurveLayout.ClampLpfFreq);
+        _conditional.Add((lpfRow, AudioOrVideo));
+
+        var bandColors = new[] { Theme.Pgm, Theme.Warn, Theme.Go, Theme.Blue };
+        for (int i = 0; i < 4; i++)
+        {
+            var row = BandRow(i + 1, bandColors[i]);
+            _conditional.Add((row, AudioOrVideo));
+        }
+
+        _eqCanvas.Height = UiMetrics.EqCanvasHeight;
+        _eqCanvas.Margin = new Thickness(10, 6, 10, 0);
+        _eqCanvas.Commit = (k, v) => Commit(k, v);
+        _eqCanvas.ReadoutChanged += text => _eqReadout.Text = text;
+        _root.Children.Add(_eqCanvas);
+        _conditional.Add((_eqCanvas, AudioOrVideo));
+
+        _root.Children.Add(_eqReadout);
+        _conditional.Add((_eqReadout, AudioOrVideo));
+
+        // Visibilidad real (AudioOrVideo Y sin analizador) la decide
+        // SyncEqUi — depende de AudioAnalysisProvider, no solo del tipo de
+        // cue, así que no encaja en el patrón _conditional (Func<Cue,bool>
+        // fijo). Se registra igualmente para que quede oculta por defecto
+        // hasta el primer SetCue.
+        _root.Children.Add(_noAnalyzerNote);
+
+        var compHeader = LastAdded(() => Header(Loc.T("COMPRESOR", "COMPRESSOR")));
+        _conditional.Add((compHeader, AudioOrVideo));
+
+        var compOnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        compOnRow.Children.Add(EqCheck("comp_enabled", Loc.T("Compresor", "Compressor"), c => c.CompEnabled));
+        _root.Children.Add(compOnRow);
+        _conditional.Add((compOnRow, AudioOrVideo));
+
+        var compRow1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        compRow1.Children.Add(FieldLabelInline(Loc.T("Umbral", "Threshold")));
+        compRow1.Children.Add(EqNumBox("comp_threshold", c => c.CompThreshold, -60, 0, 50));
+        compRow1.Children.Add(FieldLabelInline("dB"));
+        compRow1.Children.Add(FieldLabelInline("Ratio"));
+        compRow1.Children.Add(EqNumBox("comp_ratio", c => c.CompRatio, 1, 20, 40));
+        compRow1.Children.Add(FieldLabelInline(":1"));
+        _root.Children.Add(compRow1);
+        _conditional.Add((compRow1, AudioOrVideo));
+
+        var compRow2 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        compRow2.Children.Add(FieldLabelInline(Loc.T("Ataque", "Attack")));
+        compRow2.Children.Add(EqNumBox("comp_attack", c => c.CompAttack, 0.1, 200, 44));
+        compRow2.Children.Add(FieldLabelInline("ms"));
+        compRow2.Children.Add(FieldLabelInline("Release"));
+        compRow2.Children.Add(EqNumBox("comp_release", c => c.CompRelease, 5, 2000, 48, "0"));
+        compRow2.Children.Add(FieldLabelInline("ms"));
+        compRow2.Children.Add(FieldLabelInline("Makeup"));
+        compRow2.Children.Add(EqNumBox("comp_makeup", c => c.CompMakeup, 0, 24, 44));
+        compRow2.Children.Add(FieldLabelInline("dB"));
+        _root.Children.Add(compRow2);
+        _conditional.Add((compRow2, AudioOrVideo));
+
+        _compCanvas.Height = UiMetrics.EqCanvasHeight;
+        _compCanvas.Margin = new Thickness(10, 6, 10, 10);
+        _compCanvas.Commit = (k, v) => Commit(k, v);
+        _root.Children.Add(_compCanvas);
+        _conditional.Add((_compCanvas, AudioOrVideo));
+
+        _loaders["__eq_sync"] = SyncEqUi;
+    }
+
+    /// <summary>Repuebla los dos lienzos y decide si la nota "sin analizador"
+    /// se ve — mismo criterio que WinCue.App.InspectorPanel.HasAudioAnalysis:
+    /// sin AudioAnalysisProvider cableado, se asume el comportamiento clásico
+    /// (solo cues de AUDIO tienen analizador real).</summary>
+    private void SyncEqUi(Cue c)
+    {
+        _eqCanvas.SetCue(c);
+        _compCanvas.SetCue(c);
+        bool hasAnalysis = AudioAnalysisProvider?.Invoke(c.Id) ?? c.Type == CueType.Audio;
+        _noAnalyzerNote.Visibility = c.Type is CueType.Audio or CueType.Video && !hasAnalysis
+            ? Visibility.Visible : Visibility.Collapsed;
+    }
+
+    /// <summary>Casilla suelta (sin LabeledRow: va empaquetada en una fila con
+    /// más campos, como HPF/LPF y las bandas) — mismo contrato de commit que
+    /// Chk(), pero sin reservar su propia fila.</summary>
+    private CheckBox EqCheck(string key, string label, Func<Cue, bool> read)
+    {
+        var cb = new CheckBox
+        {
+            Content = label,
+            Foreground = Theme.TextPrimaryBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 6, 0),
+        };
+        cb.Checked += (_, _) => Commit(key, true);
+        cb.Unchecked += (_, _) => Commit(key, false);
+        _loaders[key] = c => cb.IsChecked = read(c);
+        return cb;
+    }
+
+    /// <summary>Caja numérica suelta con commit acotado a [min, max] —
+    /// mismo contrato que MakeNumBox/MakeFreqBox en WinCue.App.
+    /// EqEditorControl (el acotado es lo que ahí evitaba que un valor fuera
+    /// de rango llegara al motor).</summary>
+    private TextBox EqNumBox(string key, Func<Cue, double> read, double min, double max, double width, string fmt = "0.#")
+    {
+        var box = MakeTextBox(width);
+        void DoCommit()
+        {
+            if (_loading)
+                return;
+            if (double.TryParse(box.Text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                Commit(key, Math.Round(Math.Clamp(v, min, max), 3));
+        }
+        box.LostFocus += (_, _) => DoCommit();
+        box.KeyDown += (_, e) =>
+        {
+            if (e.Key == VirtualKey.Enter)
+            {
+                DoCommit();
+                e.Handled = true;
+            }
+        };
+        _loaders[key] = c => box.Text = read(c).ToString(fmt, CultureInfo.InvariantCulture);
+        return box;
+    }
+
+    /// <summary>Fila HPF/LPF: casilla on/off + frecuencia acotada + "Hz" —
+    /// mismo reparto que hpfRow/lpfRow en WinCue.App.EqEditorControl.</summary>
+    private StackPanel HpfLpfRow(string label, string onKey, string freqKey,
+        Func<Cue, bool> onRead, Func<Cue, double> freqRead, Func<double, double> clamp)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        row.Children.Add(EqCheck(onKey, label, onRead));
+        row.Children.Add(EqNumBox(freqKey, freqRead, 0, 20000, 52, "0"));
+        row.Children.Add(FieldLabelInline("Hz"));
+        _root.Children.Add(row);
+        return row;
+        // El acotado de verdad (20..2000 HPF, 200..20000 LPF) lo aplica
+        // EqNumBox con el "clamp" que se le pasó como min/max — aquí (0,
+        // 20000) es solo el límite de PARSEO; ver la llamada en EqSection.
+    }
+
+    /// <summary>Fila de una banda paramétrica: punto de color + frecuencia +
+    /// ganancia + Q — mismo reparto que el bucle de bandas en
+    /// WinCue.App.EqEditorControl.</summary>
+    private StackPanel BandRow(int n, Color dotColor)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        row.Children.Add(new Ellipse
+        {
+            Width = 10,
+            Height = 10,
+            Fill = new Microsoft.UI.Xaml.Media.SolidColorBrush(dotColor),
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 4, 0),
+        });
+        double ReadFreq(Cue c) => n switch { 1 => c.Eq1Freq, 2 => c.Eq2Freq, 3 => c.Eq3Freq, _ => c.Eq4Freq };
+        double ReadGain(Cue c) => n switch { 1 => c.Eq1Gain, 2 => c.Eq2Gain, 3 => c.Eq3Gain, _ => c.Eq4Gain };
+        double ReadQ(Cue c) => n switch { 1 => c.Eq1Q, 2 => c.Eq2Q, 3 => c.Eq3Q, _ => c.Eq4Q };
+        row.Children.Add(EqNumBox($"eq{n}_freq", ReadFreq, 20, 20000, 52, "0"));
+        row.Children.Add(FieldLabelInline("Hz"));
+        row.Children.Add(EqNumBox($"eq{n}_gain", ReadGain, -18, 18, 42));
+        row.Children.Add(FieldLabelInline("dB"));
+        row.Children.Add(EqNumBox($"eq{n}_q", ReadQ, 0.1, 12, 38, "0.##"));
+        row.Children.Add(FieldLabelInline("Q"));
+        _root.Children.Add(row);
+        return row;
+    }
+
+    private static TextBlock FieldLabelInline(string text) => new()
+    {
+        Text = text,
+        Foreground = Theme.TextDimmerBrush,
+        VerticalAlignment = VerticalAlignment.Center,
+        Margin = new Thickness(4, 0, 3, 0),
+        FontSize = 11,
+    };
 }

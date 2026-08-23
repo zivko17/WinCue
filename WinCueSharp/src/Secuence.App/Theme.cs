@@ -57,6 +57,9 @@ public static class Theme
     public static readonly Color PanicButton = Hex(Palette.PanicButton);
     public static readonly Color Standby = Hex(Palette.Standby);
     public static readonly Color Warn = Hex(Palette.Warn);
+    // Sumado para el editor de EQ (InspectorPanel.cs, hitos-0-1): el punto
+    // de color de la 4ª banda paramétrica (agudos).
+    public static readonly Color Blue = Hex(Palette.Blue);
 
     // ── Fila del playhead (tabla de cues) ──────────────────────────────
     public static readonly Color PlayheadRow = Hex(Palette.PlayheadRow);
@@ -113,6 +116,7 @@ public static class Theme
     public static readonly SolidColorBrush PanicButtonBrush = Solid(PanicButton);
     public static readonly SolidColorBrush StandbyBrush = Solid(Standby);
     public static readonly SolidColorBrush WarnBrush = Solid(Warn);
+    public static readonly SolidColorBrush BlueBrush = Solid(Blue);
     public static readonly SolidColorBrush PlayheadRowBrush = Solid(PlayheadRow);
     public static readonly SolidColorBrush TransparentBrush = Solid(Colors.Transparent);
 
