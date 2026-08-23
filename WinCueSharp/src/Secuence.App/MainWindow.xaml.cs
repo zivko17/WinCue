@@ -13,12 +13,18 @@
 // =============================================================================
 
 using System.Collections.ObjectModel;
+using Microsoft.UI;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
+using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
+using Windows.Foundation;
+using Windows.Storage.Pickers;
 using WinCue.Controller;
 using WinCue.Core;
 using WinCue.Presentation;
+using WinRT.Interop;
 
 namespace Secuence.App;
 
@@ -29,6 +35,17 @@ public sealed partial class MainWindow : Window, IShowView
     private readonly SettingsManager _settings = SettingsManager.Instance;
     private MainController? _controller;
     private int _playheadIndex;
+
+    // ── Abrir / Guardar show ─────────────────────────────────────────────
+    // hwnd propio: FileOpenPicker/FileSavePicker LANZAN COMException en una
+    // app sin identidad de paquete (WindowsPackageType=None, lo que es
+    // Secuence) si no se les asocia la ventana con InitializeWithWindow —
+    // ver el porqué exacto en OnOpenShowAsync/OnSaveShowAsAsync. Mismo hwnd
+    // que VideoOutputWindow.xaml.cs ya obtiene para su AppWindow.
+    private readonly nint _hwndPropio;
+    private readonly AppWindow _appWindow;
+    private string? _currentShowPath;
+    private bool _closeConfirmed;   // true tras confirmar cierre con cambios sin guardar
 
     // ── Salida de vídeo (ver el bloque IShowView de más abajo) ──────────
     private VideoOutputWindow? _videoOutput;
@@ -50,8 +67,30 @@ public sealed partial class MainWindow : Window, IShowView
     {
         InitializeComponent();
 
-        Title = "Secuence";
         _model = model;
+
+        _hwndPropio = WindowNative.GetWindowHandle(this);
+        var windowId = Win32Interop.GetWindowIdFromWindow(_hwndPropio);
+        _appWindow = AppWindow.GetFromWindowId(windowId);
+
+        // Cerrar con cambios sin guardar pide confirmación (un Alt+F4
+        // accidental en mitad de un show sería fatal — mismo motivo que
+        // WinCue.App.OnClosing). WinUI 3 no tiene Window.OnClosing cancelable
+        // como WPF: el punto de enganche es AppWindow.Closing, el MISMO
+        // mecanismo que VideoOutputWindow.xaml.cs usa para ocultar en vez de
+        // destruir — aquí, en cambio, si el operador confirma, se deja pasar
+        // el cierre real (_closeConfirmed evita volver a preguntar cuando
+        // Close() se llama una segunda vez desde dentro del propio handler).
+        _appWindow.Closing += async (_, args) =>
+        {
+            if (_closeConfirmed || _controller?.HasUnsavedChanges != true)
+                return;
+            args.Cancel = true;
+            if (!await ConfirmDiscardChangesAsync("Cerrar Secuence"))
+                return;
+            _closeConfirmed = true;
+            Close();
+        };
 
         GoIcon.Text = Icons.Play;
         PauseIcon.Text = Icons.Pause;
@@ -59,10 +98,29 @@ public sealed partial class MainWindow : Window, IShowView
         FadeAllIcon.Text = Icons.Fade;
         PanicIcon.Text = Icons.Warning;
         BlackoutIcon.Text = Icons.BlackFrame;
+        OpenIcon.Text = Icons.Open;
+        SaveIcon.Text = Icons.Save;
+
+        // Ctrl+O / Ctrl+S / Ctrl+Shift+S — en código, no en XAML: así no hace
+        // falta adivinar la sintaxis exacta del atributo Modifiers en el
+        // compilador de XAML de WinUI 3, y queda igual de fácil de leer.
+        AddAccelerator(Windows.System.VirtualKey.O, Windows.System.VirtualKeyModifiers.Control, OnOpenAccelerator);
+        AddAccelerator(Windows.System.VirtualKey.S, Windows.System.VirtualKeyModifiers.Control, OnSaveAccelerator);
+        AddAccelerator(Windows.System.VirtualKey.S,
+            Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift, OnSaveAsAccelerator);
 
         CueList.ItemsSource = _rows;
         ActiveCuesList.ItemsSource = Array.Empty<ActiveCueRow>();
         EstadoTexto.Text = "Cargando show…";
+        UpdateTitle();
+    }
+
+    private void AddAccelerator(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers,
+        TypedEventHandler<KeyboardAccelerator, KeyboardAcceleratorInvokedEventArgs> invoked)
+    {
+        var accelerator = new KeyboardAccelerator { Key = key, Modifiers = modifiers };
+        accelerator.Invoked += invoked;
+        RootGrid.KeyboardAccelerators.Add(accelerator);
     }
 
     /// <summary>Conecta el controlador (llamado por App tras construir motores
@@ -116,6 +174,149 @@ public sealed partial class MainWindow : Window, IShowView
         args.Handled = true;
     }
 
+    // ==================================================================
+    // Abrir / Guardar show — botones de la barra, Ctrl+O, Ctrl+S,
+    // Ctrl+Shift+S. El JSON es sagrado: CueModel.ToJson()/FromJson() de
+    // WinCue.Core tal cual (dentro de MainController.SaveShow/LoadShow, vía
+    // ShowFileService) — un show de Secuence tiene que abrir igual en WinCue
+    // y viceversa. Esta ventana solo pone los diálogos, ni una línea de
+    // (de)serialización propia.
+    // ==================================================================
+
+    /// <summary>Fija el show actual (lo usa App al abrir un show por
+    /// argumento de línea de comandos) — mismo contrato que
+    /// WinCue.App.SetCurrentShowPath.</summary>
+    public void SetCurrentShowPath(string path)
+    {
+        _currentShowPath = path;
+        UpdateTitle();
+    }
+
+    /// <summary>Nombre del show actual + asterisco si hay cambios sin
+    /// guardar (MainController.HasUnsavedChanges, compartido con WinCue).
+    /// Se llama tras Abrir/Guardar/Guardar como y en cada tick del reloj del
+    /// show (RefreshShowClock) — así el título no se queda desactualizado si
+    /// el show se ensucia por una vía que no pasa por estos botones.</summary>
+    private void UpdateTitle()
+    {
+        string name = _currentShowPath is null ? "(sin guardar)" : Path.GetFileName(_currentShowPath);
+        bool dirty = _controller?.HasUnsavedChanges == true;
+        Title = $"Secuence — {name}{(dirty ? " *" : "")}";
+    }
+
+    private void OnOpenAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        _ = OnOpenShowAsync();
+    }
+
+    private void OnSaveAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        _ = OnSaveShowAsync();
+    }
+
+    private void OnSaveAsAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        _ = OnSaveShowAsAsync();
+    }
+
+    private void OnOpenClick(object sender, RoutedEventArgs e) => _ = OnOpenShowAsync();
+    private void OnSaveClick(object sender, RoutedEventArgs e) => _ = OnSaveShowAsync();
+
+    /// <summary>Botón/atajo Abrir: FileOpenPicker con la ventana asociada de
+    /// VERDAD (WinRT.Interop.InitializeWithWindow.Initialize, con el hwnd de
+    /// WindowNative.GetWindowHandle) — SIN eso, el picker lanza COMException
+    /// en una app sin identidad de paquete (WindowsPackageType=None, lo que
+    /// es Secuence). Misma forma de trampa, mismo remedio, que ms-appx:///
+    /// con IconFont (ver la cabecera de ese archivo) — la app arranca bien y
+    /// solo revienta al pulsar el botón si esto falta, así que aquí no hay
+    /// try/catch que la esconda: si InitializeWithWindow no basta, que reviente.</summary>
+    private async Task OnOpenShowAsync()
+    {
+        if (!await ConfirmDiscardChangesAsync("Abrir otro show"))
+            return;
+
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, _hwndPropio);
+        picker.FileTypeFilter.Add(".json");
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+
+        var file = await picker.PickSingleFileAsync();
+        if (file is null)
+            return;
+
+        // LoadShow (MainController → ShowFileService) ya resuelve rutas
+        // relativas, repuebla la tabla (ReloadTable) y mueve el playhead al
+        // principio — no hay nada más que hacer aquí (ver ShowFileService.
+        // LoadShow, WinCue.Controller).
+        _controller?.LoadShow(file.Path);
+        _playheadIndex = 0;
+        _currentShowPath = file.Path;
+        UpdateTitle();
+    }
+
+    /// <summary>Botón/atajo Guardar: guarda sobre el show abierto SIN
+    /// preguntar. Si no hay show todavía (nunca se abrió/guardó), cae en
+    /// «Guardar como…» — mismo contrato que WinCue.App.OnSaveShow.</summary>
+    private async Task OnSaveShowAsync()
+    {
+        if (_currentShowPath is null)
+        {
+            await OnSaveShowAsAsync();
+            return;
+        }
+        _controller?.SaveShow(_currentShowPath);
+        UpdateTitle();
+    }
+
+    /// <summary>Guardar como…: FileSavePicker (misma trampa de identidad de
+    /// paquete que el de abrir) y pasa a ser el show actual.</summary>
+    private async Task OnSaveShowAsAsync()
+    {
+        var picker = new FileSavePicker();
+        InitializeWithWindow.Initialize(picker, _hwndPropio);
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+        picker.FileTypeChoices.Add("WinCue Show", new List<string> { ".json" });
+        picker.SuggestedFileName = _currentShowPath is not null
+            ? Path.GetFileNameWithoutExtension(_currentShowPath)
+            : "show";
+
+        var file = await picker.PickSaveFileAsync();
+        if (file is null)
+            return;
+
+        // SaveShow (MainController → ShowFileService) ya relativiza las
+        // rutas de media que viven junto al .json y escribe con
+        // CueModel.ToJson() tal cual — nada que tocar aquí.
+        _controller?.SaveShow(file.Path);
+        _currentShowPath = file.Path;
+        UpdateTitle();
+    }
+
+    /// <summary>Pregunta antes de perder cambios sin guardar (abrir otro show
+    /// descarta el actual sin red, y cerrar la ventana con el autoguardado
+    /// descartado sería peor todavía). true = seguir adelante (no había
+    /// cambios, o el operador confirmó); false = cancelar la acción que lo
+    /// preguntó.</summary>
+    private async Task<bool> ConfirmDiscardChangesAsync(string action)
+    {
+        if (_controller?.HasUnsavedChanges != true)
+            return true;
+
+        var dialog = new ContentDialog
+        {
+            Title = "Cambios sin guardar",
+            Content = $"Hay cambios sin guardar. ¿{action} de todos modos?",
+            PrimaryButtonText = "Sí",
+            CloseButtonText = "Cancelar",
+            DefaultButton = ContentDialogButton.Close,
+            XamlRoot = Content.XamlRoot,
+        };
+        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+    }
+
     /// <summary>Reloj del show, fila 0: cuenta atrás de la duración total
     /// ARMADA (pre_wait + duración de cada cue armado) menos lo que ha pasado
     /// desde que sonó el primer cue. Reimplementación simplificada de
@@ -127,6 +328,12 @@ public sealed partial class MainWindow : Window, IShowView
     {
         if (_controller is null)
             return;
+
+        // El asterisco del título se refresca aquí también (no solo tras
+        // Abrir/Guardar): si algún día una edición en vivo marca el show
+        // como modificado por una vía que no pasa por esta ventana, el
+        // título lo refleja igual, sin plumbing nuevo.
+        UpdateTitle();
 
         // Refrescar el color de GO con lo que hay sonando AHORA MISMO: un cue
         // puede terminar solo (sin que el operador toque nada) y el botón

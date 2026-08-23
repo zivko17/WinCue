@@ -62,6 +62,26 @@
                      de este XAML — más simple y sin sorpresas que un x:Bind
                      a un tipo externo solo para un glifo que no cambia. -->
                 <StackPanel Grid.Column="0" Orientation="Horizontal" Spacing="6">
+                    <!-- Abrir / Guardar: Ctrl+O, Ctrl+S van por KeyboardAccelerator
+                         en código (MainWindow.xaml.cs, constructor) — Guardar como…
+                         solo por Ctrl+Shift+S, sin botón propio (ver el encargo). -->
+                    <Button x:Name="OpenButton" Click="OnOpenClick" Height="44"
+                            ToolTipService.ToolTip="Ctrl+O">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="OpenIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="ABRIR" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Button x:Name="SaveButton" Click="OnSaveClick" Height="44"
+                            ToolTipService.ToolTip="Ctrl+S (Ctrl+Shift+S: guardar como…)">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="SaveIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="GUARDAR" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
+                    <Border Width="1" Margin="4,6" Background="{x:Bind local:Theme.DividerBrush}"/>
                     <Button x:Name="GoButton" Click="OnGoClick" Width="110" Height="44"
                             Background="{x:Bind local:Theme.GoButtonBrush}"
                             FontSize="20" FontWeight="Bold"

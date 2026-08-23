@@ -132,7 +132,10 @@ public partial class App : Application
 
         string? showPath = ResolverRutaDelShow();
         if (showPath is not null)
+        {
             controller.LoadShow(showPath);   // resuelve rutas relativas, puebla la tabla, FlashStatus
+            window.SetCurrentShowPath(showPath);   // Guardar (Ctrl+S) escribe aquí sin preguntar
+        }
         else
             window.FlashStatus("No se encontró ningún show (ni por argumento ni el de pruebas por defecto).");
 
