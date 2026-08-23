@@ -135,6 +135,15 @@
                     </Button>
                 </StackPanel>
 
+                <!-- PGM: VU de programa (piloto Win2D del encargo hitos-0-1).
+                     Las dos barras (L/R) las crea MainWindow.xaml.cs en código,
+                     igual que WinCue.App crea sus VuMeterControl — no hay
+                     constructor sin parámetros útil para "vertical=true", así
+                     que aquí solo va el hueco donde colgarlas. -->
+                <StackPanel x:Name="PgmVuHost" Grid.Column="1" Orientation="Horizontal" Spacing="3"
+                            HorizontalAlignment="Right" VerticalAlignment="Stretch" Margin="0,0,16,0"
+                            ToolTipService.ToolTip="PGM"/>
+
                 <!-- Centro: reloj del show. El countdown POR CUE vive en el
                      panel de activos (fila 1), no aquí — igual reparto que
                      WinCue (ShowClockBox central + tarjetas de activos). -->

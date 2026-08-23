@@ -59,6 +59,15 @@
          "porque hay una más nueva" sin comprobar que restauran igual. -->
     <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
     <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.*" />
+    <!-- Win2D: lo que WinUI 3 no trae (no hay DrawingContext) para pintar a
+         mano los siete controles de WinCue (VU, timeline, EQ, mixer…). Entra
+         con el VU (piloto, ver el encargo). LICENCIA: verificada en el
+         .nuspec + el license.txt real del .nupkg — ver
+         docs/legal/notices-secuence.md, que hasta esta tarea solo tenía un
+         aviso adelantado ("aún no referenciado"). NO se da por MIT por
+         analogía con el repositorio de GitHub del proyecto — esa trampa ya
+         costó una sorpresa con Microsoft.WindowsAppSDK. -->
+    <PackageReference Include="Microsoft.Graphics.Win2D" Version="1.2.*" />
   </ItemGroup>
 
   <ItemGroup>

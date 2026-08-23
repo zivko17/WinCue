@@ -51,6 +51,12 @@ public sealed partial class MainWindow : Window, IShowView
     private VideoOutputWindow? _videoOutput;
     private bool _blackout;
 
+    // ── VU de programa (piloto Win2D, ver IShowView.UpdateVuMeter) ──────
+    // Mismo ancho (9) y misma orientación vertical que _pgmVuL/_pgmVuR en
+    // src/WinCue.App/MainWindow.xaml.cs: es el mismo medidor, otro pincel.
+    private readonly VuMeterCanvas _pgmVuL = new(vertical: true) { Width = 9 };
+    private readonly VuMeterCanvas _pgmVuR = new(vertical: true) { Width = 9 };
+
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
     // timer, porque IShowView.UpdateCountdown no lo alimenta a él (ver más
@@ -113,6 +119,9 @@ public sealed partial class MainWindow : Window, IShowView
         ActiveCuesList.ItemsSource = Array.Empty<ActiveCueRow>();
         EstadoTexto.Text = "Cargando show…";
         UpdateTitle();
+
+        PgmVuHost.Children.Add(_pgmVuL);
+        PgmVuHost.Children.Add(_pgmVuR);
     }
 
     private void AddAccelerator(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers,
@@ -462,10 +471,15 @@ public sealed partial class MainWindow : Window, IShowView
         ActiveCuesList.ItemsSource = vm;
     }
 
-    /// <summary>Sin VU real en esta tarea a propósito (el mezclador es otra
-    /// pieza del roadmap, explícitamente fuera de este encargo). El audio SÍ
-    /// suena — esto solo es que no hay un medidor que pintar todavía.</summary>
-    public void UpdateVuMeter(float left, float right) { }
+    /// <summary>VU de programa, en Win2D (VuMeterCanvas — piloto del traslado
+    /// de los siete controles pintados a mano de WinCue, ver el encargo
+    /// hitos-0-1). El strip de mezclador POR CUE sigue fuera de esta tarea:
+    /// UpdateCueVuMeter, justo debajo, sigue siendo un stub a propósito.</summary>
+    public void UpdateVuMeter(float left, float right)
+    {
+        _pgmVuL.SetLevel(left);
+        _pgmVuR.SetLevel(right);
+    }
 
     /// <summary>Mismo motivo que UpdateVuMeter: sin strip de mezclador ni
     /// inspector, no hay dónde pintar el VU de un cue concreto.</summary>

@@ -20,13 +20,15 @@
 > "porque la mayoría de paquetes de Microsoft lo son". Se ha mirado el
 > `.nuspec` de cada paquete y, **cuando existía**, el fichero de licencia
 > real dentro del `.nupkg`, en `C:\Users\andre\.nuget\packages\` — no
-> siempre lo había: `Microsoft.Windows.SDK.BuildTools` y
-> `Microsoft.Windows.SDK.NET.Ref` (ver más abajo) solo traen una
-> `licenseUrl` a un `.rtf` que no se ha podido leer, y `Win2D` ni siquiera
-> tiene paquete restaurado todavía en esta máquina. El resultado, para quien
-> lea esto sin memoria del proceso: **una de las dos preguntas del encargo
-> tenía trampa** — `Microsoft.WindowsAppSDK` **no es MIT** como daba por
-> hecho el borrador inicial del encargo. Ver el detalle abajo.
+> siempre lo había: `Microsoft.Windows.SDK.BuildTools`,
+> `Microsoft.Windows.SDK.NET.Ref` y **`Microsoft.Graphics.Win2D`** (ver más
+> abajo) solo traen una `licenseUrl` que no se ha podido leer (un `.rtf` los
+> dos primeros, un 301 a una página genérica de Microsoft Learn el tercero),
+> sin ningún fichero de licencia embebido en el `.nupkg`. El resultado, para
+> quien lea esto sin memoria del proceso: **el encargo original tenía razón
+> en sospechar** — `Microsoft.WindowsAppSDK` **no es MIT**, y **Win2D
+> tampoco se puede dar por MIT** aunque su repositorio de GitHub sí lo sea:
+> es la MISMA trampa dos veces. Ver el detalle de cada uno abajo.
 
 ---
 
@@ -171,25 +173,56 @@
   paquete (no es el caso hoy), esto hay que revisarlo primero.
 - **Proyecto:** https://aka.ms/WinSDKProjectURL
 
-### Microsoft.Graphics.Win2D — aún no referenciado (entra en el hito 3)
+### Microsoft.Graphics.Win2D 1.2.0
 
-- **No está en la caché de NuGet de esta máquina** (no se ha añadido todavía
-  ninguna referencia): no hay `.nupkg` real que inspeccionar hoy. Esta
-  entrada es un aviso adelantado, no una verificación cerrada.
-- **Lo que sí se pudo comprobar de fuera:** el repositorio de origen
-  (https://github.com/microsoft/Win2D) sí declara licencia **MIT**. Pero la
-  ficha del paquete en NuGet.org muestra un campo de licencia **heredado**
-  (`licenseUrl` apuntando a
-  `https://www.microsoft.com/web/webpi/eula/eula_win2d_10012014.htm`, un
-  patrón de EULA antiguo de Microsoft) en vez de una expresión SPDX limpia —
-  y esa URL concreta ya no resuelve a nada legible (redirige a una página
-  genérica de Microsoft Learn).
-- **Conclusión: no se da la MIT por buena todavía.** Cuando el hito 3 añada
-  la referencia real al `.csproj`, hay que repetir esta comprobación sobre el
-  `.nupkg` que se restaure entonces (`.nuspec` + cualquier `license.txt`
-  embebido), exactamente como se hizo aquí con `Microsoft.WindowsAppSDK` —
-  que es precisamente el caso que demuestra por qué no basta con mirar el
-  repositorio de GitHub.
+- **Referenciado en esta tarea** (piloto del VU meter, ver el encargo
+  hitos-0-1: es el paquete que da `CanvasControl` para pintar a mano en
+  WinUI 3, que no tiene `DrawingContext`). La entrada anterior de este
+  documento decía "aún no referenciado — entra en el hito 3" y avisaba de
+  que había que repetir la comprobación sobre el `.nupkg` real cuando
+  llegara el momento. Este es ese momento, y **la comprobación confirma la
+  sospecha: NO es MIT.**
+- **Licencia real, verificada en el paquete: NO es MIT, y no se puede leer
+  el texto completo.** El `.nuspec`
+  (`~/.nuget/packages/microsoft.graphics.win2d/1.2.0/microsoft.graphics.win2d.nuspec`)
+  no trae `<license type="file">` — solo
+  `<licenseUrl>http://www.microsoft.com/web/webpi/eula/eula_win2d_10012014.htm</licenseUrl>`
+  y `<requireLicenseAcceptance>true</requireLicenseAcceptance>`. El propio
+  `.nupkg` **no contiene ningún fichero de licencia ni de aviso** (se buscó
+  con `find … -iname "*license*" -o -iname "*eula*" -o -iname "*notice*"`
+  sobre el árbol completo del paquete: cero resultados). Y la URL del EULA
+  **ya no resuelve a nada legible**: hace un 301 a
+  `https://learn.microsoft.com/windows/web`, una página genérica de
+  Microsoft Learn sin relación con ninguna licencia — comprobado hoy, no de
+  memoria. Mismo patrón exacto que `Microsoft.Windows.SDK.BuildTools` (más
+  abajo): `requireLicenseAcceptance=true` + URL muerta + nada embebido.
+- **El repositorio de origen (https://github.com/microsoft/Win2D) SÍ es
+  MIT — y no basta.** Es la misma trampa, otra vez, que
+  `Microsoft.WindowsAppSDK` de arriba: código fuente MIT en GitHub y paquete
+  NuGet compilado bajo una EULA distinta (o, aquí, bajo una EULA que ni
+  siquiera se puede leer) son dos cosas separadas. No se da la MIT por
+  buena por el repositorio.
+- **Conclusión: licencia NO VERIFICABLE con lo disponible, y NO se supone
+  MIT.** A diferencia de `Microsoft.Windows.SDK.BuildTools`, este paquete
+  **sí se distribuye** — las DLL de Win2D (`Microsoft.Graphics.Canvas.*`)
+  viajan en la carpeta del `.exe` de Secuence, self-contained igual que el
+  resto del Windows App SDK — así que aquí la licencia sin verificar SÍ es
+  relevante para la distribución y no se puede cerrar como "no genera
+  obligación". Queda como **tarea pendiente concreta antes de distribuir
+  Secuence**: conseguir el texto real del EULA de Win2D por otra vía (p. ej.
+  Wayback Machine de la URL original, o contacto directo con Microsoft) y
+  decidir con ese texto en la mano si el uso de Secuence lo cumple.
+- **Copyright:** © Microsoft Corporation. Todos los derechos reservados
+  (declarado en el `.nuspec`).
+- **Proyecto:** https://github.com/microsoft/Win2D (fuente, MIT) · paquete
+  NuGet: https://www.nuget.org/packages/Microsoft.Graphics.Win2D
+- **Uso en Secuence:** `Microsoft.Graphics.Canvas.CanvasControl`, para pintar
+  a mano los siete controles que WinCue pinta con `DrawingContext` (WPF) y
+  que WinUI 3 no tiene manera de pintar sin esto. Entra con el VU meter
+  (piloto); los otros seis lo irán sumando según se traspasen.
+- **Dependencia declarada:** `Microsoft.WindowsAppSDK 1.5.240227000` (el
+  `.csproj` de Secuence ya trae `1.6.*`, que la satisface; no añade una
+  versión nueva del SDK, solo confirma la que ya había).
 
 ---
 
