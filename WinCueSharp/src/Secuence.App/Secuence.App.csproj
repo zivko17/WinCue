@@ -1,0 +1,99 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       Secuence.App — primera ventana real del segundo producto (WinUI 3).
+       Mismo motor que WinCue (Core/Controller), interfaz distinta: aquí no hay
+       ni una línea de WPF. Nace del banco de pruebas de tools/winui3-lab (hito
+       0) y de lo que el hito 1 sacó a WinCue.Presentation (Palette, Icons,
+       UiMetrics) para que los dos productos lo compartan sin copiar código.
+
+       Esta primera versión SOLO pinta la tabla de cues de un show real. Nada
+       de transporte, inspector, timeline ni mezclador: eso es de una tarea
+       posterior. El criterio de "hecho" es ver la lista con sus colores y
+       sus iconos.
+       ========================================================================== -->
+
+  <PropertyGroup>
+    <OutputType>WinExe</OutputType>
+    <TargetFramework>net8.0-windows10.0.19041.0</TargetFramework>
+    <TargetPlatformMinVersion>10.0.17763.0</TargetPlatformMinVersion>
+    <RootNamespace>Secuence.App</RootNamespace>
+    <!-- El nombre del ensamblado es "Secuence" (grafía deliberada, no errata):
+         es el nombre del producto, no el de esta carpeta de shell de UI. -->
+    <AssemblyName>Secuence</AssemblyName>
+    <UseWinUI>true</UseWinUI>
+    <WindowsPackageType>None</WindowsPackageType>
+    <WindowsAppSDKSelfContained>true</WindowsAppSDKSelfContained>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Platforms>x64</Platforms>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+  </PropertyGroup>
+
+  <!-- ==========================================================================
+       Resolución de AppxMSBuildToolsPath — el hito 0 dejó documentado
+       (tools/winui3-lab/INFORME.md) que `dotnet build` NO encuentra las tareas
+       de MrtCore.PriGen.targets (p.ej. ExpandPriContent): $(MSBuildExtensionsPath)
+       apunta al SDK de .NET con `dotnet`, y ahí esas tareas no existen. La
+       solución de mano (-p:AppxMSBuildToolsPath=... en la línea de comandos)
+       vale para un puesto, pero el runner de CI tiene Visual Studio en otra
+       ruta y nadie va a tocar ci.yml a mano cada vez que cambie la imagen.
+
+       Este bloque busca las instalaciones conocidas de VS 2022 EN TIEMPO DE
+       EVALUACIÓN del proyecto — antes de que Sdk.targets importe los .targets
+       del paquete WindowsAppSDK, que es cuando hace falta tener ya el valor
+       puesto — y solo actúa si nadie fijó la propiedad ya a mano: la condición
+       de la primera línea hace que un -p:AppxMSBuildToolsPath=... explícito
+       (como el de los comandos documentados en el hito 0) siga ganando.
+       ========================================================================== -->
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == ''">
+    <_SecuenceVsRoot Condition="Exists('C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Enterprise</_SecuenceVsRoot>
+    <_SecuenceVsRoot Condition="'$(_SecuenceVsRoot)' == '' AND Exists('C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Professional</_SecuenceVsRoot>
+    <_SecuenceVsRoot Condition="'$(_SecuenceVsRoot)' == '' AND Exists('C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Community</_SecuenceVsRoot>
+    <_SecuenceVsRoot Condition="'$(_SecuenceVsRoot)' == '' AND Exists('C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools</_SecuenceVsRoot>
+    <AppxMSBuildToolsPath Condition="'$(_SecuenceVsRoot)' != ''">$(_SecuenceVsRoot)\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Versiones verificadas en el hito 0 contra el SDK 8.0.423. No subir
+         "porque hay una más nueva" sin comprobar que restauran igual. -->
+    <PackageReference Include="Microsoft.WindowsAppSDK" Version="1.6.*" />
+    <PackageReference Include="Microsoft.Windows.SDK.BuildTools" Version="10.0.22621.*" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
+    <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
+    <ProjectReference Include="..\WinCue.Presentation\WinCue.Presentation.csproj" />
+  </ItemGroup>
+
+  <!-- El glifo de icono (E000-F8FF) se pinta con la fuente Phosphor cargada
+       DIRECTAMENTE, sin la fuente compuesta de WPF (WinCue.CompositeFont: un
+       .CompositeFont es un formato exclusivo de WPF, no existe en WinUI 3).
+       La tabla de cues nunca mezcla un glifo con texto normal en el MISMO
+       TextBlock (ver CueRow.cs), así que no hace falta resolver por rango:
+       basta con poner Phosphor SOLO en el TextBlock del icono.
+       Va como Content copiado a la salida (no como recurso empaquetado:
+       WindowsPackageType=None es una app SIN identidad de paquete, y
+       "ms-appx:///" no resuelve ahí) para poder cargarla por ruta de archivo
+       en tiempo de ejecución — ver Theme.cs. -->
+  <ItemGroup>
+    <Content Include="assets\Phosphor.ttf">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
+  <!-- ==========================================================================
+       Reglas de analizador relajadas — cada una con su motivo, nunca en bloque.
+       ========================================================================== -->
+  <PropertyGroup>
+    <!-- CA5392: "usar DefaultDllImportSearchPathsAttribute" salta sobre código
+         que el propio paquete Microsoft.WindowsAppSDK inyecta desde la caché de
+         NuGet (visto ya en el hito 0, tools/winui3-lab/INFORME.md, Pregunta 2).
+         Un .editorconfig del repo NUNCA alcanza un .cs inyectado desde un
+         paquete, así que la única forma de silenciarlo es aquí. No es código
+         nuestro y no lo podemos tocar. -->
+    <NoWarn>$(NoWarn);CA5392</NoWarn>
+  </PropertyGroup>
+
+</Project>
