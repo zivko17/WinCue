@@ -16,14 +16,18 @@ using System.Windows.Input;
 using System.Windows.Media;
 using WinCue.Audio;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
 public sealed class WaveformControl : FrameworkElement
 {
-    private const int Buckets = 1600;
-    private const double RulerH = 16;
-    private const double HandleHit = 8;
+    // Buckets, RulerH y HandleHit viven ahora en WaveformLayout
+    // (WinCue.Presentation): son parte del CÁLCULO compartido con Secuence,
+    // no de esta interfaz. Alias locales de solo lectura para no reescribir
+    // los sitios que ya los usaban por su nombre corto.
+    private const double RulerH = WaveformLayout.RulerH;
+    private const double HandleHit = WaveformLayout.HandleHit;
 
     // Pinceles (espejo de los colores Python), congelados
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.WaveBg));
@@ -140,34 +144,13 @@ public sealed class WaveformControl : FrameworkElement
 
     private static (float[] Mins, float[] Maxs, double Duration) ComputePeaks(string path)
     {
+        // La decodificación (pipe a ffmpeg si hace falta) ya vivía en
+        // WinCue.Audio.AudioDecoder — compartida, no de esta interfaz. El
+        // submuestreo a buckets de min/max SÍ era cálculo de interfaz
+        // duplicable y ahora vive en WaveformLayout (WinCue.Presentation).
         var buf = AudioDecoder.Decode(path);
-        int frames = buf.FrameCount;
-        int ch = buf.Channels;
-        if (frames == 0)
-            throw new InvalidOperationException("sin audio");
-
-        int buckets = Math.Min(Buckets, frames);
-        var mins = new float[buckets];
-        var maxs = new float[buckets];
-        for (int b = 0; b < buckets; b++)
-        {
-            long f0 = (long)b * frames / buckets;
-            long f1 = (long)(b + 1) * frames / buckets;
-            float mn = float.MaxValue, mx = float.MinValue;
-            for (long f = f0; f < f1; f++)
-            {
-                // mezcla mono: media de canales del frame
-                float sum = 0;
-                long idx = f * ch;
-                for (int c = 0; c < ch; c++) sum += buf.Samples[idx + c];
-                float v = sum / ch;
-                if (v < mn) mn = v;
-                if (v > mx) mx = v;
-            }
-            mins[b] = mn == float.MaxValue ? 0 : mn;
-            maxs[b] = mx == float.MinValue ? 0 : mx;
-        }
-        return (mins, maxs, buf.DurationSeconds);
+        var peaks = WaveformLayout.ComputePeaks(buf.Samples, buf.Channels, buf.FrameCount);
+        return (peaks.Mins, peaks.Maxs, buf.DurationSeconds);
     }
 
     private static double ProbeDuration(string path)
@@ -194,17 +177,11 @@ public sealed class WaveformControl : FrameworkElement
     // Geometría interna
     // ------------------------------------------------------------------
 
-    private double SecToX(double sec) =>
-        _duration <= 0 ? 0.0 : Math.Clamp(sec / _duration, 0.0, 1.0) * ActualWidth;
+    private double SecToX(double sec) => WaveformLayout.SecToX(sec, _duration, ActualWidth);
 
-    private double XToSec(double x) =>
-        _duration <= 0 ? 0.0 : Math.Clamp(x / Math.Max(1.0, ActualWidth), 0.0, 1.0) * _duration;
+    private double XToSec(double x) => WaveformLayout.XToSec(x, _duration, ActualWidth);
 
-    private static string Fmt(double s)
-    {
-        int m = (int)s / 60;
-        return $"{m}:{s - m * 60:00.0}";
-    }
+    private static string Fmt(double s) => WaveformLayout.FormatTime(s);
 
     // ------------------------------------------------------------------
     // Pintado
@@ -224,7 +201,7 @@ public sealed class WaveformControl : FrameworkElement
 
         double bodyTop = RulerH, bodyH = h - RulerH;
         double sX = SecToX(_start);
-        double eX = SecToX(_end > 0 ? _end : _duration);
+        double eX = SecToX(WaveformLayout.EffectiveEnd(_end, _duration));
 
         // Cuerpo: onda (audio) o barra lisa (vídeo)
         if (_isAudio && _mins is not null && _maxs is not null)
@@ -239,7 +216,7 @@ public sealed class WaveformControl : FrameworkElement
             {
                 for (int x = 0; x < (int)w; x++)
                 {
-                    int i = Math.Min(n - 1, (int)((double)x / Math.Max(1.0, w) * n));
+                    int i = WaveformLayout.ColumnBucketIndex(x, w, n);
                     double y0 = mid - _maxs[i] * half;
                     double y1 = mid - _mins[i] * half;
                     var ctx = x >= sX && x <= eX ? gSel : gDim;
@@ -266,7 +243,7 @@ public sealed class WaveformControl : FrameworkElement
         // Regla de tiempo (0/25/50/75/100 %)
         var rulerPen = new Pen(RulerBrush, 1);
         rulerPen.Freeze();
-        foreach (double frac in new[] { 0.0, 0.25, 0.5, 0.75, 1.0 })
+        foreach (double frac in WaveformLayout.RulerFractions)
         {
             double x = Math.Clamp(frac * w, 1, w - 1);
             dc.DrawLine(rulerPen, new Point(x, 0), new Point(x, RulerH - 4));
@@ -304,13 +281,8 @@ public sealed class WaveformControl : FrameworkElement
             return;
         double x = e.GetPosition(this).X;
         double sX = SecToX(_start);
-        double eX = SecToX(_end > 0 ? _end : _duration);
-        if (Math.Abs(x - sX) <= HandleHit && Math.Abs(x - sX) <= Math.Abs(x - eX))
-            _drag = "start";
-        else if (Math.Abs(x - eX) <= HandleHit)
-            _drag = "end";
-        else
-            _drag = Math.Abs(x - sX) <= Math.Abs(x - eX) ? "start" : "end";
+        double eX = SecToX(WaveformLayout.EffectiveEnd(_end, _duration));
+        _drag = WaveformLayout.PickHandle(x, sX, eX, HandleHit) == WaveformHandle.Start ? "start" : "end";
         CaptureMouse();
         UpdateDrag(x);
     }
@@ -327,7 +299,7 @@ public sealed class WaveformControl : FrameworkElement
         {
             _drag = null;
             ReleaseMouseCapture();
-            MarkersChanged?.Invoke(_start, _end > 0 ? _end : _duration);
+            MarkersChanged?.Invoke(_start, WaveformLayout.EffectiveEnd(_end, _duration));
         }
     }
 
@@ -335,9 +307,9 @@ public sealed class WaveformControl : FrameworkElement
     {
         double sec = XToSec(x);
         if (_drag == "start")
-            _start = Math.Min(sec, _end > 0 ? _end : _duration);
+            _start = WaveformLayout.DragStart(sec, _end, _duration);
         else
-            _end = Math.Max(sec, _start);
+            _end = WaveformLayout.DragEnd(sec, _start);
         Scrubbing?.Invoke(_drag == "start" ? _start : _end);
         InvalidateVisual();
     }
