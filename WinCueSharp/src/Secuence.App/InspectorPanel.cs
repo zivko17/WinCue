@@ -19,11 +19,18 @@
 //   - Reproducción: loop, play count, trim (inicio/fin), volumen.
 //
 // FUERA de esta pasada, a propósito: el rack de audio (EQ, compresor, VU por
-// cue), la geometría de vídeo, el lienzo de encuadre y los disparadores
-// remotos (hotkey/MIDI/wall-clock). Todo eso pide controles pintados a mano
-// que Secuence no tiene todavía (ver TimelineCanvas.cs/VuMeterCanvas.cs para
-// los que sí existen) — entran en una pasada posterior, cuando esos
-// controles existan.
+// cue) y los disparadores remotos (hotkey/MIDI/wall-clock). Eso pide
+// controles pintados a mano que Secuence no tiene todavía — entran en una
+// pasada posterior, cuando esos controles existan.
+//
+// GEOMETRÍA DE VÍDEO (sumada en la tarea "canvas de geometría", hitos-0-1):
+// modo FULL/CUSTOM, aspecto, escala, posición y rotación, con el mismo
+// GeometryCanvas (Win2D) que WinCue.App.GeometryCanvasControl (WPF) — el
+// CÁLCULO de coordenadas es compartido (WinCue.Presentation.GeometryLayout),
+// ver GeometryCanvas.cs para el detalle. Sin el compositor multi-salida
+// (opacidad, canvas/output por cue) ni el visor de edición con fotograma fijo
+// — eso pide controles y una ventana que Secuence no tiene todavía; ver la
+// cabecera de GeometryCanvas.cs para el porqué exacto.
 //
 // EDICIÓN EN VIVO: ningún campo se deshabilita por que el cue esté sonando.
 // WinCue tampoco lo hace (ver InspectorPanel.cs de WPF, Commit/
@@ -78,6 +85,20 @@ public sealed class InspectorPanel : ContentControl
     private bool _loading;   // suprime commits al repoblar (igual que en WPF)
     private readonly WaveformCanvas _wave = new();
     private string _waveLoadedPath = "";
+
+    // ── Geometría de vídeo ──────────────────────────────────────────────
+    private readonly GeometryCanvas _geoCanvas = new();
+    private StackPanel _fullGeoPanel = null!;
+    private StackPanel _customGeoPanel = null!;
+    private readonly List<(Button Btn, int Deg)> _rotButtons = new();
+
+    /// <summary>Claves cuyo cambio se refleja en el lienzo + paneles + botones
+    /// de rotación (sin re-commitear). Mismo conjunto que
+    /// WinCue.App.InspectorPanel.GeoPreviewKeys.</summary>
+    private static readonly HashSet<string> GeoPreviewKeys = new()
+    {
+        "geo_mode", "preserve_aspect", "scale", "translate_x", "translate_y", "scale_x", "rotate_z",
+    };
 
     private readonly TextBlock _header = new()
     {
@@ -139,6 +160,8 @@ public sealed class InspectorPanel : ContentControl
         WaveformRow();
         VolumeField();
 
+        GeometrySection();
+
         IsEnabled = false;   // sin cue seleccionado
         _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
     }
@@ -194,6 +217,20 @@ public sealed class InspectorPanel : ContentControl
             _wave.SetMarkers(_cue.TrimStart, _cue.TrimEnd);
         else if (key == "file_path")
             UpdateWave(_cue, force: true);
+        else if (GeoPreviewKeys.Contains(key))
+        {
+            // Reflejar en lienzo + paneles + controles (sin re-commitear) —
+            // mismo reparto que WinCue.App.InspectorPanel.Commit.
+            bool was = _loading;
+            _loading = true;
+            try
+            {
+                if (_loaders.TryGetValue(key, out var loader))
+                    loader(_cue);
+                SyncGeometryUi(_cue);
+            }
+            finally { _loading = was; }
+        }
     }
 
     /// <summary>Carga la barra de trim (decodifica solo si cambia el
@@ -475,4 +512,154 @@ public sealed class InspectorPanel : ContentControl
 
     private static string VolumeLabel(double v) =>
         v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB";
+
+    // ==================================================================
+    // Geometría de vídeo: modo, aspecto, escala/posición/rotación y el
+    // lienzo interactivo (GeometryCanvas, Win2D). Mismo reparto de campos
+    // que WinCue.App.InspectorPanel.BuildGeometry, en la columna única de
+    // este formulario (Secuence no tiene aún el layout a dos columnas de
+    // WPF — ver la cabecera del archivo).
+    // ==================================================================
+
+    /// <summary>Campo numérico (double) con commit al perder foco/Enter —
+    /// mismo contrato que TimeF/Int, sin el formato de tiempo.</summary>
+    private void Dbl(string key, string label, Func<Cue, double> read, string fmt = "0.##")
+    {
+        var row = LabeledRow(label);
+        var tb = MakeTextBox(80);
+        WireTextCommit(tb, key, () =>
+            double.TryParse(tb.Text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
+                ? v : (object?)null);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c).ToString(fmt, CultureInfo.InvariantCulture);
+    }
+
+    private void GeometrySection()
+    {
+        // Toda la sección (cabecera, modo, paneles FULL/CUSTOM y lienzo) solo
+        // tiene sentido para cues de VÍDEO — a diferencia del resto de campos
+        // de esta pasada (tiempos, fundidos…), que WinCue tampoco esconde por
+        // tipo. VisibleIf lo evalúa SetCue; aquí solo se recogen los
+        // elementos de nivel superior para registrarlos.
+        bool VideoOnly(Cue c) => c.Type == CueType.Video;
+
+        var header = LastAdded(() => Header(Loc.T("GEOMETRÍA DE VÍDEO", "VIDEO GEOMETRY")));
+        _conditional.Add((header, VideoOnly));
+
+        var modeRow = LastAdded(() => Cmb("geo_mode", Loc.T("Modo:", "Mode:"),
+            c => c.GeoMode.ToString().ToUpperInvariant(),
+            ("FULL", Loc.T("Full — llena el canvas", "Full — fills the canvas")),
+            ("CUSTOM", Loc.T("Custom — posición manual", "Custom — manual position"))));
+        _conditional.Add((modeRow, VideoOnly));
+
+        // ── Panel FULL ──────────────────────────────────────────────────
+        _fullGeoPanel = new StackPanel();
+        _root.Children.Add(_fullGeoPanel);
+        _conditional.Add((_fullGeoPanel, VideoOnly));
+        {
+            var aspectRow = new CheckBox
+            {
+                Content = Loc.T("Mantener relación de aspecto", "Keep aspect ratio"),
+                Foreground = Theme.TextPrimaryBrush,
+                Margin = new Thickness(10, 3, 10, 3),
+            };
+            aspectRow.Checked += (_, _) => Commit("preserve_aspect", true);
+            aspectRow.Unchecked += (_, _) => Commit("preserve_aspect", false);
+            _fullGeoPanel.Children.Add(aspectRow);
+            _loaders["preserve_aspect"] = c => aspectRow.IsChecked = c.PreserveAspect;
+        }
+        MoveLastRowInto(_fullGeoPanel,
+            () => Dbl("scale", Loc.T("Escala (%):", "Scale (%):"), c => c.Scale, "0"));
+
+        // ── Panel CUSTOM ────────────────────────────────────────────────
+        _customGeoPanel = new StackPanel();
+        _root.Children.Add(_customGeoPanel);
+        _conditional.Add((_customGeoPanel, VideoOnly));
+        MoveLastRowInto(_customGeoPanel,
+            () => Dbl("scale_x", Loc.T("Escala (×):", "Scale (×):"), c => c.ScaleX, "0.00"));
+        MoveLastRowInto(_customGeoPanel,
+            () => Dbl("translate_x", Loc.T("Posición X (px):", "Position X (px):"), c => c.TranslateX, "0"));
+        MoveLastRowInto(_customGeoPanel,
+            () => Dbl("translate_y", Loc.T("Posición Y (px):", "Position Y (px):"), c => c.TranslateY, "0"));
+
+        var rotRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 4, 10, 2) };
+        rotRow.Children.Add(new TextBlock
+        {
+            Text = Loc.T("Rotación:", "Rotation:"), Width = 150,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Theme.TextTertiaryBrush,
+        });
+        foreach (int deg in new[] { 0, 90, 180, 270 })
+        {
+            var btn = new Button
+            {
+                Content = $"{deg}°", Width = 50,
+                Margin = new Thickness(0, 0, 4, 0),
+                Background = Theme.ButtonBgBrush,
+                Foreground = Theme.TextPrimaryBrush,
+            };
+            btn.Click += (_, _) =>
+            {
+                if (_loading || _cue is null) return;
+                Commit("rotate_z", (double)deg);
+            };
+            _rotButtons.Add((btn, deg));
+            rotRow.Children.Add(btn);
+        }
+        _customGeoPanel.Children.Add(rotRow);
+
+        // El lienzo ocupa el ancho del formulario, con la misma proporción
+        // 16:9 aproximada que WinCue le da en su columna derecha.
+        _geoCanvas.Height = UiMetrics.TrimBarHeight * 3;
+        _geoCanvas.Margin = new Thickness(10, 8, 10, 10);
+        _geoCanvas.Translated += (tx, ty) =>
+        {
+            Commit("translate_x", tx);
+            Commit("translate_y", ty);
+        };
+        // Commit dispara SyncGeometryUi, así que el campo "Escala (×)" sigue
+        // al tirador solo; no hace falta tocarlo aquí.
+        _geoCanvas.Scaled += sx => Commit("scale_x", sx);
+        _root.Children.Add(_geoCanvas);
+        _conditional.Add((_geoCanvas, VideoOnly));
+
+        _loaders["__geo_sync"] = SyncGeometryUi;
+    }
+
+    /// <summary>Ejecuta <paramref name="build"/> (que añade una fila a
+    /// _root, como Header/Cmb) y devuelve esa fila ya añadida — para
+    /// registrarla en _conditional sin reescribir esos helpers con un
+    /// StackPanel de destino.</summary>
+    private FrameworkElement LastAdded(Action build)
+    {
+        build();
+        return (FrameworkElement)_root.Children[^1];
+    }
+
+    /// <summary>Como <see cref="LastAdded"/>, pero MUEVE la fila resultante a
+    /// <paramref name="target"/> en vez de dejarla en _root — para los campos
+    /// que caen dentro del panel FULL o CUSTOM (Dbl() no recibe un StackPanel
+    /// de destino).</summary>
+    private void MoveLastRowInto(StackPanel target, Action build)
+    {
+        var row = LastAdded(build);
+        _root.Children.RemoveAt(_root.Children.Count - 1);
+        target.Children.Add(row);
+    }
+
+    /// <summary>Paneles FULL/CUSTOM, botones de rotación y lienzo — mismo
+    /// reparto que WinCue.App.InspectorPanel.SyncGeometryUi.</summary>
+    private void SyncGeometryUi(Cue c)
+    {
+        bool custom = c.GeoMode == GeoMode.Custom;
+        _fullGeoPanel.Visibility = custom ? Visibility.Collapsed : Visibility.Visible;
+        _customGeoPanel.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
+
+        long rot = (((long)(Math.Round(c.RotateZ / 90.0) * 90)) % 360 + 360) % 360;
+        foreach (var (btn, deg) in _rotButtons)
+            btn.Background = deg == rot ? Theme.StandbyBrush : Theme.ButtonBgBrush;
+
+        _geoCanvas.SetValues(custom, c.Scale, c.PreserveAspect, c.ScaleX, c.TranslateX, c.TranslateY, rot);
+    }
 }
