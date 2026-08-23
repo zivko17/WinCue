@@ -399,6 +399,17 @@
                             <TextBlock Text="SALIDA VÍDEO" VerticalAlignment="Center"/>
                         </StackPanel>
                     </Button>
+                    <!-- AJUSTES: mismo sitio (tras SALIDA VÍDEO) que
+                         WinCue.App.MainWindow.xaml pone su botón de
+                         Configuración (tras VideoOutButton) — ver
+                         OnSettingsClick, MainWindow.xaml.cs. -->
+                    <Button x:Name="SettingsButton" Click="OnSettingsClick" Height="44">
+                        <StackPanel Orientation="Horizontal" Spacing="6">
+                            <TextBlock x:Name="SettingsIcon" FontFamily="{x:Bind local:IconFont.Font}"
+                                       FontSize="16" VerticalAlignment="Center"/>
+                            <TextBlock Text="AJUSTES" VerticalAlignment="Center"/>
+                        </StackPanel>
+                    </Button>
                 </StackPanel>
             </Grid>
         </Border>

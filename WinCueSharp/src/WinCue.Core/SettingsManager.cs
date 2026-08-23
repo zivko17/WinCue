@@ -107,6 +107,14 @@ public class SettingsManager
         ["panic_double_hard"] = true,     // 2ª pulsación en <2 s = corte duro
 
         // ── Interfaz ─────────────────────────────────────────────────
+        // Idioma de la interfaz. Antes no tenía default propio (Get() caía a
+        // "en" por el parámetro de llamada en cada sitio de lectura) — mismo
+        // valor efectivo, pero ausente de GetAll(): una ventana de Ajustes
+        // que recorra GetAll() (como hace Secuence.App.SettingsPanel) veía
+        // null en vez de "en". Añadirlo aquí no cambia el comportamiento de
+        // WinCue (idéntico default), solo lo hace explícito para quien lea
+        // el conjunto completo en vez de leer la clave suelta.
+        ["ui_language"]         = "en",
         // Latencia OFF por defecto (útil para depurar, ruido para operar)
         ["show_latency_column"] = false,
         ["show_next_cue_label"] = true,
@@ -184,6 +192,33 @@ public class SettingsManager
 
     /// <summary>Devuelve una copia profunda del objeto completo de configuración.</summary>
     public JsonObject GetAll() => (JsonObject)_data.DeepClone();
+
+    /// <summary>Convierte un nodo de GetAll()[key] a su valor .NET más natural
+    /// (bool/int/double/string, o null si la clave no existe) — SIN depender
+    /// de si el JsonValue está respaldado por un int o un double de C# (los
+    /// defaults recién creados por CreateDefaults() van por un lado —
+    /// System.Text.Json.Nodes.JsonValue.Create(int) — y los que vienen de
+    /// disco, deserializados, por otro; GetValueKind()+Deserialize&lt;double&gt;
+    /// evita el 'InvalidOperationException' que da GetValue&lt;double&gt;()
+    /// contra un respaldo int. Compartido por las DOS ventanas de Ajustes
+    /// (WinCue.App, WPF, y Secuence.App, WinUI 3): las dos recorren su propio
+    /// registro de controles leyendo GetAll()[key] y necesitan el MISMO
+    /// saneado — antes vivía duplicado dentro de SettingsWindow.LoadValues
+    /// (WPF); aquí solo se ha extraído, no reescrito (mismo comportamiento,
+    /// verificado por SettingsManagerTests).</summary>
+    public static object? CoerceForField(JsonNode? node) => node switch
+    {
+        null => null,
+        _ => node.GetValueKind() switch
+        {
+            JsonValueKind.True => true,
+            JsonValueKind.False => false,
+            JsonValueKind.Number =>
+                JsonSerializer.Deserialize<double>(node) is double d && d % 1 == 0
+                    ? (object)(int)d : JsonSerializer.Deserialize<double>(node),
+            _ => node.ToString(),
+        },
+    };
 
     /// <summary>Restaura todos los valores de fábrica y guarda.</summary>
     public void ResetDefaults()

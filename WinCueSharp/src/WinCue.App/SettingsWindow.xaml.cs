@@ -636,28 +636,13 @@ public partial class SettingsWindow : Window
 
     private void LoadValues()
     {
+        var all = _sm.GetAll();
         foreach (var (key, field) in _fields)
-        {
-            var node = _sm.GetAll()[key];
-            // OJO: GetValue<double>() LANZA si el JsonValue está respaldado por
-            // un int de C# (defaults aún no guardados en settings.json);
-            // Deserialize<> convierte con independencia del respaldo.
-            object? value = node switch
-            {
-                null => null,
-                _ => node.GetValueKind() switch
-                {
-                    System.Text.Json.JsonValueKind.True => true,
-                    System.Text.Json.JsonValueKind.False => false,
-                    System.Text.Json.JsonValueKind.Number =>
-                        System.Text.Json.JsonSerializer.Deserialize<double>(node) is double d
-                            && d % 1 == 0
-                        ? (object)(int)d : System.Text.Json.JsonSerializer.Deserialize<double>(node),
-                    _ => node.ToString(),
-                },
-            };
-            field.Set(value);
-        }
+            // CoerceForField (WinCue.Core.SettingsManager): mismo saneado que
+            // usa Secuence.App.SettingsPanel (WinUI 3) — extraído de aquí,
+            // ver su comentario para el porqué exacto (GetValue<double> vs.
+            // Deserialize<>).
+            field.Set(SettingsManager.CoerceForField(all[key]));
     }
 
     private void OnSave(object sender, RoutedEventArgs e)

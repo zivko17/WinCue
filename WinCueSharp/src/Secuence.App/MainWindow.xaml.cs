@@ -166,6 +166,7 @@ public sealed partial class MainWindow : Window, IShowView
         // WinCue para el mismo botón — ver BuildAddMenu para el desplegable
         // de tipos de cue de AddButton.
         VideoOutIcon.Text = Icons.VideoOutput;
+        SettingsIcon.Text = Icons.Settings;
         AddIcon.Text = Icons.Add;
         AddExpandedIcon.Text = Icons.Expanded;
         ImportIcon.Text = Icons.Import;
@@ -749,6 +750,97 @@ public sealed partial class MainWindow : Window, IShowView
     {
         bool active = _videoOutput is { IsVisible: true };
         VideoOutButton.Background = active ? Theme.GoButtonBrush : Theme.PanicButtonBrush;
+    }
+
+    // ==================================================================
+    // Ajustes (SettingsPanel.cs) — puerta de la tarea: hasta esta pasada
+    // cambiar el monitor de salida de vídeo obligaba a editar settings.json
+    // a mano (ver el encargo). WinUI 3 no tiene una Window modal ligera como
+    // WPF (Window+ShowDialog): el formulario (SettingsPanel, un
+    // ContentControl corriente) se aloja en un ContentDialog — mismo patrón
+    // que ConfirmDiscardChangesAsync/OnEditMode más arriba.
+    // ==================================================================
+
+    /// <summary>Motor de audio a reconfigurar en caliente tras guardar
+    /// Ajustes — mismo reparto que WinCue.App.MainWindow.OnSettingsClick
+    /// (dlg.Saved → _applyEngineSettings). App.xaml.cs la fija justo después
+    /// de construir el AudioEngine; Attach() no la toca (no hace falta la
+    /// ventana entera, solo esta acción).</summary>
+    public Action? ApplyEngineSettings { get; set; }
+
+    private async void OnSettingsClick(object sender, RoutedEventArgs e)
+    {
+        var panel = new SettingsPanel(_settings) { BrowseFile = BrowseFileAsync };
+        var dialog = new ContentDialog
+        {
+            Title = $"Secuence — {Loc.T("Configuración", "Settings")}",
+            Content = new Border
+            {
+                Width = 620,
+                MaxHeight = 560,
+                Child = panel,
+            },
+            PrimaryButtonText = Loc.T("Guardar", "Save"),
+            SecondaryButtonText = Loc.T("Restaurar valores de fábrica", "Restore factory defaults"),
+            CloseButtonText = Loc.T("Cancelar", "Cancel"),
+            DefaultButton = ContentDialogButton.Primary,
+            // Fuerza el tema oscuro EN ESTE diálogo (Microsoft.UI.Xaml.
+            // Controls.ComboBox/CheckBox/NumberBox/TabView no tienen aquí una
+            // plantilla propia como los Button de MainWindow.xaml — Grid.
+            // Resources — así que sin esto seguirían el tema del SISTEMA, no
+            // el de la app): mismo criterio "misma familia" del encargo, con
+            // el mecanismo que WinUI 3 ofrece para un ContentDialog suelto en
+            // vez de retemplar cada control uno a uno.
+            RequestedTheme = ElementTheme.Dark,
+            Background = Theme.WindowBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+            XamlRoot = Content.XamlRoot,
+        };
+        // Restaurar valores de fábrica NO cierra el diálogo ni guarda de
+        // inmediato (a diferencia de WPF, que sí persiste ahí mismo tras un
+        // MessageBox de confirmación): un ContentDialog de WinUI 3 no puede
+        // abrir un segundo ContentDialog de confirmación sin cerrarse él
+        // primero. Aquí "Restaurar" solo repuebla los campos EN PANTALLA —
+        // sigue haciendo falta pulsar Guardar para que se escriba a disco,
+        // lo que de paso da un "cancelar" gratis si fue un despiste.
+        dialog.SecondaryButtonClick += (_, args) =>
+        {
+            args.Cancel = true;
+            panel.LoadDefaults();
+        };
+
+        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            return;
+
+        int previousSampleRate = panel.InitialSampleRate;
+        var updates = panel.CollectValues();
+        _settings.SetMany(updates);
+
+        if (Convert.ToInt32(updates["audio_sample_rate"]) != previousSampleRate)
+        {
+            var info = new ContentDialog
+            {
+                Title = Loc.T("Configuración", "Settings"),
+                Content = Loc.T(
+                    "La nueva frecuencia de muestreo se aplicará al reiniciar Secuence.",
+                    "The new sample rate will apply after restarting Secuence."),
+                CloseButtonText = "OK",
+                XamlRoot = Content.XamlRoot,
+            };
+            await info.ShowAsync();
+        }
+
+        // Reconfigurar EN CALIENTE — mismo reparto que
+        // WinCue.App.MainWindow.OnSettingsClick (dlg.Saved): dispositivo de
+        // audio (ApplyEngineSettings, fijado por App.xaml.cs), volumen
+        // master, y la salida de vídeo si ya está abierta (recolocarla en el
+        // monitor recién elegido, sin esperar al siguiente GO).
+        ApplyEngineSettings?.Invoke();
+        _controller?.OnMasterVolume(_settings.Get("master_volume", 100));
+        _mixer.SetMasterFader(_settings.Get("master_volume", 100));
+        if (_videoOutput is { IsVisible: true })
+            _videoOutput.PlaceOnScreen(_settings.Get("video_output_screen", 0));
+        FlashStatus(Loc.T("Configuración guardada y aplicada.", "Settings saved and applied."));
     }
 
     // ==================================================================

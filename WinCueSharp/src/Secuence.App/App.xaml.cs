@@ -94,6 +94,16 @@ public partial class App : Application
         // llena de cuadritos (ver IconFont.Comprobar para el porqué exacto).
         IconFont.Comprobar();
 
+        // Idioma de la interfaz (ui_language): faltaba por completo en esta
+        // App.xaml.cs — Loc.T() ya se usa por toda Secuence.App (InspectorPanel,
+        // MixerPanel, SettingsPanel…) pero sin esta línea Loc.Current se
+        // quedaba siempre en su default de arranque (Es), ignorando settings.json.
+        // Mismo sitio y mismo criterio que WinCue.App.App.xaml.cs (antes de
+        // construir ninguna ventana: el idioma no puede cambiar a media
+        // construcción de MainWindow/InspectorPanel).
+        var settings = SettingsManager.Instance;
+        Loc.SetFromCode(settings.Get("ui_language", "en"));
+
         var model = new CueModel();
         var window = new MainWindow(model);
         _window = window;
@@ -105,13 +115,20 @@ public partial class App : Application
         var dispatcherQueue = window.DispatcherQueue;
         Action<Action> dispatch = action => dispatcherQueue.TryEnqueue(() => action());
 
-        var settings = SettingsManager.Instance;
         var audio = new AudioEngine(
             dispatch,
             driver: settings.Get("audio_driver", "wasapi"),
             sampleRate: settings.Get("audio_sample_rate", 48000));
         _audio = audio;
         ApplyAudioDevice(settings);
+        // Ajustes → Audio: reconfigura el dispositivo en caliente tras
+        // guardar (MainWindow.OnSettingsClick la invoca) — antes Secuence
+        // solo aplicaba audio_device_name/audio_driver UNA VEZ, al arrancar
+        // (ver el comentario viejo de ApplyAudioDevice más abajo, ya no
+        // válido: esta tarea es la que añade la ventana de Ajustes que hace
+        // falta "en caliente"). Mismo reparto que WinCue.App.App.xaml.cs,
+        // window.Attach(..., applyEngineSettings: () => ApplyAudioDevice(settings)).
+        window.ApplyEngineSettings = () => ApplyAudioDevice(settings);
 
         // VideoEngine real (WinCue.Video, con mpv): esta tarea rellena el
         // hueco que el NullVideoEngine provisional de la tarea anterior
@@ -160,10 +177,11 @@ public partial class App : Application
         _window.Activate();
     }
 
-    /// <summary>Aplica el dispositivo/driver de settings al motor. Simplificada
-    /// respecto a WinCue.App.App.ApplyAudioDevice: Secuence todavía no tiene
-    /// pantalla de Ajustes propia, así que solo hay un valor que leer al
-    /// arrancar (no un "en caliente" que reaplicar tras guardar).</summary>
+    /// <summary>Aplica el dispositivo/driver de settings al motor — al
+    /// arrancar Y en caliente tras guardar Ajustes (window.ApplyEngineSettings,
+    /// más arriba). Idéntica a WinCue.App.App.ApplyAudioDevice: ya no hay
+    /// simplificación posible ahora que Secuence también tiene ventana de
+    /// Ajustes (ver SettingsPanel.cs).</summary>
     private void ApplyAudioDevice(SettingsManager settings)
     {
         if (_audio is null)
