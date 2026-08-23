@@ -112,7 +112,9 @@ public sealed class MonitorTransportBar : DockPanel
 
         double dur = _monitor.PreviewDuration;
         double pos = _monitor.PreviewPosition;
-        _time.Text = $"{Mmss(pos)} / {Mmss(dur)}";
+        // Cálculo compartido con Secuence (WinCue.Presentation.MonitorClockFormat,
+        // extraído verbatim de lo que era Mmss aquí mismo — mismo comportamiento).
+        _time.Text = MonitorClockFormat.Format(pos, dur);
         if (_seeking || dur <= 0.05)
             return;
         double v = Math.Clamp(pos / dur, 0.0, 1.0) * _seek.Maximum;
@@ -121,13 +123,5 @@ public sealed class MonitorTransportBar : DockPanel
         _seeking = true;      // no re-entrar por ValueChanged
         _seek.Value = v;
         _seeking = false;
-    }
-
-    private static string Mmss(double s)
-    {
-        if (double.IsNaN(s) || s < 0)
-            s = 0;
-        int m = (int)(s / 60);
-        return $"{m}:{s - m * 60:00.0}";
     }
 }
