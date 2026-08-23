@@ -25,6 +25,15 @@ using System.Windows.Media;
 using WinCue.Controller;
 using WinCue.Core;
 using WinCue.Presentation;
+// El CÁLCULO de la proyección (bloques, recuadros de grupo, arrastre en
+// curso) vive en WinCue.Presentation.TimelineLayout (ver el encargo,
+// hitos-0-1): estos alias dejan que TODO el código de interacción de más
+// abajo (arrastre, hit-test, menú contextual) siga escribiendo "Block"/
+// "Span"/"DragMode" tal cual, sin un solo cambio de nombre, sobre los tipos
+// AHORA compartidos con Secuence.
+using Block = WinCue.Presentation.TimelineBlock;
+using Span = WinCue.Presentation.TimelineSpan;
+using DragMode = WinCue.Presentation.TimelineDragMode;
 
 namespace WinCue.App;
 
@@ -236,13 +245,13 @@ public sealed class TimelinePanel : Border
 /// <summary>Lienzo: proyección temporal de la lista, bloques, grupos y cursor.</summary>
 public sealed class TimelineCanvas : FrameworkElement
 {
-    private const double RulerH = 20;
-    // 3 pistas por defecto (UI ligera); crecen solas al usarlas, techo 8.
-    // El techo va a juego con las 8 superficies de la ventana de salida.
-    private const int MaxLayers = 8;
-    private const int MinLayers = 3;
+    // RulerH, MaxLayers, MinLayers e InstantFootprint viven ahora en
+    // TimelineLayout (WinCue.Presentation): son parte del CÁLCULO compartido,
+    // no de esta interfaz. Los alias locales de solo lectura evitan reescribir
+    // los ~40 sitios que ya los usaban por su nombre corto.
+    private const double RulerH = TimelineLayout.RulerH;
+    private const int MaxLayers = TimelineLayout.MaxLayers;
     private const double SnapSeconds = 0.1;
-    private const double InstantFootprint = 0.3;   // huella temporal de un cue instantáneo
 
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.TimelineBg));
     private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Theme.TimelineLayerA));
@@ -318,42 +327,15 @@ public sealed class TimelineCanvas : FrameworkElement
     /// que en un show con vídeos largos «Fit» dejaba clips fuera y no había
     /// forma de alejarse más. No era un fallo de ajuste sino un imposible
     /// aritmético. Con 0,02 px/s entran veinte horas.</summary>
-    private const double MinPxPerSec = 0.02;
-    private const double MaxPxPerSec = 400;
+    private const double MinPxPerSec = TimelineLayout.MinPxPerSec;
+    private const double MaxPxPerSec = TimelineLayout.MaxPxPerSec;
     private double _scrollX;
     private bool _fitDone;
 
-    // Proyección calculada de la lista
-    private sealed class Block
-    {
-        public required Cue Cue;
-        public double Start;
-        public double Dur;            // 0 = instantáneo
-        public int Layer;             // asignada (manual o auto)
-        public bool Dimmed;           // desarmado / rama que no se disparará
-        public bool ManualLayer;      // timeline_layer >= 0 (colocado a mano)
-
-        // Efectos de los cues de control REFLEJADOS en la proyección:
-        public bool Ghost;            // instancia lanzada por un START (↗, no editable)
-        public double? CutAt;         // un STOP (o FADE y parar) lo corta aquí (abs)
-        public double RampStart = -1; // rampa de un FADE sobre este bloque (abs)
-        public double RampLen;
-        public bool RampToSilence;    // FADE a volumen 0 sin parar: resto en silencio
-
-        // AVISO SUAVE de fundido incoherente (calculado en la reproyección)
-        public FadeIssues Issues;
-        public double? Headroom;      // s que le quedan al saliente al entrar
-    }
-
-    private sealed class Span
-    {
-        public required Cue Group;
-        public double Start;
-        public double End;
-        public int MinLayer;
-        public int MaxLayer;
-    }
-
+    // Proyección calculada de la lista: Block/Span son ahora alias de
+    // WinCue.Presentation.TimelineBlock/TimelineSpan (ver los "using" al
+    // principio del archivo) — el CÁLCULO que los produce vive en
+    // TimelineLayout.Project(), no aquí. Ver RebuildLayout más abajo.
     private readonly List<Block> _blocks = new();
     private readonly List<Span> _spans = new();
     private readonly List<double> _goMarks = new();
@@ -366,11 +348,15 @@ public sealed class TimelineCanvas : FrameworkElement
     // El reloj es el del controlador (ShowClock), no un Stopwatch propio: el
     // cursor y el disparo de los cues se miden con la misma vara, y con el
     // show en pausa el reloj se congela y el cursor deja de deslizar solo.
-    private readonly Dictionary<int, double> _activeElapsed = new();
-    private readonly Dictionary<int, bool> _activeAdvancing = new();
-    private readonly Dictionary<int, double> _smoothElapsed = new();
+    //
+    // El CÁLCULO (extrapolación, persecución del valor dibujado, posición del
+    // cursor) vive en WinCue.Presentation.TimelinePlayhead — mismo motivo que
+    // TimelineLayout: es EXACTAMENTE lo que hoy pinta Secuence también. Sin
+    // reloj (_clock null), se pasa 0.0 en los dos puntos de contacto (aquí y
+    // en SetActive) para que la resta quede siempre en 0 y el resultado sea
+    // el mismo "sin extrapolar" que devolvía el LiveElapsed original.
+    private readonly TimelinePlayhead _playhead = new();
     private IShowClock? _clock;
-    private double _activeStamp;      // segundos de IShowClock.Now
     private bool _renderHooked;
 
     /// <summary>Reloj del show (el del controlador). Sin él, el cursor no
@@ -381,29 +367,8 @@ public sealed class TimelineCanvas : FrameworkElement
         set => _clock = value;
     }
 
-    /// <summary>Objetivo: raw del tick + extrapolación con el reloj del show
-    /// (cap 350 ms; solo si el cue avanzaba — un cue pausado no debe deslizar
-    /// y volver).</summary>
-    private double LiveElapsed(int cueId, double raw)
-    {
-        if (_clock is null || !_activeAdvancing.GetValueOrDefault(cueId))
-            return raw;
-        double extra = _clock.Now - _activeStamp;
-        return raw + Math.Min(Math.Max(0.0, extra), 0.35);
-    }
-
-    /// <summary>Posición DIBUJADA: persigue al objetivo (25 % del error por
-    /// frame) en vez de saltar a él — las correcciones de los pushes de mpv
-    /// quedaban como micro-tirones. Un error grande (seek) sí salta.</summary>
-    private double DrawnElapsed(int cueId, double raw)
-    {
-        double target = LiveElapsed(cueId, raw);
-        double cur = _smoothElapsed.TryGetValue(cueId, out double c) ? c : target;
-        double delta = target - cur;
-        cur = Math.Abs(delta) > 0.6 ? target : cur + delta * 0.25;
-        _smoothElapsed[cueId] = cur;
-        return cur;
-    }
+    private double DrawnElapsed(int cueId, double raw) =>
+        _playhead.DrawnElapsed(cueId, raw, _clock?.Now ?? 0.0);
 
     private void HookRender(bool on)
     {
@@ -418,9 +383,10 @@ public sealed class TimelineCanvas : FrameworkElement
 
     private void OnFrameRendering(object? sender, EventArgs e) => InvalidateVisual();
 
-    // Arrastre (mover bloque/grupo, o redimensionar por los bordes)
-    private enum DragMode { Move, ResizeL, ResizeR }
-
+    // Arrastre (mover bloque/grupo, o redimensionar por los bordes). DragMode
+    // es alias de WinCue.Presentation.TimelineDragMode (ver los "using" al
+    // principio del archivo): mismo tipo que consume TimelineLayout.Project()
+    // al construir el TimelineDragOverride en RebuildLayout.
     private Cue? _dragCue;
     private DragMode _dragMode;
     private bool _dragIsGroup;
@@ -449,8 +415,7 @@ public sealed class TimelineCanvas : FrameworkElement
     }
 
     /// <summary>Alto de cada pista: reparte el alto disponible (estilo Watchout).</summary>
-    private double LayerH =>
-        Math.Max(24, (Math.Max(ActualHeight, 90) - RulerH) / VisibleLayers());
+    private double LayerH => TimelineLayout.LayerHeight(ActualHeight, VisibleLayers());
 
     public void SetModel(CueModel model)
     {
@@ -470,31 +435,10 @@ public sealed class TimelineCanvas : FrameworkElement
 
     public void SetActive(IReadOnlyList<ActiveCueInfo> rows)
     {
-        bool wasEmpty = _activeElapsed.Count == 0;
-        // ¿Avanza cada cue respecto al tick anterior? (para extrapolar solo
-        // los que corren; los pausados se quedan quietos)
-        _activeAdvancing.Clear();
-        foreach (var r in rows)
-            if (r.PreWaitRemaining is null)
-                _activeAdvancing[r.Id] =
-                    !_activeElapsed.TryGetValue(r.Id, out double prev)
-                    || r.Elapsed > prev + 0.001;
-        _activeStamp = _clock?.Now ?? 0.0;
-        _activeElapsed.Clear();
-        foreach (var r in rows)
-        {
-            // En pre_wait la ACCIÓN no ha empezado: su bloque no debe mostrar
-            // progreso ni empujar el cursor (Elapsed cuenta desde el disparo)
-            if (r.PreWaitRemaining is not null)
-                continue;
-            _activeElapsed[r.Id] = r.Elapsed;
-        }
-        // Purga del filtro de persecución: cues que ya no suenan
-        if (_smoothElapsed.Count > 0)
-            foreach (int id in _smoothElapsed.Keys.Where(k => !_activeElapsed.ContainsKey(k)).ToList())
-                _smoothElapsed.Remove(id);
+        bool wasEmpty = !_playhead.HasActive;
+        _playhead.SetActive(rows, _clock?.Now ?? 0.0);
         // Repintado por frame SOLO mientras hay actividad (60 Hz ≈ cursor fluido)
-        HookRender(_activeElapsed.Count > 0);
+        HookRender(_playhead.HasActive);
         if (!(wasEmpty && rows.Count == 0))
             InvalidateVisual();
     }
@@ -509,89 +453,17 @@ public sealed class TimelineCanvas : FrameworkElement
     /// cuando este cue entra, según la proyección del timeline. null = no hay
     /// saliente vivo (no hay cruce) o el saliente no acaba nunca (loop).
     /// Es el dato que convierte "fade_in de 8 s" en "el cruce no cabe".</summary>
-    public double? OutgoingRemaining(int cueId)
-    {
-        var block = _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == cueId);
-        if (block is null || block.Cue.Type != CueType.Video)
-            return null;
-        Block? prev = null;
-        foreach (var b in _blocks)
-        {
-            if (b.Ghost || b.Cue.Id == cueId || b.Cue.Type != CueType.Video)
-                continue;
-            if (b.Layer != block.Layer || b.Dimmed)
-                continue;
-            if (b.Start > block.Start + 0.001)
-                continue;                                  // entra después
-            if (b.Cue.Loop)
-                return null;                               // no acaba nunca
-            if (b.Start + b.Dur <= block.Start + 0.001)
-                continue;                                  // ya había acabado
-            if (prev is null || b.Start > prev.Start)
-                prev = b;
-        }
-        return prev is null ? null : prev.Start + prev.Dur - block.Start;
-    }
-
-    /// <summary>Marca en cada bloque sus avisos de fundido incoherente (aviso
-    /// SUAVE: pinta un ⚠ y explica qué pasará; no impide NADA). Se calcula
-    /// una vez por reproyección, no por frame.</summary>
-    private void MarkFadeIssues()
-    {
-        foreach (var b in _blocks)
-        {
-            b.Headroom = b.Ghost ? null : OutgoingRemaining(b.Cue.Id);
-            b.Issues = b.Ghost ? FadeIssues.None
-                               : FadeSanity.Check(b.Cue, b.Headroom);
-        }
-    }
+    public double? OutgoingRemaining(int cueId) => TimelineLayout.OutgoingRemaining(_blocks, cueId);
 
     // ------------------------------------------------------------------
     // Proyección: lista de cues → bloques con tiempo y capa
     // ------------------------------------------------------------------
-
-    private double DisplayPreWait(Cue c) =>
-        _dragCue is not null && c.Id == _dragCue.Id ? _dragPreWait : c.PreWait;
-
-    /// <summary>timeline_layer efectivo (-1 = auto), con el override del arrastre.</summary>
-    private int DisplayLayerRaw(Cue c) =>
-        _dragCue is not null && c.Id == _dragCue.Id && !_dragIsGroup
-            ? _dragLayer
-            : Math.Clamp(c.TimelineLayer, -1, MaxLayers - 1);
-
-    private bool IsDragging(Cue c, DragMode mode) =>
-        _dragCue is not null && c.Id == _dragCue.Id && _dragMode == mode;
-
-    private double DisplayTrimStart(Cue c) =>
-        IsDragging(c, DragMode.ResizeL) ? _dragTrimStart : c.TrimStart;
-
-    private double DisplayTrimEnd(Cue c) =>
-        IsDragging(c, DragMode.ResizeR) && c.IsMedia() ? _dragTrimEnd : c.TrimEnd;
-
-    private double DisplayDuration(Cue c) =>
-        IsDragging(c, DragMode.ResizeR) && !c.IsMedia() ? _dragDuration : c.Duration;
-
-    /// <summary>Duración de la acción del cue (0 = instantáneo), con los
-    /// overrides del redimensionado en curso.</summary>
-    private double EffectiveDuration(Cue cue)
-    {
-        switch (cue.Type)
-        {
-            case CueType.Audio:
-            case CueType.Video:
-                double ts = DisplayTrimStart(cue);
-                double te = DisplayTrimEnd(cue);
-                double end = te > 0
-                    ? (cue.Duration > 0 ? Math.Min(te, cue.Duration) : te)
-                    : cue.Duration;
-                return Math.Max(0, end - ts);
-            case CueType.Wait:
-            case CueType.Fade:
-                return Math.Max(0, DisplayDuration(cue));
-            default:
-                return 0;
-        }
-    }
+    // El CÁLCULO (recorrido de la jerarquía, efectos de los cues de control,
+    // asignación de pistas, avisos de fundido) vive en
+    // WinCue.Presentation.TimelineLayout.Project() — ver el encargo,
+    // hitos-0-1. Esta clase solo arma el TimelineDragOverride con el gesto en
+    // curso (null fuera de un arrastre) y pinta lo que Project() devuelve.
+    // Es el mismo cálculo, exacto, que usa Secuence — ni un número repetido.
 
     private void RebuildLayout()
     {
@@ -601,232 +473,44 @@ public sealed class TimelineCanvas : FrameworkElement
         _startById.Clear();
         if (_model is null)
             return;
-        var roots = _model.Cues.Where(c => c.ParentId is null).ToList();
-        LayoutSequence(roots, 0.0, dimmed: false);
-        ApplyControlCueEffects();
-        AssignLayers();
 
-        // Los recuadros de grupo abrazan las capas de sus bloques
-        foreach (var span in _spans)
-        {
-            int min = MaxLayers - 1, max = 0;
-            foreach (var b in _blocks)
-                if (!b.Ghost && _model.IsDescendant(b.Cue, span.Group.Id))
-                {
-                    min = Math.Min(min, b.Layer);
-                    max = Math.Max(max, b.Layer);
-                }
-            span.MinLayer = Math.Min(min, max);
-            span.MaxLayer = Math.Max(min, max);
-        }
-
-        MarkFadeIssues();   // avisos de fundido con las pistas ya asignadas
-    }
-
-    /// <summary>Coloca una secuencia (nivel raíz o hijos de un grupo ENTER)
-    /// encadenando triggers según continue_mode. Devuelve el fin de la última
-    /// acción de la secuencia.</summary>
-    private double LayoutSequence(List<Cue> cues, double t0, bool dimmed)
-    {
-        double trigger = t0;
-        double lastEnd = t0;
-        for (int i = 0; i < cues.Count; i++)
-        {
-            var cue = cues[i];
-            double actionStart = trigger + DisplayPreWait(cue);
-            double end = LayoutCue(cue, actionStart, dimmed);
-            lastEnd = Math.Max(lastEnd, end);
-            if (i == cues.Count - 1)
-                break;
-            switch (cue.ContinueMode)
+        TimelineDragOverride? drag = _dragCue is null
+            ? null
+            : new TimelineDragOverride
             {
-                case ContinueMode.AutoContinue:
-                    trigger = actionStart + cue.PostWait;
-                    break;
-                case ContinueMode.AutoFollow:
-                    trigger = end;
-                    break;
-                default:   // GO manual: proyección "dispara cuando termina"
-                    trigger = Math.Max(trigger, end);
-                    if (!dimmed)
-                        _goMarks.Add(trigger);
-                    break;
-            }
-        }
-        return lastEnd;
+                CueId = _dragCue.Id,
+                IsGroup = _dragIsGroup,
+                Mode = _dragMode,
+                PreWait = _dragPreWait,
+                Layer = _dragLayer,
+                TrimStart = _dragTrimStart,
+                TrimEnd = _dragTrimEnd,
+                Duration = _dragDuration,
+            };
+
+        var proj = TimelineLayout.Project(_model, drag);
+        _blocks.AddRange(proj.Blocks);
+        _spans.AddRange(proj.Spans);
+        _goMarks.AddRange(proj.GoMarks);
+        foreach (var kv in proj.StartById)
+            _startById[kv.Key] = kv.Value;
     }
 
-    /// <summary>Coloca un cue (y sus hijos si es grupo) con la acción empezando
-    /// en <paramref name="start"/>. Devuelve cuándo termina su acción.</summary>
-    private double LayoutCue(Cue cue, double start, bool dimmed)
-    {
-        _startById[cue.Id] = start;
+    /// <summary>trim_start efectivo durante un arrastre de ResizeL, para la
+    /// mini-onda del bloque (decoración de PINTADO, fuera del alcance de esta
+    /// pasada: la mini-onda no entra en el cálculo compartido — ver el
+    /// encargo, hitos-0-1 — así que sigue resuelta aquí, tal cual antes.</summary>
+    private double CurrentTrimStart(Cue cue) =>
+        _dragCue is not null && _dragCue.Id == cue.Id && _dragMode == DragMode.ResizeL
+            ? _dragTrimStart
+            : cue.TrimStart;
 
-        if (cue.Type == CueType.Group)
-        {
-            var children = _model!.DirectChildren(cue.Id);
-            bool dim = dimmed || !cue.Armed;
-            double end = start;
-            switch (cue.GroupMode)
-            {
-                case GroupMode.Timeline:
-                    // Tiempo REAL: todos a la vez, cada uno a su offset
-                    foreach (var child in children)
-                        end = Math.Max(end, LayoutCue(
-                            child, start + DisplayPreWait(child), dim));
-                    break;
-                case GroupMode.Enter:
-                    end = LayoutSequence(children, start, dim);
-                    break;
-                default:   // GO_NEXT: solo el primero · RANDOM: cualquiera
-                    for (int i = 0; i < children.Count; i++)
-                    {
-                        bool branchDim = dim ||
-                            (cue.GroupMode == GroupMode.GoNext && i > 0);
-                        double e = LayoutCue(children[i],
-                            start + DisplayPreWait(children[i]), branchDim);
-                        if (cue.GroupMode == GroupMode.Random || i == 0)
-                            end = Math.Max(end, e);
-                    }
-                    break;
-            }
-            if (children.Count > 0)
-                _spans.Add(new Span
-                {
-                    Group = cue,
-                    Start = start,
-                    End = Math.Max(end, start + 0.2),
-                });
-            return cue.Armed ? end : start;
-        }
+    private int VisibleLayers() => TimelineLayout.VisibleLayers(_blocks);
 
-        int raw = DisplayLayerRaw(cue);
-        _blocks.Add(new Block
-        {
-            Cue = cue,
-            Start = start,
-            Dur = EffectiveDuration(cue),
-            Layer = raw,
-            Dimmed = dimmed || !cue.Armed,
-            ManualLayer = raw >= 0,
-        });
-        return cue.Armed ? start + EffectiveDuration(cue) : start;
-    }
+    private double TotalSeconds() => TimelineLayout.TotalSeconds(_blocks);
 
-    /// <summary>Los cues de CONTROL dejan su huella en la proyección: un STOP
-    /// corta el bloque de su objetivo; un FADE dibuja la rampa sobre él (y lo
-    /// corta si "parar al terminar"); un START añade un bloque FANTASMA del
-    /// objetivo en su instante (se ve lo que va a sonar, sin ser editable).</summary>
-    private void ApplyControlCueEffects()
-    {
-        if (_model is null)
-            return;
-        foreach (var ctl in _model.Cues)
-        {
-            if (ctl.TargetId is not int targetId
-                || !_startById.TryGetValue(ctl.Id, out double at)
-                || _model.GetById(targetId) is not Cue target)
-                continue;
-
-            switch (ctl.Type)
-            {
-                case CueType.Start:
-                {
-                    // El disparo respeta el PRE-WAIT del objetivo (semántica
-                    // QLab): el fantasma se dibuja donde SONARÁ de verdad
-                    double dur = EffectiveDuration(target);
-                    int raw = Math.Clamp(target.TimelineLayer, -1, MaxLayers - 1);
-                    _blocks.Add(new Block
-                    {
-                        Cue = target,
-                        Start = at + DisplayPreWait(target),
-                        Dur = dur,
-                        Layer = raw,
-                        ManualLayer = raw >= 0,
-                        Dimmed = !ctl.Armed || !target.Armed,
-                        Ghost = true,
-                    });
-                    break;
-                }
-
-                case CueType.Stop:
-                case CueType.Fade:
-                {
-                    var tb = _blocks.FirstOrDefault(b =>
-                        !b.Ghost && b.Cue.Id == targetId);
-                    if (tb is null || tb.Dur <= 0
-                        || at <= tb.Start + 0.05 || at >= tb.Start + tb.Dur)
-                        break;   // el objetivo no está sonando en ese punto
-                    if (ctl.Type == CueType.Stop)
-                    {
-                        tb.CutAt = Min(tb.CutAt, at);
-                    }
-                    else
-                    {
-                        tb.RampStart = at;
-                        tb.RampLen = Math.Max(0.1, ctl.Duration);
-                        if (ctl.FadeStopOnDone)
-                            tb.CutAt = Min(tb.CutAt, at + tb.RampLen);
-                        else if (ctl.Volume <= 0.01)
-                            tb.RampToSilence = true;
-                    }
-                    break;
-                }
-            }
-        }
-
-        static double Min(double? a, double b) => a is double v ? Math.Min(v, b) : b;
-    }
-
-    /// <summary>Capas: la fijada a mano se respeta; el resto se apila greedy
-    /// en la primera pista libre para su intervalo.</summary>
-    private void AssignLayers()
-    {
-        var ends = new double[MaxLayers];
-        for (int i = 0; i < MaxLayers; i++)
-            ends[i] = double.NegativeInfinity;
-
-        foreach (var b in _blocks.OrderBy(b => b.Start))
-        {
-            double foot = b.Start + Math.Max(b.Dur, InstantFootprint);
-            if (b.ManualLayer)
-            {
-                b.Layer = Math.Clamp(b.Layer, 0, MaxLayers - 1);
-                ends[b.Layer] = Math.Max(ends[b.Layer], foot);
-                continue;
-            }
-            int chosen = MaxLayers - 1;
-            for (int l = 0; l < MaxLayers; l++)
-            {
-                if (ends[l] <= b.Start + 1e-6)
-                {
-                    chosen = l;
-                    break;
-                }
-            }
-            b.Layer = chosen;
-            ends[chosen] = Math.Max(ends[chosen], foot);
-        }
-    }
-
-    private int VisibleLayers()
-    {
-        int maxUsed = 0;
-        foreach (var b in _blocks)
-            maxUsed = Math.Max(maxUsed, b.Layer);
-        return Math.Clamp(maxUsed + 2, MinLayers, MaxLayers);
-    }
-
-    private double TotalSeconds()
-    {
-        double max = 0;
-        foreach (var b in _blocks)
-            max = Math.Max(max, b.Start + Math.Max(b.Dur, InstantFootprint));
-        return max;
-    }
-
-    private double SecToX(double sec) => sec * _pxPerSec - _scrollX;
-    private double XToSec(double x) => (x + _scrollX) / _pxPerSec;
+    private double SecToX(double sec) => TimelineLayout.SecToX(sec, _pxPerSec, _scrollX);
+    private double XToSec(double x) => TimelineLayout.XToSec(x, _pxPerSec, _scrollX);
 
     // ------------------------------------------------------------------
     // Zoom / scroll
@@ -978,16 +662,9 @@ public sealed class TimelineCanvas : FrameworkElement
         // Cursor: posición real más avanzada de los cues sonando (limitada al
         // final de su bloque: con trim, el contador nunca debe salirse de él).
         // Los FANTASMAS de un START no cuentan: comparten id con su cue real
-        // y teletransportarían el cursor al final del show.
-        double? cursor = null;
-        foreach (var b in _blocks)
-            if (!b.Ghost && _activeElapsed.TryGetValue(b.Cue.Id, out double rawElapsed))
-            {
-                double elapsed = DrawnElapsed(b.Cue.Id, rawElapsed);
-                double lim = b.Dur > 0 ? b.Dur : elapsed;
-                double pos = b.Start + Math.Min(Math.Max(0, elapsed), lim);
-                cursor = Math.Max(cursor ?? 0, pos);
-            }
+        // y teletransportarían el cursor al final del show. Cálculo compartido
+        // (WinCue.Presentation.TimelinePlayhead) — es el mismo playhead de Secuence.
+        double? cursor = _playhead.CursorSeconds(_blocks, _clock?.Now ?? 0.0);
         if (cursor is double cs)
         {
             double x = SecToX(cs);
@@ -1022,19 +699,15 @@ public sealed class TimelineCanvas : FrameworkElement
         SpanGeometry(Span span, double lh)
     {
         var group = span.Group;
-        var color = group.Color.Length > 0
-            && CueConstants.CueColors.TryGetValue(group.Color, out var gc) && gc.Length > 0
-            ? (Color)ColorConverter.ConvertFromString(gc)
-            : Theme.TypeGroup;
+        // Color: cálculo compartido (WinCue.Presentation.TimelinePalette) —
+        // el mismo que resuelve la columna «Tipo» de la tabla, sin que este
+        // sitio pueda volver a llevar su propia copia del switch.
+        var color = ToColor(TimelinePalette.ResolveCueColor(group));
 
-        double x0 = SecToX(span.Start) - 4;
-        double x1 = SecToX(span.End) + 4;
-        double y = RulerH + span.MinLayer * lh + 1;
-        double bh = (span.MaxLayer - span.MinLayer + 1) * lh - 2;
-        var box = new Rect(x0, y, Math.Max(12, x1 - x0), bh);
+        var boxRect = TimelineLayout.SpanBoxRect(span, _pxPerSec, _scrollX, lh);
+        var box = new Rect(boxRect.X, boxRect.Y, boxRect.Width, boxRect.Height);
 
-        string mode = group.GroupMode.ToString().ToUpperInvariant();
-        var lbl = Label($"{Icons.Group} {group.DisplayNumber} · {group.Name} · {mode}",
+        var lbl = Label(TimelineLayout.SpanLabelText(span),
             Frozen(new SolidColorBrush(Colors.White)), 10);
         double cw = Math.Min(lbl.WidthIncludingTrailingWhitespace + 12,
             Math.Max(30, box.Width));
@@ -1090,24 +763,23 @@ public sealed class TimelineCanvas : FrameworkElement
     private void DrawBlock(DrawingContext dc, Block b, double lh)
     {
         var cue = b.Cue;
-        // Un STOP/FADE con parada TRUNCA el bloque: se dibuja hasta el corte
-        double dur = b.CutAt is double cutAbs
-            ? Math.Max(0.05, Math.Min(b.Dur, cutAbs - b.Start))
-            : b.Dur;
-        double x = SecToX(b.Start);
-        double y = RulerH + b.Layer * lh + 4;
-        double bh = lh - 8;
-        bool instant = b.Dur <= 0;
-        double bw = instant ? 12 : Math.Max(4, dur * _pxPerSec);
+        // Geometría (posición, ancho recortado por un CutAt) y color: cálculo
+        // compartido con Secuence — ver TimelineLayout.BlockGeometry y
+        // TimelinePalette.ResolveCueColor.
+        var geom = TimelineLayout.BlockGeometry(b, _pxPerSec, _scrollX, lh);
+        double dur = geom.DrawnDuration;
+        double x = geom.Rect.X;
+        double y = geom.Rect.Y;
+        double bh = geom.Rect.Height;
+        bool instant = geom.Instant;
+        double bw = geom.Rect.Width;
 
         if (x + bw < 0 || x > ActualWidth)
             return;
 
-        var baseColor = cue.Color.Length > 0
-            && CueConstants.CueColors.TryGetValue(cue.Color, out var ch) && ch.Length > 0
-            ? (Color)ColorConverter.ConvertFromString(ch)
-            : Theme.ForCueType(cue.Type);
-        var fill = new LinearGradientBrush(baseColor, Darken(baseColor, 0.65), 90);
+        var baseColor = ToColor(TimelinePalette.ResolveCueColor(cue));
+        var fill = new LinearGradientBrush(baseColor,
+            ToColor(TimelinePalette.Darken(TimelinePalette.ResolveCueColor(cue), TimelinePalette.BlockGradientDarken)), 90);
         fill.Freeze();
 
         if (b.Ghost)
@@ -1121,7 +793,7 @@ public sealed class TimelineCanvas : FrameworkElement
             dc.DrawRoundedRectangle(FadeBrush, null, rect, 3, 3);
 
         // Progreso real dentro del bloque mientras suena
-        if (!instant && _activeElapsed.TryGetValue(cue.Id, out double rawElapsed))
+        if (!instant && _playhead.TryGetElapsed(cue.Id, out double rawElapsed))
         {
             double elapsed = DrawnElapsed(cue.Id, rawElapsed);
             double pw = Math.Clamp(elapsed / Math.Max(0.001, dur), 0, 1) * bw;
@@ -1137,7 +809,7 @@ public sealed class TimelineCanvas : FrameworkElement
             if (_peaks.TryGetValue(cue.FilePath, out var pk)
                 && pk.Mins.Length > 0 && pk.Dur > 0)
             {
-                double t0 = DisplayTrimStart(cue);
+                double t0 = CurrentTrimStart(cue);
                 double mid = y + bh / 2, half = bh / 2 - 2;
                 int n = pk.Mins.Length;
                 double px0 = Math.Max(x, 0), px1 = Math.Min(x + bw, ActualWidth);
@@ -1201,14 +873,7 @@ public sealed class TimelineCanvas : FrameworkElement
 
         if (bw > 30)
         {
-            string text = $"{cue.DisplayNumber} · {cue.Name}";
-            if (b.Ghost)
-                text = $"{Icons.Jump} " + text;
-            if (cue.Loop || cue.PlayCount > 1)
-                text += cue.Loop ? $" {Icons.Loop}" : $" ×{cue.PlayCount}";
-            // 📌 = pista fijada a mano
-            if (b.ManualLayer && !b.Ghost)
-                text = $"{Icons.Pin} " + text;
+            string text = TimelineLayout.BlockLabelText(b);
             var label = Label(text, LabelBrush, 11);
             label.MaxTextWidth = Math.Max(1, bw - 10);
             label.MaxLineCount = 1;
@@ -1233,34 +898,14 @@ public sealed class TimelineCanvas : FrameworkElement
         return g;
     }
 
-    /// <summary>Separación de las marcas de la regla. La escalera llega hasta
-    /// las 4 horas porque el zoom puede alejarse mucho más que antes: con el
-    /// tope anterior (10 min) un show largo pintaba una marca cada 12 px y la
-    /// regla se convertía en un borrón de números encimados.</summary>
-    private double RulerStep()
-    {
-        foreach (double s in new[]
-                 { 0.1, 0.2, 0.5, 1, 2, 5, 10, 15, 30, 60, 120, 300, 600,
-                   900, 1800, 3600, 7200, 14400 })
-            if (s * _pxPerSec >= 64)
-                return s;
-        return 14400;
-    }
+    /// <summary>Separación de las marcas de la regla — cálculo compartido
+    /// (TimelineLayout.RulerStep). La escalera llega hasta las 4 horas porque
+    /// el zoom puede alejarse mucho más que antes: con el tope anterior
+    /// (10 min) un show largo pintaba una marca cada 12 px y la regla se
+    /// convertía en un borrón de números encimados.</summary>
+    private double RulerStep() => TimelineLayout.RulerStep(_pxPerSec);
 
-    private static string FmtTime(double s)
-    {
-        // A partir de la hora, h:mm:ss — «72:30.0» minutos no se lee de un
-        // vistazo, y con el zoom alejado esas cifras son las habituales.
-        if (s >= 3600)
-        {
-            int h = (int)(s / 3600);
-            int mm = (int)((s - h * 3600) / 60);
-            return $"{h}:{mm:00}:{s - h * 3600 - mm * 60:00}";
-        }
-        int m = (int)(s / 60);
-        double rest = s - m * 60;
-        return s >= 60 ? $"{m}:{rest:00.#}" : $"{rest:0.#}s";
-    }
+    private static string FmtTime(double s) => TimelineLayout.FormatTime(s);
 
     // IconFont.Font y no "Segoe UI": estas etiquetas llevan glifos de icono
     // mezclados con el texto (el tipo de cue, la marca de GO). FormattedText no
@@ -1272,8 +917,11 @@ public sealed class TimelineCanvas : FrameworkElement
         new Typeface(IconFont.Font, FontStyles.Normal, FontWeights.Normal,
                      FontStretches.Normal), size, brush, 1.0);
 
-    private static Color Darken(Color c, double f) => Color.FromRgb(
-        (byte)(c.R * f), (byte)(c.G * f), (byte)(c.B * f));
+    /// <summary>Token de color de Palette (0xRRGGBB) → Color de WPF. Traduce
+    /// lo que TimelinePalette resuelve en WinCue.Presentation, sin que ese
+    /// proyecto necesite saber qué es un System.Windows.Media.Color.</summary>
+    private static Color ToColor(uint rgb) => Color.FromRgb(
+        (byte)((rgb >> 16) & 0xff), (byte)((rgb >> 8) & 0xff), (byte)(rgb & 0xff));
 
     // ------------------------------------------------------------------
     // Interacción: seleccionar, arrastrar (tiempo/pista) y reordenar
@@ -1914,8 +1562,8 @@ public sealed class TimelineCanvas : FrameworkElement
             CueSelected?.Invoke(cue.Id);
             InvalidateVisual();
 
-            bool active = _activeElapsed.ContainsKey(cue.Id) ||
-                (cue.Type == CueType.Group && _activeElapsed.Keys.Any(id =>
+            bool active = _playhead.IsActive(cue.Id) ||
+                (cue.Type == CueType.Group && _playhead.ActiveCueIds.Any(id =>
                     _model.GetById(id) is Cue c && _model.IsDescendant(c, cue.Id)));
             menu.Items.Add(MainWindow.Mi($"{Icons.Play} Disparar", "",
                 () => TriggerRequested?.Invoke(cue.Id)));

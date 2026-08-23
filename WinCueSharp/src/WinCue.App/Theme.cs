@@ -92,24 +92,14 @@ public static class Theme
     public static readonly Color TypeMemo = Hex(Palette.TypeMemo);
     public static readonly Color TypeGroup = Standby;
 
-    /// <summary>Color de un tipo de cue. ÚNICA definición: la comparten la
-    /// columna «Tipo» de la tabla (CueRowViewModel) y los bloques del timeline
-    /// (TimelinePanel). Antes estaban duplicadas y habían DERIVADO: Wait era
-    /// #666666 en el timeline y #888888 en la tabla; Group, #c9a227 y #e8c000.
-    /// Manda la tabla, que es lo que el timeline decía estar reflejando.</summary>
-    public static Color ForCueType(CueType type) => type switch
-    {
-        CueType.Audio => TypeAudio,
-        CueType.Video => TypeVideo,
-        CueType.Wait => TypeWait,
-        CueType.Fade => TypeFade,
-        CueType.Start => TypeStart,
-        CueType.Stop => TypeStop,
-        CueType.Script => TypeScript,
-        CueType.Memo => TypeMemo,
-        CueType.Group => TypeGroup,
-        _ => TextPrimary,
-    };
+    /// <summary>Color de un tipo de cue. ÚNICA definición del SWITCH —
+    /// TimelinePalette.ForCueType (WinCue.Presentation, hitos-0-1, timeline) —
+    /// la comparten la columna «Tipo» de la tabla (CueRowViewModel), los
+    /// bloques del timeline (TimelinePanel) Y Secuence. Antes estaban
+    /// duplicadas y habían DERIVADO: Wait era #666666 en el timeline y
+    /// #888888 en la tabla; Group, #c9a227 y #e8c000. Aquí solo se traduce el
+    /// token de Palette (uint) a Color de WPF.</summary>
+    public static Color ForCueType(CueType type) => Hex(TimelinePalette.ForCueType(type));
 
     // ═════════════════════════ TEXTO ═════════════════════════
 
