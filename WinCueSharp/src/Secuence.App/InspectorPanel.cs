@@ -27,7 +27,7 @@
 // de VÍDEO — mismo alcance que WinCue.App.EqEditorControl (WPF). El CÁLCULO
 // (ejes, respuesta de los filtros —biquads RBJ, la MISMA fórmula que aplica
 // el motor de audio—, balística del RTA, transferencia del compresor) es
-// compartido: WinCue.Presentation.EqCurveLayout/CompCurveLayout/EqResponse.
+// compartido: WinCue.Presentation.EqCurveLayout/CompCurveLayout y WinCue.Core.EqResponse.
 // Ver EqSection() más abajo y EqCurveCanvas.cs/CompCurveCanvas.cs (Win2D)
 // para el detalle.
 //

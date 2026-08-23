@@ -9,14 +9,13 @@
 // (edición en vivo sin clics).
 //
 // Los COEFICIENTES (Peaking/Highpass/Lowpass/Coefficients) y ResponseDb()
-// viven en WinCue.Presentation.EqResponse — es la MISMA fórmula que la curva
+// viven en WinCue.Core.EqResponse — es la MISMA fórmula que la curva
 // del editor de EQ dibuja en pantalla (WinCue.App/Secuence.App), y solo puede
 // haber una copia: aquí solo queda el estado en tiempo real (Stage, Z1/Z2) y
 // el procesado de audio de verdad.
 // =============================================================================
 
 using WinCue.Core;
-using WinCue.Presentation;
 
 namespace WinCue.Audio;
 
@@ -171,7 +170,7 @@ public sealed class EqChain
 
     /// <summary>Respuesta teórica de la cadena en dB a una frecuencia dada
     /// (para pintar la curva del editor; incluye la ganancia del clip).
-    /// Delega en WinCue.Presentation.EqResponse — ver la cabecera del
+    /// Delega en WinCue.Core.EqResponse — ver la cabecera del
     /// archivo. Queda aquí para no romper a quien ya llama EqChain.ResponseDb
     /// (tests incluidos).</summary>
     public static double ResponseDb(AudioEqParams eq, double freq, int sampleRate = 48000) =>

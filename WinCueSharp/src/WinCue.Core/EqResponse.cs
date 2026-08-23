@@ -20,15 +20,13 @@
 // Por qué aquí y no en WinCue.Audio: estas fórmulas son matemática pura sobre
 // tipos de WinCue.Core (AudioEqParams/EqBand), sin una sola línea de NAudio ni
 // de estado en tiempo real (eso — Stage, Z1/Z2, el propio EqChain con su
-// Process() de audio — SÍ es cosa de WinCue.Audio y se queda allí). Que
-// WinCue.Audio referencie WinCue.Presentation para esto no crea un ciclo:
-// Presentation ya depende de Core y de Controller, ninguno de los dos depende
-// de Audio.
+// Process() de audio — SÍ es cosa de WinCue.Audio y se queda allí). Nació en
+// WinCue.Presentation, pero eso obligaba a WinCue.Audio a referenciar la capa
+// de presentación solo para llegar a una fórmula; en Core la ven Audio y
+// Presentation sin que ninguno dependa del otro.
 // =============================================================================
 
-using WinCue.Core;
-
-namespace WinCue.Presentation;
+namespace WinCue.Core;
 
 /// <summary>Respuesta en frecuencia de la cadena de EQ por clip (ganancia +
 /// HPF + hasta 4 bandas paramétricas + LPF). Coeficientes RBJ, forma directa

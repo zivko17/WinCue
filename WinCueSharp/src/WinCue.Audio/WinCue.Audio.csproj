@@ -12,11 +12,6 @@
 
   <ItemGroup>
     <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
-    <!-- Coeficientes RBJ y respuesta en frecuencia: la MISMA fórmula que la
-         curva del editor de EQ dibuja en pantalla (WinCue.App/Secuence.App).
-         No hay ciclo: Presentation depende de Core y de Controller, ninguno
-         de los dos depende de Audio. -->
-    <ProjectReference Include="..\WinCue.Presentation\WinCue.Presentation.csproj" />
   </ItemGroup>
 
 </Project>

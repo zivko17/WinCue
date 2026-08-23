@@ -5,7 +5,7 @@
 // Equivalente de la clase EqCurveCanvas de src/WinCue.App/EqEditorControl.cs
 // (WPF) para esta interfaz, NO una copia (regla 2 del proyecto). El CÁLCULO
 // (mapeo de ejes frecuencia↔píxel LOGARÍTMICO y dB↔píxel, muestreo de la
-// curva de respuesta —WinCue.Presentation.EqResponse, biquads RBJ, la MISMA
+// curva de respuesta —WinCue.Core.EqResponse, biquads RBJ, la MISMA
 // fórmula que aplica el motor de audio—, balística del RTA y hit-test/
 // arrastre de los manejadores) es EXACTAMENTE el mismo que usa WinCue: vive
 // en WinCue.Presentation.EqCurveLayout. Este archivo SOLO pinta e interpreta

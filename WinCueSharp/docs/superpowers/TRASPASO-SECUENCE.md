@@ -54,7 +54,8 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
 `MixerLayout`, `WaveformLayout`, `GeometryLayout`, `EqCurveLayout`,
-`CompCurveLayout`, `EqResponse`.
+`CompCurveLayout`. (`EqResponse`, los biquads RBJ que alimentan la curva de
+EQ, vive en `WinCue.Core` — matemática de audio, no presentación.)
 
 ---
 
@@ -159,9 +160,6 @@ Todo verificado por Andrés en pantalla, paso a paso:
   atajos más allá de Espacio/Esc
 
 **Anotado y sin hacer:**
-- **`EqResponse` debería moverse a `WinCue.Core`.** Hoy `WinCue.Audio`
-  referencia a `WinCue.Presentation` para llegar a él, y el nombre engaña —
-  son biquads RBJ, matemática de audio sobre tipos de Core. Diez minutos.
 - **`<AssemblyName>WinCue</AssemblyName>`** — el ejecutable se llama
   `WinCue.App.exe` de cara al cliente. Cambiarlo rompería accesos directos de
   quien ya tenga la beta.

@@ -10,9 +10,8 @@
 // =============================================================================
 
 using WinCue.Core;
-using WinCue.Presentation;
 
-namespace WinCue.Presentation.Tests;
+namespace WinCue.Core.Tests;
 
 public class EqResponseTests
 {
