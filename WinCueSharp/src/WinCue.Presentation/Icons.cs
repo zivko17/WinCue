@@ -22,7 +22,8 @@
 // USO
 //   · C#   → Icons.Open, $"{Icons.Audio} AUDIO"
 //   · XAML → Content="{local:Loc Icon=Open, Es=Abrir, En=Open}"
-//            o, sin texto, Content="{x:Static local:Icons.Search}"
+//            o, sin texto, Content="{x:Static icons:Icons.Search}"
+//            (xmlns:icons="clr-namespace:WinCue.Presentation;assembly=WinCue.Presentation")
 // =============================================================================
 
 namespace WinCue.Presentation;

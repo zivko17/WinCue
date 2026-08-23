@@ -207,8 +207,8 @@ public static class Palette
 
     // ═════════════════════════ MEDIDOR VU / MEZCLADOR ═════════════════════════
 
-    /// <summary>Fondo del panel del timeline. Era #202022: colapsado.
-    /// (MeterBg vive en la sección de FONDOS por orden de inicialización.)</summary>
+    /// <summary>Fondo del panel del timeline. Era #202022: colapsado con
+    /// MeterBg (sección FONDOS).</summary>
     public const uint MeterBgAlt = MeterBg;
 
     // ═════════════════════════ LIENZO DE GEOMETRÍA ═════════════════════════

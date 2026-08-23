@@ -8,10 +8,10 @@
 // lado y otras debajo.
 //
 // Aquí viven esas medidas, por el mismo motivo por el que el color vive en
-// Theme y los iconos en Icons: para poder cambiarlas en un sitio y que la
+// Palette y los iconos en Icons: para poder cambiarlas en un sitio y que la
 // consola siga pareciendo UNA consola.
 //
-// NO metas colores aquí — esos son de Theme.
+// NO metas colores aquí — esos son de Palette.cs, aquí al lado.
 // =============================================================================
 
 namespace WinCue.Presentation;

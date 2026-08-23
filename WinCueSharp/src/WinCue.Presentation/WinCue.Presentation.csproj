@@ -14,8 +14,4 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
-  <ItemGroup>
-    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
-  </ItemGroup>
-
 </Project>

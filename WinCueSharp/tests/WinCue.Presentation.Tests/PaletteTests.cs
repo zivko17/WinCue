@@ -50,6 +50,32 @@ public class PaletteTests
     }
 
     [Fact]
+    public void LosDemasAliasSiguenSiendoAlias()
+    {
+        // La prueba de arriba ya fija TypeFade, TypeStart y TypeStop. De los
+        // 20 alias de Palette.cs, estos 17 no tenían ninguna red: podían
+        // resolverse a su número literal mañana y las cuatro pruebas de este
+        // fichero seguirían en verde. Emparejamientos verificados en Palette.cs.
+        Assert.Equal(Palette.Standby, Palette.TypeGroup);
+        Assert.Equal(Palette.TextBright, Palette.TextBrightAlt);
+        Assert.Equal(Palette.TextMuted, Palette.TextMutedAlt);
+        Assert.Equal(Palette.ControlBg, Palette.ToolbarBg);
+        Assert.Equal(Palette.ButtonBg, Palette.ButtonBgAlt);
+        Assert.Equal(Palette.WindowBg, Palette.TimelineLayerA);
+        Assert.Equal(Palette.TrackBg, Palette.TimelineLayerB);
+        Assert.Equal(Palette.ListBg, Palette.TimelineRulerBg);
+        Assert.Equal(Palette.Border, Palette.TimelineTick);
+        Assert.Equal(Palette.BorderMeter, Palette.EqZero);
+        Assert.Equal(Palette.MeterBg, Palette.EqGrBg);
+        Assert.Equal(Palette.TypeAudio, Palette.Wave);
+        Assert.Equal(Palette.MeterBg, Palette.MeterBgAlt);
+        Assert.Equal(Palette.EqBg, Palette.GeometryBg);
+        Assert.Equal(Palette.Blue, Palette.GeometryFrame);
+        Assert.Equal(Palette.Pgm, Palette.StopSmallBg);
+        Assert.Equal(Palette.ButtonBg, Palette.SplitArrowBg);
+    }
+
+    [Fact]
     public void EstanLos94ColoresQueTeniaTheme()
     {
         // Cuenta exacta. Si el traslado se dejó uno por el camino, el
