@@ -44,7 +44,6 @@ using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Windows.Foundation;
-using Windows.System;
 using Windows.UI;
 using WinCue.Controller;
 using WinCue.Core;
@@ -291,7 +290,7 @@ public sealed class TimelineCanvas : UserControl
     {
         var pt = e.GetCurrentPoint(_canvas);
         _vp.Wheel(pt.Properties.MouseWheelDelta,
-            e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control),
+            e.KeyModifiers.HasFlag(Windows.System.VirtualKeyModifiers.Control),
             pt.Position.X, TimelineLayout.TotalSeconds(_projection.Blocks),
             _canvas.ActualWidth);
         _canvas.Invalidate();

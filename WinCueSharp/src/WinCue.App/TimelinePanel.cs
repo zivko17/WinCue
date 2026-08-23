@@ -252,12 +252,13 @@ public sealed class TimelinePanel : Border
 /// <summary>Lienzo: proyección temporal de la lista, bloques, grupos y cursor.</summary>
 public sealed class TimelineCanvas : FrameworkElement
 {
-    // RulerH, MaxLayers, MinLayers e InstantFootprint viven ahora en
+    // RulerH (y MaxLayers, MinLayers, InstantFootprint) viven en
     // TimelineLayout (WinCue.Presentation): son parte del CÁLCULO compartido,
-    // no de esta interfaz. Los alias locales de solo lectura evitan reescribir
-    // los ~40 sitios que ya los usaban por su nombre corto.
+    // no de esta interfaz. El alias local de solo lectura evita reescribir
+    // los sitios de PINTADO que lo usan por su nombre corto; los demás alias
+    // se fueron con la interacción en la segunda pasada — el último consumo
+    // de MaxLayers aquí se marchó dentro de TimelineDragGesture.
     private const double RulerH = TimelineLayout.RulerH;
-    private const int MaxLayers = TimelineLayout.MaxLayers;
 
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.TimelineBg));
     private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Theme.TimelineLayerA));
