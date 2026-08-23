@@ -19,6 +19,7 @@ using NAudio.Midi;
 using WinCue.Audio;
 using WinCue.Core;
 using WinCue.Presentation;
+using WinCue.Remote;
 
 namespace WinCue.App;
 
@@ -488,16 +489,12 @@ public partial class SettingsWindow : Window
 
     private void RefreshMidiDevices()
     {
+        // Enumeración compartida con Secuence.App (WinCue.Remote.
+        // RemoteInputService.ListDevices — antes vivía solo aquí por
+        // accidente, igual que RemoteInputService antes de la Fase 6).
         _midiDevices.Items.Clear();
-        try
-        {
-            for (int i = 0; i < MidiIn.NumberOfDevices; i++)
-            {
-                string name = MidiIn.DeviceInfo(i).ProductName;
-                _midiDevices.Items.Add(new ComboBoxItem { Content = name, Tag = name });
-            }
-        }
-        catch (Exception) { /* subsistema MIDI no disponible */ }
+        foreach (var dev in RemoteInputService.ListDevices())
+            _midiDevices.Items.Add(new ComboBoxItem { Content = dev.Name, Tag = dev.Name });
         if (_midiDevices.Items.Count == 0)
             _midiDevices.Items.Add(new ComboBoxItem
             { Content = "(sin dispositivos MIDI)", Tag = "" });
@@ -563,14 +560,8 @@ public partial class SettingsWindow : Window
     {
         StopMidiLearn();
         string wanted = (_midiDevices.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
-        int devIndex = -1;
-        try
-        {
-            for (int i = 0; i < MidiIn.NumberOfDevices; i++)
-                if (MidiIn.DeviceInfo(i).ProductName == wanted)
-                { devIndex = i; break; }
-        }
-        catch (Exception) { }
+        int devIndex = RemoteInputService.ListDevices()
+            .FirstOrDefault(d => d.Name == wanted)?.Index ?? -1;
         if (devIndex < 0)
         {
             _midiLearnStatus.Text = "Sin dispositivo MIDI seleccionado";

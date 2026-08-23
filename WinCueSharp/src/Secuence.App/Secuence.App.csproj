@@ -84,6 +84,11 @@
          sigue compilando en verde; solo los tests marcados Requiere=libmpv
          la necesitan, y esos ya se excluyen ahí (ver ci.yml). -->
     <ProjectReference Include="..\WinCue.Video\WinCue.Video.csproj" />
+    <!-- Disparo remoto por OSC y MIDI (WinCue.Remote): mismo servicio que
+         WinCue, extraído a este proyecto aparte el primer día de la tarea de
+         Secuence precisamente para que este momento (enchufarlo aquí) no
+         copiara nada. Ver App.xaml.cs. -->
+    <ProjectReference Include="..\WinCue.Remote\WinCue.Remote.csproj" />
   </ItemGroup>
 
   <!-- ==========================================================================

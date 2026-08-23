@@ -16,6 +16,10 @@ using WinCue.Core;
 
 namespace WinCue.Remote;
 
+/// <summary>Un dispositivo MIDI IN del sistema — Index es el que espera
+/// <see cref="NAudio.Midi.MidiIn"/> (constructor y DeviceInfo).</summary>
+public sealed record MidiDeviceInfo(int Index, string Name);
+
 public sealed class RemoteInputService : IDisposable
 {
     private readonly MainController _controller;
@@ -191,16 +195,37 @@ public sealed class RemoteInputService : IDisposable
     private int FindMidiDevice()
     {
         string name = _settings.Get("midi_device_name", "");
+        var devices = ListDevices();
         if (name.Length > 0)
         {
-            for (int i = 0; i < MidiIn.NumberOfDevices; i++)
-                if (MidiIn.DeviceInfo(i).ProductName == name)
-                    return i;
+            var match = devices.FirstOrDefault(d => d.Name == name);
+            if (match is not null)
+                return match.Index;
         }
         int idx = _settings.Get("midi_device_index", -1);
-        if (idx >= 0 && idx < MidiIn.NumberOfDevices)
+        if (idx >= 0 && idx < devices.Count)
             return idx;
-        return MidiIn.NumberOfDevices > 0 ? 0 : -1;
+        return devices.Count > 0 ? 0 : -1;
+    }
+
+    /// <summary>Dispositivos MIDI IN del sistema. Subida desde
+    /// WinCue.App/SettingsWindow.xaml.cs (donde vivía por accidente, igual que
+    /// RemoteInputService antes de la Fase 6): no es de framework — es la
+    /// misma llamada a NAudio.Midi.MidiIn que hace falta desde Ajustes en
+    /// cualquiera de los dos productos para poblar el desplegable de
+    /// dispositivo de entrada. Nunca lanza: sin subsistema MIDI (o sin
+    /// dispositivos) da lista vacía, igual que ListDevices() en
+    /// WinCue.Audio.AudioEngine.</summary>
+    public static List<MidiDeviceInfo> ListDevices()
+    {
+        var result = new List<MidiDeviceInfo>();
+        try
+        {
+            for (int i = 0; i < MidiIn.NumberOfDevices; i++)
+                result.Add(new MidiDeviceInfo(i, MidiIn.DeviceInfo(i).ProductName));
+        }
+        catch (Exception) { /* subsistema MIDI no disponible */ }
+        return result;
     }
 
     /// <summary>Quarter-frame de MIDI Timecode: 8 piezas = una posición.

@@ -25,45 +25,64 @@
 // salida de vídeo) — mismo reparto que WinCue.App.MainWindow.OnSettingsClick
 // (dlg.Saved) frente a WinCue.App.SettingsWindow (el formulario).
 //
-// ALCANCE de esta pasada — CUATRO pestañas, no las cinco de WPF, y cada campo
-// incluido es uno que de verdad hace algo hoy en Secuence (ver el informe
-// para el porqué exacto de cada exclusión):
+// ALCANCE de esta pasada — CINCO pestañas (la quinta, Red/Control, llega en
+// la tarea de disparo remoto: hasta entonces RemoteInputService/RemoteRouter
+// ni siquiera estaban conectados en Secuence.App.xaml.cs, así que un
+// desplegable de dispositivo MIDI no habría disparado nada — ver el informe
+// de esa tarea). Cada campo incluido es uno que de verdad hace algo hoy en
+// Secuence (ver el informe para el porqué exacto de cada exclusión):
 //   - Vídeo:   monitor de salida (lo que obligaba a editar settings.json a
 //     mano), motor ProRes propio, techo del audio espejo de vídeo.
 //   - Audio:   dispositivo/driver de salida, frecuencia de muestreo, volumen
 //     master, dispositivo de audición.
+//   - Red/Control: OSC (puerto de escucha, host/puerto de envío, ping de
+//     prueba) y MIDI (dispositivo de entrada, notas de GO/STOP, MIDI Learn) —
+//     RemoteInputService (WinCue.Remote) ya está enchufado en App.xaml.cs;
+//     Apply() se llama en caliente al guardar, igual que WinCue.
 //   - Rutas:   solo ffmpeg_path (el único campo de la pestaña Rutas de WPF
 //     que algo lee — ShowFileService.ResolveFfmpegPath).
 //   - Interfaz: idioma (recién enchufado, ver App.xaml.cs), comportamiento de
 //     GO y PANIC — todo MainController, el mismo motor que WinCue.
-// FUERA a propósito: Red/Control (OSC+MIDI) — RemoteInputService/RemoteRouter
-// ni siquiera están conectados en Secuence.App.xaml.cs todavía; añadir un
-// desplegable de dispositivo MIDI que no dispara nada sería peor que no
-// tenerlo. video_compositor/canvas — sin GetCompositorSurface conectado
-// (SetGpuLayerSurfaceProvider nunca se llama en Secuence.App.xaml.cs), el
-// interruptor no cambiaría nada visible. video_default_volume/
-// video_loop_default/audio_buffer_size/default_show_path/default_media_path/
-// show_latency_column/show_next_cue_label/confirm_last_cue/ui_font_scale/
-// keyboard_* — ninguno de estos lo lee NADA fuera de la propia ventana de
-// Ajustes de WPF (ni siquiera WinCue.App los aplica en otro sitio): son
-// decorativos en los dos productos, y esta pasada no los añade aquí tampoco.
+// FUERA a propósito, todavía: video_compositor/canvas — sin
+// GetCompositorSurface conectado (SetGpuLayerSurfaceProvider nunca se llama
+// en Secuence.App.xaml.cs), el interruptor no cambiaría nada visible.
+// video_default_volume/video_loop_default/audio_buffer_size/
+// default_show_path/default_media_path/show_latency_column/
+// show_next_cue_label/confirm_last_cue/ui_font_scale/keyboard_* — ninguno de
+// estos lo lee NADA fuera de la propia ventana de Ajustes de WPF (ni
+// siquiera WinCue.App los aplica en otro sitio): son decorativos en los dos
+// productos, y esta pasada no los añade aquí tampoco.
 // =============================================================================
 
+using System.Net;
+using System.Net.Sockets;
+using System.Text;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
+using NAudio.Midi;
 using WinCue.Audio;
 using WinCue.Core;
 using WinCue.Presentation;
+using WinCue.Remote;
 
 namespace Secuence.App;
 
+// CA1001: el MidiIn del MIDI Learn (_learnInput) se libera deterministamente
+// en StopMidiLearn(), llamado desde Unloaded (ver el constructor) — mismo
+// motivo y mismo pragma que WinCue.App.SettingsWindow.
+#pragma warning disable CA1001
 public sealed class SettingsPanel : ContentControl
 {
+#pragma warning restore CA1001
     private readonly SettingsManager _sm;
     private readonly Dictionary<string, (Func<object?> Get, Action<object?> Set)> _fields = new();
 
     private ComboBox _audioDevices = null!;
+    private ComboBox _midiDevices = null!;
+    private TextBlock _oscTestResult = null!;
+    private TextBlock _midiLearnStatus = null!;
+    private (NumberBox Go, NumberBox Stop)? _midiNotes;
 
     /// <summary>Selector de archivo — MainWindow.BrowseFileAsync (necesita el
     /// hwnd propio de la ventana, que este panel no tiene por qué conocer;
@@ -86,12 +105,21 @@ public sealed class SettingsPanel : ContentControl
         };
         tabs.TabItems.Add(MakeTab(Loc.T("Vídeo", "Video"), BuildVideo()));
         tabs.TabItems.Add(MakeTab("Audio", BuildAudio()));
+        tabs.TabItems.Add(MakeTab(Loc.T("Red / Control", "Network / Control"), BuildNetwork()));
         tabs.TabItems.Add(MakeTab(Loc.T("Rutas", "Paths"), BuildPaths()));
         tabs.TabItems.Add(MakeTab(Loc.T("Interfaz", "Interface"), BuildInterface()));
 
         Content = tabs;
         LoadValues();
         InitialSampleRate = _sm.Get("audio_sample_rate", 48000);
+
+        // MIDI Learn deja un MidiIn abierto y un timeout de 5 s pendientes si
+        // el operador cierra el diálogo (Cancelar/clic fuera) a mitad de
+        // gesto — Unloaded es el equivalente en WinUI 3 de OnClosed en
+        // WinCue.App.SettingsWindow (que llama a StopMidiLearn ahí mismo):
+        // este ContentControl se desmonta cuando el ContentDialog que lo aloja
+        // se cierra, con o sin Guardar.
+        Unloaded += (_, _) => StopMidiLearn();
     }
 
     private static TabViewItem MakeTab(string title, UIElement content) => new()
@@ -239,6 +267,213 @@ public sealed class SettingsPanel : ContentControl
                     _audioDevices.SelectedItem = item;
                     break;
                 }
+    }
+
+    // ==================================================================
+    // Red / Control — OSC + MIDI. Equivalente de
+    // WinCue.App.SettingsWindow.BuildNetwork, no una copia: el formulario es
+    // de framework (WinUI 3 aquí, WPF allá) y por eso se reescribe, igual que
+    // el resto de esta clase — ver la cabecera del archivo. Lo que dispara de
+    // verdad (RemoteInputService.ApplyOsc/ApplyMidi, WinCue.Remote) SÍ es
+    // compartido, sin una línea copiada.
+    // ==================================================================
+
+    private UIElement BuildNetwork()
+    {
+        var root = new StackPanel();
+
+        var osc = Group(root, "OSC (Open Sound Control)");
+        Check("osc_enabled", osc, Loc.T("Habilitar OSC", "Enable OSC"));
+        SpinInt("osc_listen_port", osc, Loc.T("Puerto de escucha:", "Listen port:"), 1, 65535);
+        Text("osc_send_host", osc, Loc.T("Host de envío:", "Send host:"));
+        SpinInt("osc_send_port", osc, Loc.T("Puerto de envío:", "Send port:"), 1, 65535);
+        var testRow = Row(osc, "");
+        var btnPing = new Button { Content = Loc.T("Enviar ping de prueba", "Send test ping") };
+        btnPing.Click += OnOscTest;
+        _oscTestResult = new TextBlock
+        {
+            Foreground = Theme.TextDimBrush,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        testRow.Children.Add(btnPing);
+        testRow.Children.Add(_oscTestResult);
+        Note(osc, Loc.T(
+            "Guardar recarga el listener en caliente (RemoteInputService.Apply): no hace falta reiniciar Secuence tras cambiar el puerto.",
+            "Saving reloads the listener on the fly (RemoteInputService.Apply): no need to restart Secuence after changing the port."));
+
+        var midi = Group(root, "MIDI");
+        Check("midi_enabled", midi, Loc.T("Habilitar disparo por MIDI", "Enable MIDI triggering"));
+        _midiDevices = Combo("midi_device_name", midi, Loc.T("Dispositivo de entrada:", "Input device:"));
+        RefreshMidiDevices();
+        var goNote = SpinInt("midi_go_note", midi, Loc.T("Nota MIDI para GO:", "MIDI note for GO:"), 0, 127);
+        var stopNote = SpinInt("midi_stop_note", midi, Loc.T("Nota MIDI para STOP:", "MIDI note for STOP:"), 0, 127);
+        _midiNotes = (goNote, stopNote);
+        var learnRow = Row(midi, "");
+        var btnLearnGo = new Button
+        {
+            Content = $"{Icons.Midi} Learn GO (5 s)",
+            FontFamily = IconFont.Font,
+        };
+        var btnLearnStop = new Button
+        {
+            Content = $"{Icons.Midi} Learn STOP (5 s)",
+            FontFamily = IconFont.Font,
+        };
+        btnLearnGo.Click += (_, _) => MidiLearn(isGo: true);
+        btnLearnStop.Click += (_, _) => MidiLearn(isGo: false);
+        _midiLearnStatus = new TextBlock
+        {
+            Foreground = Theme.TextDimBrush,
+            Margin = new Thickness(8, 0, 0, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        learnRow.Children.Add(btnLearnGo);
+        learnRow.Children.Add(btnLearnStop);
+        learnRow.Children.Add(_midiLearnStatus);
+
+        return root;
+    }
+
+    /// <summary>Repuebla el desplegable de dispositivos MIDI IN —
+    /// RemoteInputService.ListDevices (WinCue.Remote), compartida con
+    /// WinCue.App.SettingsWindow: antes vivía solo allí por accidente.</summary>
+    private void RefreshMidiDevices()
+    {
+        _midiDevices.Items.Clear();
+        foreach (var dev in RemoteInputService.ListDevices())
+            _midiDevices.Items.Add(new ComboBoxItem { Content = dev.Name, Tag = dev.Name });
+        if (_midiDevices.Items.Count == 0)
+            _midiDevices.Items.Add(new ComboBoxItem
+            { Content = Loc.T("(sin dispositivos MIDI)", "(no MIDI devices)"), Tag = "" });
+        _midiDevices.SelectedIndex = 0;
+    }
+
+    // ------------------------------------------------------------------
+    // OSC test ping — puerto del _OscTester Python / WinCue.App.SettingsWindow.OnOscTest
+    // ------------------------------------------------------------------
+
+    private async void OnOscTest(object sender, RoutedEventArgs e)
+    {
+        string host = _fields["osc_send_host"].Get()?.ToString() ?? "127.0.0.1";
+        int port = Convert.ToInt32(_fields["osc_send_port"].Get() ?? 9000);
+        _oscTestResult.Text = Loc.T("Enviando…", "Sending…");
+        try
+        {
+            string result = await Task.Run(() =>
+            {
+                using var udp = new UdpClient();
+                udp.Client.ReceiveTimeout = 1000;
+                byte[] msg = BuildOscPing();
+                udp.Send(msg, msg.Length, host, port);
+                try
+                {
+                    var remote = new IPEndPoint(IPAddress.Any, 0);
+                    udp.Receive(ref remote);
+                    return $"{Icons.Check} " + Loc.T($"Respuesta de {remote}", $"Response from {remote}");
+                }
+                catch (SocketException)
+                {
+                    return Loc.T("Sin respuesta en 1 s  (ping enviado correctamente)",
+                                 "No response in 1 s  (ping sent successfully)");
+                }
+            });
+            _oscTestResult.Text = result;
+        }
+        catch (Exception exc)
+        {
+            _oscTestResult.Text = $"Error: {exc.Message}";
+        }
+    }
+
+    /// <summary>/test/ping OSC mínimo: address null-padded a 4 + type tag ",".</summary>
+    private static byte[] BuildOscPing()
+    {
+        static byte[] Pad4(byte[] b)
+        {
+            int rem = b.Length % 4;
+            return rem == 0 ? b : b.Concat(new byte[4 - rem]).ToArray();
+        }
+        byte[] addr = Pad4(Encoding.ASCII.GetBytes("/test/ping\0"));
+        byte[] tags = Pad4(Encoding.ASCII.GetBytes(",\0"));
+        return addr.Concat(tags).ToArray();
+    }
+
+    // ------------------------------------------------------------------
+    // MIDI learn — puerto del _MidiLearnWorker Python / WinCue.App.SettingsWindow.MidiLearn
+    // ------------------------------------------------------------------
+
+    private MidiIn? _learnInput;
+
+    private void MidiLearn(bool isGo)
+    {
+        StopMidiLearn();
+        string wanted = (_midiDevices.SelectedItem as ComboBoxItem)?.Tag?.ToString() ?? "";
+        int devIndex = RemoteInputService.ListDevices()
+            .FirstOrDefault(d => d.Name == wanted)?.Index ?? -1;
+        if (devIndex < 0)
+        {
+            _midiLearnStatus.Text = Loc.T("Sin dispositivo MIDI seleccionado", "No MIDI device selected");
+            return;
+        }
+
+        _midiLearnStatus.Text = Loc.T($"Toca una nota para {(isGo ? "GO" : "STOP")}…",
+                                       $"Play a note for {(isGo ? "GO" : "STOP")}…");
+        try
+        {
+            _learnInput = new MidiIn(devIndex);
+            _learnInput.MessageReceived += (_, ev) =>
+            {
+                if (ev.MidiEvent is NoteOnEvent { Velocity: > 0 } note)
+                {
+                    // Llega en el hilo de callback de winmm → remitir al hilo de UI
+                    DispatcherQueue.TryEnqueue(() =>
+                    {
+                        var (goNb, stopNb) = _midiNotes!.Value;
+                        (isGo ? goNb : stopNb).Value = note.NoteNumber;
+                        _midiLearnStatus.Text = $"{Icons.Check} " + Loc.T(
+                            $"Nota {note.NoteNumber} ({MidiNoteName(note.NoteNumber)})",
+                            $"Note {note.NoteNumber} ({MidiNoteName(note.NoteNumber)})");
+                        StopMidiLearn();
+                    });
+                }
+            };
+            _learnInput.Start();
+
+            // Timeout de 5 s — DispatcherQueue.CreateTimer necesita el control
+            // ya en el árbol visual (mismo motivo que MixerPanel.StartGrTimer):
+            // aquí es seguro porque el botón que llama a MidiLearn solo existe
+            // dentro de un ContentDialog ya mostrado.
+            var t = DispatcherQueue.CreateTimer();
+            t.Interval = TimeSpan.FromSeconds(5);
+            t.Tick += (_, _) =>
+            {
+                t.Stop();
+                if (_learnInput is not null)
+                {
+                    StopMidiLearn();
+                    _midiLearnStatus.Text = Loc.T("Tiempo agotado (5 s)", "Timed out (5 s)");
+                }
+            };
+            t.Start();
+        }
+        catch (Exception exc)
+        {
+            _midiLearnStatus.Text = $"Error: {exc.Message}";
+            StopMidiLearn();
+        }
+    }
+
+    private void StopMidiLearn()
+    {
+        try { _learnInput?.Stop(); _learnInput?.Dispose(); } catch (Exception) { }
+        _learnInput = null;
+    }
+
+    private static string MidiNoteName(int note)
+    {
+        string[] names = { "C", "C#", "D", "D#", "E", "F", "F#", "G", "G#", "A", "A#", "B" };
+        return $"{names[note % 12]}{note / 12 - 1}";
     }
 
     // ==================================================================
@@ -404,10 +639,17 @@ public sealed class SettingsPanel : ContentControl
         return nb;
     }
 
-    // Sin helper Text(): ningún campo de esta pasada es texto libre plano —
-    // los dos únicos String de settings que aparecen aquí (ffmpeg_path,
-    // panic_image_path) son rutas y van por PathField. Añadirlo sin uso
-    // dispararía IDE0051 (miembro privado sin usar) bajo TreatWarningsAsErrors.
+    /// <summary>Texto libre plano — osc_send_host es el único campo de esta
+    /// clase que no es ni ruta (PathField) ni numérico (Spin*): un host
+    /// (nombre o IP) no tiene min/max ni selector de archivo.</summary>
+    private TextBox Text(string key, StackPanel parent, string label)
+    {
+        var row = Row(parent, label);
+        var tb = new TextBox { Width = 220 };
+        row.Children.Add(tb);
+        _fields[key] = (() => tb.Text, v => tb.Text = v?.ToString() ?? "");
+        return tb;
+    }
 
     /// <summary>Combo con pares (valor, etiqueta). Sin items → editable por
     /// código (audition_device_name, poblado tras esta llamada en BuildAudio).</summary>

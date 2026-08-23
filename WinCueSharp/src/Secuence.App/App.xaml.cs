@@ -48,13 +48,14 @@ using Microsoft.UI.Xaml;
 using WinCue.Audio;
 using WinCue.Controller;
 using WinCue.Core;
+using WinCue.Remote;
 using WinCue.Video;
 
 namespace Secuence.App;
 
-// CA1001: App no se "dispose-a" — _audio se libera deterministamente en
-// window.Closed (ver OnLaunched), el punto de cierre de esta ventana única.
-// Mismo motivo y mismo pragma que WinCue.App.App.
+// CA1001: App no se "dispose-a" — _audio/_video/_remote se liberan
+// deterministamente en window.Closed (ver OnLaunched), el punto de cierre de
+// esta ventana única. Mismo motivo y mismo pragma que WinCue.App.App.
 #pragma warning disable CA1001
 public partial class App : Application
 {
@@ -63,6 +64,7 @@ public partial class App : Application
     private AudioEngine? _audio;
     private VideoEngine? _video;
     private MainController? _controller;
+    private RemoteInputService? _remote;
     private DispatcherQueueTimer? _tick;
 
     public App() => InitializeComponent();
@@ -121,14 +123,6 @@ public partial class App : Application
             sampleRate: settings.Get("audio_sample_rate", 48000));
         _audio = audio;
         ApplyAudioDevice(settings);
-        // Ajustes → Audio: reconfigura el dispositivo en caliente tras
-        // guardar (MainWindow.OnSettingsClick la invoca) — antes Secuence
-        // solo aplicaba audio_device_name/audio_driver UNA VEZ, al arrancar
-        // (ver el comentario viejo de ApplyAudioDevice más abajo, ya no
-        // válido: esta tarea es la que añade la ventana de Ajustes que hace
-        // falta "en caliente"). Mismo reparto que WinCue.App.App.xaml.cs,
-        // window.Attach(..., applyEngineSettings: () => ApplyAudioDevice(settings)).
-        window.ApplyEngineSettings = () => ApplyAudioDevice(settings);
 
         // VideoEngine real (WinCue.Video, con mpv): esta tarea rellena el
         // hueco que el NullVideoEngine provisional de la tarea anterior
@@ -146,6 +140,31 @@ public partial class App : Application
         var controller = new MainController(model, window, audio, video, scheduler, settings);
         _controller = controller;
         window.Attach(controller);
+
+        // Fase 6 (disparo remoto): mismo servicio que WinCue.App.App.xaml.cs
+        // — WinCue.Remote.RemoteInputService, extraído a un proyecto aparte
+        // el primer día de esta tarea precisamente para este momento. Escucha
+        // OSC/MIDI según settings.json y remite cada mensaje al controlador
+        // por el mismo delegado `dispatch` que usan audio y vídeo. Su cabecera
+        // es explícita: "nada de aquí puede tirar el show" — todos los
+        // errores (puerto ocupado, dispositivo MIDI ausente…) salen por el
+        // evento Status, nunca por una excepción, y aquí van a la barra de
+        // estado igual que en WinCue.
+        var remote = new RemoteInputService(controller, model, settings, dispatch);
+        _remote = remote;
+        remote.Status += msg => dispatch(() => window.FlashStatus(msg));
+
+        // Ajustes → Audio + Red/Control: reconfigura el dispositivo de audio
+        // Y recarga los listeners OSC/MIDI en caliente tras guardar
+        // (MainWindow.OnSettingsClick invoca ApplyEngineSettings) — mismo
+        // reparto de responsabilidades que WinCue.App.App.xaml.cs
+        // (window.Attach(..., applyEngineSettings: () => { ApplyAudioDevice(...); _remote.Apply(); ... })).
+        window.ApplyEngineSettings = () =>
+        {
+            ApplyAudioDevice(settings);
+            remote.Apply();
+        };
+        remote.Apply();
 
         string? showPath = ResolverRutaDelShow();
         if (showPath is not null)
@@ -167,6 +186,7 @@ public partial class App : Application
         window.Closed += (_, _) =>
         {
             tick.Stop();
+            remote.Dispose();
             controller.Shutdown();
             window.ShutdownMonitors();   // previos PGM/PVW: su propio mpv + HwndHijo
             audio.Dispose();

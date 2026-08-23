@@ -1,0 +1,40 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       WinCue.Remote.Tests — RemoteInputService (OSC/MIDI). Referencia también
+       tests\WinCue.Controller.Tests para reusar sus dobles de prueba (FakeView,
+       FakeAudioEngine, FakeVideoEngine, VirtualScheduler, ControllerTestBase):
+       construir un MainController real de verdad exige esas piezas, y
+       RemoteInputService las necesita para su constructor aunque los tests de
+       aquí nunca ejerciten el ruteo en sí (eso ya está cubierto en
+       tests\WinCue.Controller.Tests\RemoteControlTests.cs contra MainController/
+       RemoteRouter). Copiar esas ~400 líneas de dobles aquí sería justo la
+       clase de duplicación que este proyecto existe para evitar.
+       ========================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+
+    <IsPackable>false</IsPackable>
+    <IsTestProject>true</IsTestProject>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <PackageReference Include="coverlet.collector" Version="6.0.0" />
+    <PackageReference Include="Microsoft.NET.Test.Sdk" Version="17.8.0" />
+    <PackageReference Include="xunit" Version="2.5.3" />
+    <PackageReference Include="xunit.runner.visualstudio" Version="2.5.3" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Using Include="Xunit" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\..\src\WinCue.Remote\WinCue.Remote.csproj" />
+    <ProjectReference Include="..\WinCue.Controller.Tests\WinCue.Controller.Tests.csproj" />
+  </ItemGroup>
+
+</Project>
