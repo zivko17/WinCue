@@ -16,6 +16,13 @@
 // Un show que no carga NO debe tirar la ventana: se abre igual, vacía, con el
 // motivo en el título. Es la única garantía que pide la verificación de este
 // hito ("el proceso sigue vivo varios segundos").
+//
+// La fuente de iconos SÍ debe tirar la ventana si no cargó de verdad
+// (IconFont.Comprobar(), llamada aquí antes de construir MainWindow, mismo
+// momento que IconFont.InstallFont() en WinCue.App): una tabla con cuadritos
+// en vez de iconos es un fallo que hay que ver como excepción con nombre, no
+// como una captura de pantalla que alguien tiene que interpretar. Se vuelca
+// además a logs/crash-*.log por si esto pasa fuera de una sesión de consola.
 // =============================================================================
 
 using Microsoft.UI.Xaml;
@@ -29,8 +36,33 @@ public partial class App : Application
 
     public App() => InitializeComponent();
 
+    /// <summary>Vuelca una excepción a logs/crash-*.log. Mismo motivo que
+    /// WinCue.App.App.DumpCrash: un fallo de arranque sin rastro en disco es
+    /// imposible de diagnosticar después de cerrar la consola.</summary>
+    private static string? DumpCrash(string origin, object exceptionObject)
+    {
+        try
+        {
+            string dir = Path.Combine(AppContext.BaseDirectory, "logs");
+            Directory.CreateDirectory(dir);
+            string file = Path.Combine(dir, $"crash-{DateTime.Now:yyyyMMdd-HHmmss}.log");
+            File.WriteAllText(file,
+                $"[{DateTime.Now:yyyy-MM-dd HH:mm:ss.fff}] {origin}\r\n\r\n{exceptionObject}\r\n");
+            return file;
+        }
+        catch (Exception) { return null; }
+    }
+
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
+        AppDomain.CurrentDomain.UnhandledException += (_, e) =>
+            DumpCrash("AppDomain.UnhandledException", e.ExceptionObject);
+
+        // Antes de construir ninguna ventana: si la fuente de iconos no se
+        // aplicó de verdad, mejor una excepción con nombre aquí que una tabla
+        // llena de cuadritos (ver IconFont.Comprobar para el porqué exacto).
+        IconFont.Comprobar();
+
         var model = new CueModel();
         string? showPath = ResolverRutaDelShow();
         string? error = null;

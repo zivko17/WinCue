@@ -73,10 +73,13 @@
        La tabla de cues nunca mezcla un glifo con texto normal en el MISMO
        TextBlock (ver CueRow.cs), así que no hace falta resolver por rango:
        basta con poner Phosphor SOLO en el TextBlock del icono.
-       Va como Content copiado a la salida (no como recurso empaquetado:
-       WindowsPackageType=None es una app SIN identidad de paquete, y
-       "ms-appx:///" no resuelve ahí) para poder cargarla por ruta de archivo
-       en tiempo de ejecución — ver Theme.cs. -->
+       Va como Content copiado a la salida porque "ms-appx:///" en WinUI 3
+       —a diferencia del mecanismo clásico de UWP (Windows.ApplicationModel.
+       Package), que sí exige identidad de paquete— lo resuelve el propio
+       Windows App SDK para XAML (FontFamily, Image…) incluso en una app SIN
+       identidad de paquete (WindowsPackageType=None): lo mapea al directorio
+       del ejecutable. Por eso el .ttf tiene que estar FÍSICAMENTE ahí — ver
+       IconFont.cs para la URI exacta y su comprobación de carga en runtime. -->
   <ItemGroup>
     <Content Include="assets\Phosphor.ttf">
       <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
