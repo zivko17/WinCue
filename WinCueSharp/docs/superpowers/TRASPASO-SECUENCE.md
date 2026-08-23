@@ -54,8 +54,11 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
 `MixerLayout`, `WaveformLayout`, `GeometryLayout`, `EqCurveLayout`,
-`CompCurveLayout`. (`EqResponse`, los biquads RBJ que alimentan la curva de
-EQ, vive en `WinCue.Core` — matemática de audio, no presentación.)
+`CompCurveLayout`, y la interacción del timeline: `TimelineViewport`
+(zoom/scroll), `TimelineHitTest`/`TimelineDragGesture` (agarrar y arrastrar)
+y `TimelineEditing` (qué escribe el soltar). (`EqResponse`, los biquads RBJ
+que alimentan la curva de EQ, vive en `WinCue.Core` — matemática de audio,
+no presentación.)
 
 ---
 
@@ -140,9 +143,11 @@ Todo verificado por Andrés en pantalla, paso a paso:
   blackout. mpv en un HWND hijo (ruta clásica, no compositor)
 - Abrir / Guardar / Guardar como, asterisco de modificado, aviso de cambios
 - Inspector: identidad, tiempos, encadenado, fundidos, reproducción
-- **Los siete controles pintados a mano en Win2D**: VU, timeline (solo
-  lectura), mixer + escala de faders, waveform (con trim arrastrable), canvas
-  de geometría (**conectado a la salida en vivo**), EQ y compresor
+- **Los siete controles pintados a mano en Win2D**: VU, timeline
+  (interactivo: seleccionar, arrastrar en tiempo/pista/bordes, zoom con
+  `Ctrl+rueda` — pendiente de verificación en pantalla), mixer + escala de
+  faders, waveform (con trim arrastrable), canvas de geometría (**conectado a
+  la salida en vivo**), EQ y compresor
 - Disposición igual a la de WinCue, con el mismo lenguaje de relieve
 - Previos **PGM/PVW en vivo** (mpv embebido)
 - Añadir / Importar / Borrar, modo EDIT-SHOW, conmutador de salida, SIGUIENTE
@@ -152,8 +157,15 @@ Todo verificado por Andrés en pantalla, paso a paso:
 ## Lo que falta
 
 **Inmediato:**
-- **Timeline interactivo** — hoy es de solo lectura. Falta arrastrar bloques
-  (tiempo y pista), zoom con `Ctrl+rueda`, selección
+- **Timeline: lo que queda tras la segunda pasada.** Arrastrar bloques
+  (tiempo/pista/bordes con sus topes), zoom con `Ctrl+rueda`, scroll y
+  selección bidireccional con la tabla YA están — el cálculo es compartido y
+  probado (`TimelineViewport`/`TimelineHitTest`/`TimelineDragGesture`/
+  `TimelineEditing` en WinCue.Presentation; WinCue.App pasó a usarlo). Falta:
+  pintar los recuadros de grupo y los marcadores GO en Secuence (y con ello
+  agarrar grupos), el cursor de edición con scrub y doble clic, y la casilla
+  del crossfade automático (lee `timeline_auto_crossfade` de settings; sin
+  interfaz propia todavía) — todo eso va con la pasada del menú contextual.
 - **Inspector, segunda pasada**: rack de audio del cue, geometría, disparadores
   remotos, color/armado/flag/notas
 - Menú contextual de la tabla, arrastrar y soltar archivos, barra de estado,

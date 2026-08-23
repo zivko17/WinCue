@@ -347,11 +347,13 @@ public sealed partial class MainWindow : Window, IShowView
         {
             _selectedCueId = row.CueId;
             _inspector.SetCue(_model.GetById(row.CueId));
+            _timeline.SetSelected(row.CueId);   // resalta (y trae a la vista)
         }
         else
         {
             _selectedCueId = -1;
             _inspector.SetCue(null);
+            _timeline.SetSelected(-1);
         }
     }
 
@@ -371,6 +373,31 @@ public sealed partial class MainWindow : Window, IShowView
         RebuildHotkeys();
         UpdateTransport(controller.IsPaused);
         _timeline.Clock = controller.Clock;
+
+        // Timeline interactivo (hitos-0-1, segunda pasada): MISMO cableado
+        // que WinCue.App.MainWindow.xaml.cs.Attach — los commits van por
+        // OnCueEditCommitted (edición en vivo + asterisco de modificado),
+        // reordenar por OnMoveCue (la tabla se refresca por el callback de
+        // vista del controlador), selección bidireccional con la tabla, y en
+        // modo SHOW se selecciona pero no se edita. El interruptor 🔀 lee la
+        // MISMA clave de settings que WinCue; su casilla en la interfaz de
+        // Secuence queda para la pasada del menú contextual (PENDIENTE).
+        _timeline.CommitField = (cueId, key, value) =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                controller.OnCueEditCommitted(row,
+                    new Dictionary<string, object?> { [key] = value });
+        };
+        _timeline.MoveCueRequested = (from, to) => controller.OnMoveCue(from, to);
+        _timeline.IsEditAllowed = () => ModeToggle.IsChecked != true;
+        _timeline.AutoCrossfade = _settings.Get("timeline_auto_crossfade", true);
+        _timeline.CueSelected += cueId =>
+        {
+            var row = _rows.FirstOrDefault(r => r.CueId == cueId);
+            if (row is not null)
+                CueList.SelectedItem = row;   // → OnCueSelectionChanged → inspector
+        };
 
         // Inspector → controlador (edición en vivo campo a campo) — mismo
         // camino que WinCue.App.MainWindow.xaml.cs.Attach: cueId → row por
@@ -1121,6 +1148,11 @@ public sealed partial class MainWindow : Window, IShowView
             try { CueList.SelectedItem = refreshed; }
             finally { _suppressSelectionSync = false; }
         }
+
+        // El timeline proyecta el MISMO modelo: un campo comprometido (desde
+        // el inspector o desde el propio timeline) lo repinta — igual que
+        // WinCue.App.MainWindow.RefreshRow.
+        _timeline.RefreshFromModel();
     }
 
     public void ReloadTable()

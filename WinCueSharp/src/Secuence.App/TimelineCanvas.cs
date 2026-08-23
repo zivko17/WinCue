@@ -1,38 +1,36 @@
 // =============================================================================
-// TimelineCanvas.cs — timeline del show en Win2D, DE SOLO LECTURA.
+// TimelineCanvas.cs — timeline del show en Win2D, ya INTERACTIVO.
 // =============================================================================
-// Primera pasada del traslado del timeline a Secuence (ver el encargo,
-// hitos-0-1): la regla de tiempo, las pistas, los bloques de cue (posición,
-// duración, color por tipo, etiqueta), el playhead y el indicador de
-// solapamiento (aviso de fundido incoherente). NADA de arrastre, zoom con
-// Ctrl+rueda, selección ni menú contextual — eso sigue siendo, a propósito,
-// exclusivo de src/WinCue.App/TimelinePanel.cs (segunda pasada).
+// Segunda pasada del traslado del timeline a Secuence (ver el encargo,
+// hitos-0-1). La primera dejó regla, pistas, bloques, playhead y aviso de
+// solapamiento; esta añade la interacción: seleccionar (bidireccional con la
+// tabla), arrastrar bloques en tiempo y pista, redimensionar por los bordes
+// (trim/duración), zoom con Ctrl+rueda y scroll con la rueda.
 //
-// El CÁLCULO (proyección de bloques, geometría en píxeles, playhead) es
-// EXACTAMENTE el mismo que usa WinCue: vive en WinCue.Presentation
-// (TimelineLayout, TimelinePalette, TimelinePlayhead), sin un solo tipo de
-// framework de interfaz. Este archivo SOLO pinta — mismo reparto que
-// VuMeterCanvas.cs (el piloto de este traslado): CÁLCULO pedido, PINTADO con
-// CanvasDrawingSession.
+// El CÁLCULO — proyección, geometría, zoom/scroll (TimelineViewport),
+// hit-test (TimelineHitTest), el gesto con su umbral/snap/topes
+// (TimelineDragGesture) y la política del soltar (TimelineEditing.CommitDrag:
+// reordenar, encadenar en paralelo, anclar a los demás, reconciliar
+// crossfades) — es EXACTAMENTE el que usa WinCue: vive en WinCue.Presentation
+// sin un solo tipo de framework de interfaz. Este archivo solo traduce
+// punteros de WinUI 3 y pinta — mismo reparto que VuMeterCanvas.cs.
 //
 // UserControl + CanvasControl (no herencia): CanvasControl sigue sellada — ver
 // la cabecera de VuMeterCanvas.cs para la razón completa.
 //
 // SIMPLIFICACIONES DELIBERADAS DE ESTA PASADA (documentadas, no descuidos):
-//   · La etiqueta del bloque aquí es "número · nombre" a secas — sin los
-//     prefijos ↗ (fantasma) / ∞ (bucle) / 📌 (pista fijada a mano) que sí
-//     lleva WinCue. Esos son glifos de Icons (Phosphor), y Win2D/DirectWrite
-//     no resuelve por NOMBRE una fuente cargada solo para XAML (ver
-//     IconFont.cs): pintarlos aquí exige cargar Phosphor como CanvasFontSet,
-//     que es trabajo de una pasada futura. TimelineLayout.BlockLabelText SÍ
-//     existe y YA lo usa WinCue — Secuence podrá sumarse el día que cargue
-//     la fuente en Win2D sin tener que tocar el cálculo.
-//   · El indicador de solapamiento se pinta como una marca triangular lisa
-//     (sin el glifo ⚠ de Icons.Warning), por el mismo motivo de fuente.
-//   · No se pintan los recuadros de grupo (spans) ni los marcadores GO: no
-//     están en la lista de "entra" del encargo para esta pasada — el cálculo
-//     YA los proyecta (TimelineProjection.Spans/GoMarks), así que sumarlos
-//     aquí el día que haga falta es pintar, no volver a calcular nada.
+//   · La etiqueta del bloque sigue siendo "número · nombre" a secas — los
+//     prefijos ↗/∞/📌 son glifos de Icons (Phosphor) y Win2D/DirectWrite no
+//     resuelve por NOMBRE una fuente cargada solo para XAML (ver IconFont.cs).
+//     El aviso de solapamiento sigue siendo la marca triangular lisa.
+//   · Los recuadros de grupo (spans) y los marcadores GO siguen sin pintarse;
+//     por coherencia, aquí tampoco se AGARRAN los grupos (no se puede
+//     arrastrar lo que no se ve — en WinCue sí: asa → bloque → marco). El día
+//     que se pinten, el hit-test compartido (TimelineHitTest.SpanChip/Span)
+//     ya está listo y probado.
+//   · Sin cursor de edición, scrub, doble clic ni menú contextual: el menú
+//     contextual de Secuence es un pendiente aparte del encargo, y el doble
+//     clic (inspector / reproducir desde la regla) irá con él.
 // =============================================================================
 
 using System.Numerics;
@@ -42,8 +40,11 @@ using Microsoft.Graphics.Canvas.Geometry;
 using Microsoft.Graphics.Canvas.Text;
 using Microsoft.Graphics.Canvas.UI.Xaml;
 using Microsoft.UI.Dispatching;
+using Microsoft.UI.Input;
 using Microsoft.UI.Xaml.Controls;
+using Microsoft.UI.Xaml.Input;
 using Windows.Foundation;
+using Windows.System;
 using Windows.UI;
 using WinCue.Controller;
 using WinCue.Core;
@@ -51,22 +52,49 @@ using WinCue.Presentation;
 
 namespace Secuence.App;
 
-/// <summary>Timeline de solo lectura, en Win2D. Equivalente de
-/// <c>WinCue.App.TimelinePanel</c> (WPF) para WinUI 3, limitado a lo que este
-/// hito pide: regla, pistas, bloques con color y etiqueta, playhead y aviso
-/// de solapamiento. UserControl que aloja un CanvasControl.</summary>
+/// <summary>Timeline interactivo en Win2D. Equivalente de
+/// <c>WinCue.App.TimelinePanel</c> (WPF) para WinUI 3: regla, pistas, bloques
+/// con color y etiqueta, playhead, selección, arrastre (tiempo/pista/bordes)
+/// y zoom — con el cálculo compartido de WinCue.Presentation.</summary>
 public sealed class TimelineCanvas : UserControl
 {
     private readonly CanvasControl _canvas = new();
     private readonly TimelinePlayhead _playhead = new();
 
+    // Zoom y scroll: estado y operaciones compartidos con WinCue
+    // (TimelineViewport) — zoom anclado al puntero, fit, topes del scroll.
+    private readonly TimelineViewport _vp = new();
+
     private CueModel? _model;
     private TimelineProjection _projection = new();
-    private double _pxPerSec = 20;
-    private double _scrollX;
     private bool _fitDone;
     private bool _renderHooked;
     private DispatcherQueueTimer? _frameTimer;
+
+    private int _selectedId = -1;
+
+    // Arrastre en curso (umbral, snap y topes compartidos). null = sin gesto.
+    private TimelineDragGesture? _drag;
+
+    /// <summary>Commit de un campo (cueId, campo, valor) → el producto lo
+    /// cablea a MainController.OnCueEditCommitted. Mismo contrato que
+    /// WinCue.App.TimelineCanvas.CommitField.</summary>
+    public Action<int, string, object?>? CommitField;
+
+    /// <summary>Reordenar la lista (fila origen, fila destino) → OnMoveCue.</summary>
+    public Action<int, int>? MoveCueRequested;
+
+    /// <summary>true → el timeline GESTIONA los fades al arrastrar (solape =
+    /// crossfade; separar = quitarlo) — mismo interruptor 🔀 que WinCue.</summary>
+    public bool AutoCrossfade = true;
+
+    /// <summary>En modo SHOW se selecciona pero no se edita (igual que la
+    /// tabla). Sin delegado, se permite editar.</summary>
+    public Func<bool>? IsEditAllowed;
+
+    /// <summary>Clic en un bloque: selección hacia la tabla (y viceversa,
+    /// ver SetSelected).</summary>
+    public event Action<int>? CueSelected;
 
     public TimelineCanvas()
     {
@@ -78,6 +106,12 @@ public sealed class TimelineCanvas : UserControl
             _fitDone = false;
             _canvas.Invalidate();
         };
+        _canvas.PointerPressed += OnPointerPressed;
+        _canvas.PointerMoved += OnPointerMoved;
+        _canvas.PointerReleased += OnPointerReleased;
+        _canvas.PointerCaptureLost += (_, _) => CancelDrag();
+        _canvas.PointerCanceled += (_, _) => CancelDrag();
+        _canvas.PointerWheelChanged += OnPointerWheel;
         Unloaded += (_, _) => _frameTimer?.Stop();
     }
 
@@ -92,13 +126,26 @@ public sealed class TimelineCanvas : UserControl
         RefreshFromModel();
     }
 
-    /// <summary>Recalcula la proyección tras cualquier cambio del modelo
-    /// (carga de show). Mismo cálculo compartido que WinCue —
-    /// TimelineLayout.Project(), sin override de arrastre: aquí no se
-    /// arrastra nada.</summary>
+    /// <summary>Recalcula la proyección tras cualquier cambio del modelo.
+    /// Mismo cálculo compartido que WinCue — TimelineLayout.Project(), con la
+    /// vista previa del arrastre en curso si lo hay.</summary>
     public void RefreshFromModel()
     {
-        _projection = _model is null ? new TimelineProjection() : TimelineLayout.Project(_model);
+        _projection = _model is null
+            ? new TimelineProjection()
+            : TimelineLayout.Project(_model, _drag?.ToOverride());
+        _canvas.Invalidate();
+    }
+
+    /// <summary>Selección desde la tabla (-1 = nada): resalta el bloque y lo
+    /// trae a la vista si quedó fuera — mismo contrato que WinCue.</summary>
+    public void SetSelected(int cueId)
+    {
+        if (_selectedId == cueId)
+            return;
+        _selectedId = cueId;
+        if (_projection.StartById.TryGetValue(cueId, out double start))
+            _vp.EnsureVisible(start, _canvas.ActualWidth);
         _canvas.Invalidate();
     }
 
@@ -138,6 +185,123 @@ public sealed class TimelineCanvas : UserControl
 
     private void OnFrameTick(DispatcherQueueTimer sender, object args) => _canvas.Invalidate();
 
+    // ------------------------------------------------------------------
+    // Interacción: seleccionar, arrastrar y zoom (cálculo compartido)
+    // ------------------------------------------------------------------
+
+    private double LayerH => TimelineLayout.LayerHeight(
+        _canvas.ActualHeight, TimelineLayout.VisibleLayers(_projection.Blocks));
+
+    private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
+    {
+        if (_model is null)
+            return;
+        var pt = e.GetCurrentPoint(_canvas);
+        if (!pt.Properties.IsLeftButtonPressed)
+            return;
+        var p = pt.Position;
+
+        // Solo bloques: los recuadros de grupo no se pintan todavía en
+        // Secuence, así que tampoco se agarran (ver la cabecera).
+        var block = TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
+            _vp.PxPerSec, _vp.ScrollX, LayerH);
+        if (block is null)
+            return;
+
+        _selectedId = block.Cue.Id;
+        CueSelected?.Invoke(block.Cue.Id);
+
+        // En modo SHOW se selecciona pero no se edita (igual que la tabla)
+        if (!(IsEditAllowed?.Invoke() ?? true))
+        {
+            _canvas.Invalidate();
+            return;
+        }
+
+        // El gesto (umbral, snap, topes, anclas) es cálculo compartido:
+        // ¿agarró un borde? → redimensionar en vez de mover
+        var mode = TimelineHitTest.EdgeMode(block, p.X, _vp.PxPerSec, _vp.ScrollX);
+        _drag = new TimelineDragGesture(block.Cue, isGroup: false, mode,
+            block, p.X, p.Y, _projection.StartById);
+
+        _canvas.CapturePointer(e.Pointer);
+        _canvas.Invalidate();
+    }
+
+    private void OnPointerMoved(object sender, PointerRoutedEventArgs e)
+    {
+        var p = e.GetCurrentPoint(_canvas).Position;
+
+        if (_drag is null)
+        {
+            // Cursor según lo que hay debajo, como WPF: ↔ en un borde
+            // redimensionable, ✥ sobre un bloque, flecha en el vacío
+            var over = TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
+                _vp.PxPerSec, _vp.ScrollX, LayerH);
+            var shape = over is null
+                ? InputSystemCursorShape.Arrow
+                : TimelineHitTest.EdgeMode(over, p.X, _vp.PxPerSec, _vp.ScrollX)
+                    != TimelineDragMode.Move
+                    ? InputSystemCursorShape.SizeWestEast
+                    : InputSystemCursorShape.SizeAll;
+            ProtectedCursor = InputSystemCursor.Create(shape);
+            return;
+        }
+
+        // El gesto aplica el umbral, el snap y los topes (cálculo compartido)
+        _drag.Update(p.X, p.Y, _vp.PxPerSec, LayerH);
+        if (!_drag.Moved)
+            return;
+
+        // Reproyección en vivo: el resto del show se desplaza con el arrastre
+        RefreshFromModel();
+    }
+
+    private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
+    {
+        if (_drag is null)
+            return;
+        var g = _drag;
+        _drag = null;
+        _canvas.ReleasePointerCaptures();
+
+        // Qué escribe el soltar (reordenar, encadenar en paralelo, anclar a
+        // los demás, reconciliar crossfades) es política compartida:
+        // TimelineEditing.CommitDrag, WinCue.Presentation. Sin gesto real
+        // (un clic), no escribe nada.
+        if (_model is not null)
+            TimelineEditing.CommitDrag(_model, g,
+                (id, field, value) => CommitField?.Invoke(id, field, value),
+                (from, to) => MoveCueRequested?.Invoke(from, to),
+                AutoCrossfade);
+        RefreshFromModel();
+    }
+
+    /// <summary>El capture se perdió a medio gesto (cambio de foco, pantalla
+    /// táctil…): descartar la vista previa sin escribir nada.</summary>
+    private void CancelDrag()
+    {
+        if (_drag is null)
+            return;
+        _drag = null;
+        RefreshFromModel();
+    }
+
+    private void OnPointerWheel(object sender, PointerRoutedEventArgs e)
+    {
+        var pt = e.GetCurrentPoint(_canvas);
+        _vp.Wheel(pt.Properties.MouseWheelDelta,
+            e.KeyModifiers.HasFlag(VirtualKeyModifiers.Control),
+            pt.Position.X, TimelineLayout.TotalSeconds(_projection.Blocks),
+            _canvas.ActualWidth);
+        _canvas.Invalidate();
+        e.Handled = true;
+    }
+
+    // ------------------------------------------------------------------
+    // Pintado
+    // ------------------------------------------------------------------
+
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         var ds = args.DrawingSession;
@@ -151,9 +315,7 @@ public sealed class TimelineCanvas : UserControl
         if (!_fitDone && w > 0 && blocks.Count > 0)
         {
             _fitDone = true;
-            double total = Math.Max(10, TimelineLayout.TotalSeconds(blocks) + 2);
-            _pxPerSec = Math.Clamp((w - 20) / total, TimelineLayout.MinPxPerSec, TimelineLayout.MaxPxPerSec);
-            _scrollX = 0;
+            _vp.Fit(TimelineLayout.TotalSeconds(blocks), w);
         }
 
         int layers = TimelineLayout.VisibleLayers(blocks);
@@ -170,9 +332,9 @@ public sealed class TimelineCanvas : UserControl
         // Regla de tiempo
         ds.FillRectangle(new Rect(0, 0, w, TimelineLayout.RulerH), ToColor(Palette.TimelineRulerBg));
         using var tickFormat = new CanvasTextFormat { FontSize = 10 };
-        foreach (double t in TimelineLayout.RulerTicks(_pxPerSec, _scrollX, w))
+        foreach (double t in TimelineLayout.RulerTicks(_vp.PxPerSec, _vp.ScrollX, w))
         {
-            float x = (float)TimelineLayout.SecToX(t, _pxPerSec, _scrollX);
+            float x = (float)_vp.SecToX(t);
             ds.DrawLine(new Vector2(x, (float)(TimelineLayout.RulerH - 6)), new Vector2(x, (float)TimelineLayout.RulerH),
                 ToColor(Palette.TimelineTick));
             ds.DrawLine(new Vector2(x, (float)TimelineLayout.RulerH), new Vector2(x, (float)h),
@@ -183,14 +345,22 @@ public sealed class TimelineCanvas : UserControl
         if (blocks.Count == 0)
             return;
 
+        // Bloques (el arrastrado, encima — como WPF)
         foreach (var b in blocks)
-            DrawBlock(ds, b, lh, w);
+            if (_drag is null || b.Cue.Id != _drag.Cue.Id)
+                DrawBlock(ds, b, lh, w);
+        if (_drag is not null)
+        {
+            var dragBlock = blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _drag.Cue.Id);
+            if (dragBlock is not null)
+                DrawBlock(ds, dragBlock, lh, w);
+        }
 
         // Playhead: cálculo compartido (WinCue.Presentation.TimelinePlayhead)
         double? cursor = _playhead.CursorSeconds(blocks, Clock?.Now ?? 0.0);
         if (cursor is double cs)
         {
-            float x = (float)TimelineLayout.SecToX(cs, _pxPerSec, _scrollX);
+            float x = (float)_vp.SecToX(cs);
             if (x >= 0 && x <= w)
                 ds.DrawLine(new Vector2(x, 0), new Vector2(x, (float)h), ToColor(Palette.Pgm), 2f);
         }
@@ -198,7 +368,7 @@ public sealed class TimelineCanvas : UserControl
 
     private void DrawBlock(CanvasDrawingSession ds, TimelineBlock b, double lh, double w)
     {
-        var geom = TimelineLayout.BlockGeometry(b, _pxPerSec, _scrollX, lh);
+        var geom = TimelineLayout.BlockGeometry(b, _vp.PxPerSec, _vp.ScrollX, lh);
         var r = geom.Rect;
         if (r.X + r.Width < 0 || r.X > w)
             return;
@@ -217,6 +387,10 @@ public sealed class TimelineCanvas : UserControl
 
             if (b.Dimmed)
                 ds.FillGeometry(geometry, ToColor(Palette.Black, 90));
+
+            // Selección: borde blanco, como el SelectedPen de WPF
+            if (!b.Ghost && b.Cue.Id == _selectedId)
+                ds.DrawGeometry(geometry, ToColor(Palette.White), 1.5f);
         }
 
         // Indicador de solapamiento (aviso de fundido incoherente): sale del
