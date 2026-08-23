@@ -113,40 +113,21 @@ foreach ($t in @('LGPL-3.0.txt', 'GPL-3.0.txt')) {
     }
 }
 
-# ── SMOKE DE LICENCIAS ───────────────────────────────────────────────────
-# El guardián vive en scripts\verificar-licencias.ps1 para que
-# publish-secuence.ps1 use EL MISMO y no una copia recortada.
+# ── SMOKE DE LICENCIAS (FFmpeg + libmpv) ────────────────────────────────
+# El guardián vive ENTERO en scripts\verificar-licencias.ps1 para que
+# publish-secuence.ps1 use EL MISMO y no una copia recortada. Cubre las dos
+# nativas: libmpv era el bloqueante histórico (la build de shinchiro / del
+# proyecto Python es GPL y colarla en un paquete obligaría a abrir el código
+# de WinCue). Se comprueba lo que hay DENTRO del paquete, no el árbol de
+# desarrollo.
+$mpvOut = Join-Path $out 'libmpv-2.dll'
 if ($SinVerificarLicencias) {
     Write-Warning "Verificación de licencias SALTADA (-SinVerificarLicencias). NO distribuyas este paquete."
 } else {
     & (Join-Path $root 'scripts\verificar-licencias.ps1') `
         -CarpetaFfmpegBin (Join-Path $ffDst 'bin') `
-        -RaizRepo $root
-}
-
-# ── El mismo guardián, para libmpv ──────────────────────────────────────
-# libmpv era el bloqueante histórico: la build de shinchiro / del proyecto
-# Python es GPL y colarla en un paquete obligaría a abrir el código de WinCue.
-# Se comprueba la DLL DEL PAQUETE, no la del árbol de desarrollo.
-$mpvOut = Join-Path $out 'libmpv-2.dll'
-if ($SinVerificarLicencias) {
-    Write-Warning "Verificación de libmpv SALTADA (-SinVerificarLicencias). NO distribuyas este paquete."
-} elseif (Test-Path $mpvOut) {
-    Write-Host "`nVerificando la licencia de libmpv del PAQUETE..." -ForegroundColor Cyan
-    $verifMpv = Join-Path $root 'tools\libmpv-lgpl\verificar-licencia\verificar-licencia.csproj'
-    # Ruta explícita por variable de entorno, igual que con FFmpeg: sin ella el
-    # verificador podría cargar OTRA libmpv del PATH y dar por bueno el paquete
-    # sin haber mirado la DLL que se entrega.
-    $env:WINCUE_LIBMPV = $mpvOut
-    try { & dotnet run --project $verifMpv -c Release } finally { $env:WINCUE_LIBMPV = $null }
-    if ($LASTEXITCODE -ne 0) {
-        Remove-Item $mpvOut -Force
-        Remove-Item (Join-Path $out 'libmpv-BUILD.txt') -Force -ErrorAction SilentlyContinue
-        throw ("LICENCIA RECHAZADA: la libmpv del paquete NO es LGPL. Se ha borrado del " +
-               "paquete. Con una libmpv GPL no se puede distribuir WinCue cerrado. " +
-               "Consigue la build LGPL con tools\libmpv-lgpl\obtener-libmpv-lgpl.ps1.")
-    }
-    Write-Host "Licencia de libmpv verificada: LGPL." -ForegroundColor Green
+        -RaizRepo $root `
+        -RutaLibmpv $mpvOut
 }
 
 Write-Host "`nPublicado en: $out" -ForegroundColor Green

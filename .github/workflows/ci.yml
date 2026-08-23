@@ -58,6 +58,16 @@ jobs:
       - name: Traer el código
         uses: actions/checkout@v4
 
+      # El hito 1 dejó 94 nombres duplicados entre Theme.cs (WPF) y Palette.cs
+      # (sin framework, para que Secuence la comparta): la correspondencia es
+      # por NOMBRE y el compilador no la vigila. Un cruce compila, pasa la
+      # suite entera y pinta mal en un escenario. Va aquí, antes del build,
+      # porque es puramente textual — no necesita el SDK ni compilar nada — y
+      # así falla rápido si el cruce ya está ahí, sin gastar el resto del job.
+      - name: Verificar que Theme sigue derivando de Palette
+        shell: pwsh
+        run: WinCueSharp/scripts/verificar-paleta.ps1
+
       # La versión se lee de global.json y NO se escribe aquí: si estuviera en
       # los dos sitios, acabarían discrepando. Ojo, esto instala el SDK pero no
       # impide que la imagen del runner traiga otros más nuevos — quien decide
