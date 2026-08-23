@@ -29,8 +29,15 @@ using WinRT.Interop;
 
 namespace Secuence.App;
 
+// CA1001: la ventana vive tanto como la app; _pgm/_pvw (LiveMonitorControl,
+// cada uno con su mpv embebido + HwndHijo) se liberan deterministamente vía
+// ShutdownMonitors() (llamado por App.xaml.cs en window.Closed) — mismo
+// criterio y mismo comentario que WinCue.App.LiveMonitorControl (WPF) sobre
+// su propio CA1001.
+#pragma warning disable CA1001
 public sealed partial class MainWindow : Window, IShowView
 {
+#pragma warning restore CA1001
     private readonly CueModel _model;
     private readonly ObservableCollection<CueRow> _rows = new();
     private readonly SettingsManager _settings = SettingsManager.Instance;
@@ -57,6 +64,16 @@ public sealed partial class MainWindow : Window, IShowView
     // src/WinCue.App/MainWindow.xaml.cs: es el mismo medidor, otro pincel.
     private readonly VuMeterCanvas _pgmVuL = new(vertical: true) { Width = 9 };
     private readonly VuMeterCanvas _pgmVuR = new(vertical: true) { Width = 9 };
+
+    // ── Previos PGM/PVW en vivo (mpv embebido, ver LiveMonitorControl.cs) ──
+    // PGM se resincroniza por tic (_pgmTimer, igual que WinCue.App); PVW se
+    // recarga cuando cambia el playhead (SetPlayhead → UpdatePreviewMonitor)
+    // y lleva su propia tira de transporte (_pvwTransportTimer).
+    private readonly LiveMonitorControl _pgm;
+    private readonly LiveMonitorControl _pvw;
+    private DispatcherQueueTimer? _pgmTimer;
+    private DispatcherQueueTimer? _pvwTransportTimer;
+    private bool _pvwSeeking;   // el operador tiene la barra agarrada (no la recoloca el tic)
 
     // ── Timeline del show (hitos-0-1, DE SOLO LECTURA) ──────────────────
     // TimelineCanvas.cs, en Win2D: mismo cálculo compartido que
@@ -172,6 +189,26 @@ public sealed partial class MainWindow : Window, IShowView
 
         PgmVuHost.Children.Add(_pgmVuL);
         PgmVuHost.Children.Add(_pgmVuR);
+
+        // Previos PGM/PVW en vivo — ver LiveMonitorControl.cs para el HwndHijo
+        // que hospeda a mpv y el porqué de no espejar el compositor.
+        _pgm = new LiveMonitorControl(_hwndPropio, PgmInner, PgmHeader, PgmMessage, PgmStatus);
+        _pvw = new LiveMonitorControl(_hwndPropio, PvwInner, PvwHeader, PvwMessage, PvwStatus);
+        PreviewPlayIcon.Text = Icons.Play;
+        PreviewPlayButton.Click += (_, _) =>
+        {
+            if (_pvw.PreviewIsPaused)
+                _pvw.PreviewPlay();
+            else
+                _pvw.PreviewPause();
+            RefreshPvwTransport();
+        };
+        PreviewSeekSlider.AddHandler(UIElement.PointerPressedEvent,
+            new PointerEventHandler((_, _) => _pvwSeeking = true), true);
+        PreviewSeekSlider.AddHandler(UIElement.PointerReleasedEvent,
+            new PointerEventHandler((_, _) => { _pvwSeeking = false; SeekPvwToSlider(); }), true);
+        PreviewSeekSlider.ValueChanged += (_, _) => { if (_pvwSeeking) SeekPvwToSlider(); };
+        RefreshPvwTransport();
 
         TimelineHost.Content = _timeline;
         _timeline.SetModel(_model);
@@ -402,7 +439,91 @@ public sealed partial class MainWindow : Window, IShowView
         _clockTimer.Tick += (_, _) => RefreshShowClock();
         _clockTimer.Start();
 
+        // PGM: se resincroniza por tic — mismo intervalo (500 ms) que
+        // WinCue.App._pgmTimer.
+        _pgmTimer = DispatcherQueue.CreateTimer();
+        _pgmTimer.Interval = TimeSpan.FromMilliseconds(500);
+        _pgmTimer.Tick += (_, _) => UpdateProgramMonitor();
+        _pgmTimer.Start();
+
+        // Tira de transporte del PVW: solo pregunta posición/duración a mpv
+        // mientras hay algo cargado — mismo intervalo (120 ms) y motivo que
+        // WinCue.App.MonitorTransportBar.
+        _pvwTransportTimer = DispatcherQueue.CreateTimer();
+        _pvwTransportTimer.Interval = TimeSpan.FromMilliseconds(120);
+        _pvwTransportTimer.Tick += (_, _) => RefreshPvwTransport();
+        _pvwTransportTimer.Start();
+
         SyncMixer();   // los canales del show cargado, ya visibles al arrancar
+    }
+
+    /// <summary>PGM = lo que SALE. Secuence no tiene compositor GPU todavía
+    /// (ver la cabecera de LiveMonitorControl.cs), así que siempre decodifica
+    /// su propia copia, muda — la misma rama que toma WinCue.App cuando no
+    /// hay superficie que espejar.</summary>
+    private void UpdateProgramMonitor()
+    {
+        var info = _controller?.GetProgramVideo();
+        if (info is null)
+        {
+            if (_pgm.CurrentPath.Length > 0)
+                _pgm.Clear("NEGRO");
+            return;
+        }
+        // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí.
+        _pgm.ShowVideo(info.Value.FilePath, info.Value.Elapsed, loop: false);
+    }
+
+    /// <summary>PVW: el cue en standby reproduciéndose en bucle (mudo).</summary>
+    private void UpdatePreviewMonitor()
+    {
+        var cue = _model.GetCue(_playheadIndex);
+        if (cue is null || cue.FilePath.Length == 0 || cue.Type != CueType.Video)
+        {
+            if (_pvw.CurrentPath.Length > 0 || cue is null)
+                _pvw.Clear("—");
+            return;
+        }
+        if (cue.FilePath != _pvw.CurrentPath)
+            _pvw.ShowVideo(cue.FilePath, cue.TrimStart, loop: true);
+    }
+
+    private void SeekPvwToSlider()
+    {
+        double dur = _pvw.PreviewDuration;
+        if (dur > 0.05)
+            _pvw.PreviewSeek(PreviewSeekSlider.Value / PreviewSeekSlider.Maximum * dur);
+    }
+
+    /// <summary>Pone al día botón, barra y reloj de la tira de transporte del
+    /// PVW — mismo cálculo (WinCue.Presentation.MonitorClockFormat) y mismo
+    /// reparto que WinCue.App.MonitorTransportBar.Refresh.</summary>
+    private void RefreshPvwTransport()
+    {
+        PreviewPlayIcon.Text = _pvw.PreviewIsPaused ? Icons.Play : Icons.Pause;
+
+        double dur = _pvw.PreviewDuration;
+        double pos = _pvw.PreviewPosition;
+        PreviewTimeText.Text = MonitorClockFormat.Format(pos, dur);
+        if (_pvwSeeking || dur <= 0.05)
+            return;
+        double v = Math.Clamp(pos / dur, 0.0, 1.0) * PreviewSeekSlider.Maximum;
+        if (Math.Abs(PreviewSeekSlider.Value - v) <= 1.0)
+            return;
+        _pvwSeeking = true;   // no re-entrar por ValueChanged
+        PreviewSeekSlider.Value = v;
+        _pvwSeeking = false;
+    }
+
+    /// <summary>Libera los dos previos (mpv + HWND hijo) — llamado por
+    /// App.xaml.cs, window.Closed, ANTES de CloseVideoOutput()/video.Dispose():
+    /// menos instancias de mpv vivas a la vez durante el cierre.</summary>
+    public void ShutdownMonitors()
+    {
+        _pgmTimer?.Stop();
+        _pvwTransportTimer?.Stop();
+        _pgm.Dispose();
+        _pvw.Dispose();
     }
 
     /// <summary>Pone al día la mesa con TODO el show — mismo reparto que
@@ -672,6 +793,7 @@ public sealed partial class MainWindow : Window, IShowView
             _rows[i].IsPlayhead = i == index;
         if (index >= 0 && index < _rows.Count)
             CueList.ScrollIntoView(_rows[index]);
+        UpdatePreviewMonitor();
     }
 
     public void RefreshRow(int index)

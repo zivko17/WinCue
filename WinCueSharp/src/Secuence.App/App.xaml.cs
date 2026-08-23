@@ -151,6 +151,7 @@ public partial class App : Application
         {
             tick.Stop();
             controller.Shutdown();
+            window.ShutdownMonitors();   // previos PGM/PVW: su propio mpv + HwndHijo
             audio.Dispose();
             video.Dispose();
             window.CloseVideoOutput();

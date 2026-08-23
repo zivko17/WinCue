@@ -14,6 +14,14 @@
 // donde se solapaban, no el texto que iba por encima en la disposición). No
 // es un fallo: solo desaparece con SwapChainPanel (fase 2b, fuera de esta
 // tarea — "nada de compositor" es una restricción explícita del encargo).
+//
+// DOS CONSUMIDORES (ver el porqué de x/y en Crear/Colocar, más abajo):
+//   · VideoOutputWindow.xaml.cs — el hijo ocupa TODA la ventana de salida
+//     (pantalla completa): nace en (0,0) y solo cambia de TAMAÑO
+//     (Redimensionar), nunca de posición.
+//   · LiveMonitorControl.cs — el hijo es un HUECO dentro de MainWindow (el
+//     previo PGM o PVW, no toda la ventana): nace en el punto donde mide su
+//     hueco y tiene que poder MOVERSE si ese hueco se recoloca (Colocar).
 // =============================================================================
 
 using System.Runtime.InteropServices;
@@ -53,15 +61,17 @@ internal static class HwndHijo
     private static extern bool DestroyWindow(nint hWnd);
 
     /// <summary>Crea la ventana hija (clase "static", igual que el hito 0) y
-    /// devuelve su HWND. Lanza si CreateWindowExW falla — un HWND que no se
-    /// pudo crear no es un caso silencioso: sin él no hay superficie donde
-    /// mpv pueda pintar nada.</summary>
-    internal static nint Crear(nint padre, int ancho, int alto)
+    /// devuelve su HWND. (x, y) por defecto = (0,0) — el caso de
+    /// VideoOutputWindow, que llena toda la ventana de salida; LiveMonitorControl
+    /// pasa el punto donde mide su hueco dentro de MainWindow. Lanza si
+    /// CreateWindowExW falla — un HWND que no se pudo crear no es un caso
+    /// silencioso: sin él no hay superficie donde mpv pueda pintar nada.</summary>
+    internal static nint Crear(nint padre, int ancho, int alto, int x = 0, int y = 0)
     {
         nint h = CreateWindowExW(
             0, "static", null,
             WsChild | WsVisible | WsClipChildren | WsClipSiblings,
-            0, 0, Math.Max(1, ancho), Math.Max(1, alto), padre, 0, 0, 0);
+            x, y, Math.Max(1, ancho), Math.Max(1, alto), padre, 0, 0, 0);
 
         if (h == 0)
             throw new InvalidOperationException(
@@ -71,10 +81,21 @@ internal static class HwndHijo
     }
 
     /// <summary>Sigue el tamaño de la ventana de salida (punto 4 del encargo).
-    /// SWP_NOACTIVATE: un simple cambio de tamaño no debe robarle el foco a
-    /// la ventana de salida ni, de rebote, a la de control.</summary>
+    /// Mantiene la posición en (0,0) — VideoOutputWindow siempre llena toda la
+    /// ventana de salida, nunca se mueve dentro de ella. SWP_NOACTIVATE: un
+    /// simple cambio de tamaño no debe robarle el foco a la ventana de salida
+    /// ni, de rebote, a la de control.</summary>
     internal static void Redimensionar(nint hijo, int ancho, int alto) =>
         SetWindowPos(hijo, 0, 0, 0, Math.Max(1, ancho), Math.Max(1, alto),
+            SwpNoZOrder | SwpNoActivate);
+
+    /// <summary>Mueve Y redimensiona en una sola llamada — lo que necesita
+    /// LiveMonitorControl cuando su hueco (el previo PGM/PVW dentro de
+    /// MainWindow) cambia de sitio o de tamaño, a diferencia de
+    /// VideoOutputWindow (que nunca se mueve, solo cambia de tamaño — ver
+    /// Redimensionar). Mismos flags: SWP_NOACTIVATE por el mismo motivo.</summary>
+    internal static void Colocar(nint hijo, int x, int y, int ancho, int alto) =>
+        SetWindowPos(hijo, 0, x, y, Math.Max(1, ancho), Math.Max(1, alto),
             SwpNoZOrder | SwpNoActivate);
 
     /// <summary>Blackout: ocultar/mostrar el HWND hijo. En modo clásico HWND
