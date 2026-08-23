@@ -25,6 +25,18 @@ public sealed class CueListEditor
     private readonly Action<int> _stopIfRunning;      // parar el cue antes de borrarlo
     private readonly Action<int> _forgetGroupState;   // round-robin del grupo eliminado
 
+    // Modo SHOW (ver MainController.EditingLocked): candado de las CUATRO
+    // operaciones que WinCue.App bloquea con TODAS sus entradas a la vez
+    // (toolbar Y tecla Supr, ver ToolbarSetEnabled/SetEditingEnabled) —
+    // añadir, insertar, borrar e importar. Copiar/pegar/duplicar/agrupar NO
+    // entran aquí a propósito: en WinCue.App esas acciones se bloquean SOLO
+    // desde el menú contextual (el flag "edit"), pero sus atajos de teclado
+    // (Ctrl+V/Ctrl+D/Ctrl+G) siguen vivos en modo SHOW — un candado aquí las
+    // bloquearía TAMBIÉN por teclado y cambiaría el comportamiento de WinCue
+    // sin que nadie lo haya pedido. Null = sin candado (comportamiento de
+    // siempre; los tests existentes no pasan este parámetro).
+    private readonly Func<bool>? _isLocked;
+
     // Portapapeles interno de cues (JSON de una lista de cues)
     private string? _clipboard;
 
@@ -40,7 +52,8 @@ public sealed class CueListEditor
         Action pushUndo,
         Action<int> setPlayhead,
         Action<int> stopIfRunning,
-        Action<int> forgetGroupState)
+        Action<int> forgetGroupState,
+        Func<bool>? isLocked = null)
     {
         _model = model;
         _view = view;
@@ -48,6 +61,20 @@ public sealed class CueListEditor
         _setPlayhead = setPlayhead;
         _stopIfRunning = stopIfRunning;
         _forgetGroupState = forgetGroupState;
+        _isLocked = isLocked;
+    }
+
+    /// <summary>true si la operación se rechazó por el candado de modo SHOW
+    /// (y ya se avisó por FlashStatus). Se llama al principio de las cuatro
+    /// operaciones que bloquea — ver el comentario de _isLocked.</summary>
+    private bool RejectIfLocked()
+    {
+        if (_isLocked?.Invoke() != true)
+            return false;
+        _view.FlashStatus(Loc.T(
+            "Modo SHOW: la lista está bloqueada.",
+            "SHOW mode: the list is locked."));
+        return true;
     }
 
     // ==================================================================
@@ -220,6 +247,8 @@ public sealed class CueListEditor
 
     public void AddNewCue(CueType cueType = CueType.Audio)
     {
+        if (RejectIfLocked())
+            return;
         _pushUndo();
         var cue = new Cue
         {
@@ -237,6 +266,8 @@ public sealed class CueListEditor
     /// <summary>Inserta un cue nuevo del tipo dado justo debajo de la fila row.</summary>
     public void OnInsertCue(CueType cueType, int row)
     {
+        if (RejectIfLocked())
+            return;
         // Un GRUPO nuevo nunca nace dentro de otro: si la fila de referencia
         // está dentro de uno, se crea DETRÁS del bloque entero (raíz).
         if (cueType == CueType.Group && row >= 0)
@@ -262,6 +293,8 @@ public sealed class CueListEditor
     /// <summary>Elimina el cue de la fila dada (deteniéndolo antes si sonaba).</summary>
     public void OnDeleteCue(int row)
     {
+        if (RejectIfLocked())
+            return;
         var cue = _model.GetCue(row);
         if (cue is null)
             return;
@@ -410,6 +443,8 @@ public sealed class CueListEditor
     /// La duración real del archivo se lee con ffprobe al importar.</summary>
     public void AddCuesFromFiles(int targetRow, IReadOnlyList<string> paths)
     {
+        if (RejectIfLocked())
+            return;
         _pushUndo();
         int insertAt = targetRow >= 0 ? targetRow : _model.Count;
         int created = 0;

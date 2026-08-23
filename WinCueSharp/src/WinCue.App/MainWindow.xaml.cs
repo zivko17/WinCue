@@ -1227,6 +1227,11 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Background = Theme.Solid(Theme.GoButton);
         ModeToggle.Foreground = Brushes.White;
         SetEditingEnabled(false);
+        // Deja el candado también en MainController.EditingLocked (compartido
+        // con Secuence): esta ventana ya bloqueaba todo por su cuenta
+        // deshabilitando los botones, así que esto es puramente aditivo — no
+        // cambia nada de lo que WinCue hacía hasta ahora.
+        _controller.SetEditingLocked(true);
         BottomTabs.SelectedIndex = 0;   // en SHOW, abajo SIEMPRE el timeline
         UpdateShowClock();   // el reloj pasa a verde "armado"
     }
@@ -1254,6 +1259,7 @@ public partial class MainWindow : Window, IShowView
         ModeToggle.Background = Theme.GoldBrush;
         ModeToggle.Foreground = Brushes.Black;
         SetEditingEnabled(true);
+        _controller?.SetEditingLocked(false);   // ver el comentario de OnShowMode
         UpdateShowClock();   // el reloj vuelve al ámbar de edición
     }
 

@@ -234,7 +234,8 @@ public class MainController
                 if (_running.ContainsKey(cueId))
                     EndCue(cueId, markStopped: false);
             },
-            forgetGroupState: groupId => _rrState.Remove(groupId));
+            forgetGroupState: groupId => _rrState.Remove(groupId),
+            isLocked: () => EditingLocked);
 
         // Ruteo remoto extraído (paso 3): OSC/MIDI/MTC/wall-clock parsean y
         // despachan hacia estas acciones — nunca mutan _running directamente.
@@ -2366,6 +2367,17 @@ public class MainController
     /// <summary>true si hubo ediciones desde el último Guardar/Cargar
     /// (la vista lo usa para confirmar el cierre).</summary>
     public bool HasUnsavedChanges { get; private set; }
+
+    /// <summary>Modo SHOW (WinCue.App.ModeToggle / Secuence.App.ModeToggle):
+    /// true bloquea añadir/insertar/borrar/importar cues (ver CueListEditor.
+    /// RejectIfLocked). Es la vista quien decide CUÁNDO se activa —este
+    /// controlador solo guarda el estado y lo hace cumplir en el modelo—,
+    /// así que el candado protege la lista incluso si algún día una vista se
+    /// olvida de deshabilitar uno de sus propios botones.</summary>
+    public bool EditingLocked { get; private set; }
+
+    /// <summary>Activa/desactiva el candado de edición del modo SHOW.</summary>
+    public void SetEditingLocked(bool locked) => EditingLocked = locked;
 
     /// <summary>Apunta el estado en la pila de deshacer y marca el show como
     /// modificado. Es el callback que reciben los servicios de edición.</summary>
