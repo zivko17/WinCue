@@ -258,53 +258,36 @@ public sealed class AudioMixerPanel : ContentControl
     public void SyncActive(IReadOnlyList<ActiveCueInfo> rows, Func<int, Cue?> resolveCue,
                            IReadOnlyList<Cue>? allCues = null)
     {
-        var sonando = rows.Where(r => r.Type is CueType.Audio or CueType.Video)
-                          .ToDictionary(r => r.Id);
-
-        // El orden de la mesa es el de la LISTA, no el del disparo: una mesa
-        // cuyos canales cambian de sitio no se puede tocar de memoria.
-        var deseados = new List<ActiveCueInfo>();
-        if (allCues is not null)
-        {
-            foreach (var c in allCues)
-            {
-                if (c.Type is not (CueType.Audio or CueType.Video) || c.FilePath.Length == 0)
-                    continue;
-                deseados.Add(sonando.TryGetValue(c.Id, out var viva)
-                    ? viva
-                    : new ActiveCueInfo(c.Id, c.DisplayNumber, c.Name, c.Type, c.Color,
-                                        0.0, null, null));
-            }
-        }
-        else
-        {
-            deseados.AddRange(sonando.Values);
-        }
+        // Reparto compartido con Secuence (WinCue.Presentation.MixerLayout):
+        // qué strips muestra la mesa y en qué orden — ver la cabecera de ese
+        // archivo. Aquí solo queda reconciliar contra los strips YA PINTADOS.
+        var deseados = MixerLayout.PlanCueStrips(rows, allCues);
+        var porId = deseados.ToDictionary(s => s.Id);
 
         var seen = new HashSet<int>();
-        foreach (var row in deseados)
+        foreach (var spec in deseados)
         {
-            seen.Add(row.Id);
-            if (_cueStrips.TryGetValue(row.Id, out var strip))
+            seen.Add(spec.Id);
+            if (_cueStrips.TryGetValue(spec.Id, out var strip))
             {
                 // MirrorAudio no cambia en la vida del cue SALVO el fallback
                 // del espejo (audio recuperado por mpv): recrear el strip
                 // para que el VU y la nota reflejen la ruta real.
-                if (strip.MirrorAudio == row.MirrorAudio)
+                if (strip.MirrorAudio == spec.MirrorAudio)
                 {
-                    strip.RefreshFromModel(resolveCue(row.Id));
+                    strip.RefreshFromModel(resolveCue(spec.Id));
                     continue;
                 }
                 int at = _cueHost.Children.IndexOf(strip.Root);
                 _cueHost.Children.Remove(strip.Root);
-                _cueStrips.Remove(row.Id);
-                var recreated = MakeStrip(row, resolveCue);
+                _cueStrips.Remove(spec.Id);
+                var recreated = MakeStrip(spec, resolveCue);
                 _cueHost.Children.Insert(at, recreated.Root);
                 continue;
             }
             // MakeStrip lo da de alta en el board, y el alta ya reparte el solo:
             // si hay uno puesto, el strip nuevo nace mudo.
-            _cueHost.Children.Add(MakeStrip(row, resolveCue).Root);
+            _cueHost.Children.Add(MakeStrip(spec, resolveCue).Root);
         }
         foreach (int id in _cueStrips.Keys.ToList())
         {
@@ -320,11 +303,10 @@ public sealed class AudioMixerPanel : ContentControl
         }
 
         // PLEGADO: manda lo que haya dicho el operador; si no ha dicho nada,
-        // abierto el que suena y plegado el resto.
+        // abierto el que suena y plegado el resto (MixerLayout.ShouldCollapse).
         foreach (var (id, strip) in _cueStrips)
-            strip.SetCollapsed(_plegadoAMano.TryGetValue(id, out bool quiere)
-                ? quiere
-                : !sonando.ContainsKey(id));
+            strip.SetCollapsed(MixerLayout.ShouldCollapse(porId[id].IsSounding,
+                _plegadoAMano.TryGetValue(id, out bool quiere) ? quiere : null));
 
         _emptyHint.Visibility = _cueStrips.Count == 0 ? Visibility.Visible : Visibility.Collapsed;
         // Entrar o salir de la lista de activos habilita o deshabilita los
@@ -334,12 +316,12 @@ public sealed class AudioMixerPanel : ContentControl
 
     // ── Interno ────────────────────────────────────────────────────────
 
-    private CueStrip MakeStrip(ActiveCueInfo row, Func<int, Cue?> resolveCue)
+    private CueStrip MakeStrip(MixerStripSpec spec, Func<int, Cue?> resolveCue)
     {
-        var s = new CueStrip(row, resolveCue(row.Id),
+        var s = new CueStrip(spec, resolveCue(spec.Id),
             (id, vol) => CueVolumeCommitted?.Invoke(id, vol),
             id => CueStripActivated?.Invoke(id));
-        s.Key = row.Id;
+        s.Key = spec.Id;
         s.Board = _board;
         s.RepaintAll = RepaintAllStrips;
         s.AuditionSource = () => AuditionSourceId?.Invoke() ?? -1;
@@ -348,7 +330,7 @@ public sealed class AudioMixerPanel : ContentControl
         // El solo solo existe entre cues: aquí sí hay algo contra lo que solear.
         s.EnableSolo();
         // Plegable: el nombre de pie en la tira estrecha.
-        s.EnableCollapse($"{row.Number} · {row.Name}", Theme.Solid(Theme.TextSecondary));
+        s.EnableCollapse($"{spec.Number} · {spec.Name}", Theme.Solid(Theme.TextSecondary));
         s.CollapseToggled = st =>
         {
             // La decisión se RECUERDA: sin esto, la siguiente vuelta de
@@ -358,9 +340,9 @@ public sealed class AudioMixerPanel : ContentControl
             st.SetCollapsed(quiere);
         };
         // El alta reparte el solo sola: si hay uno puesto, este nace mudo.
-        _board.Add(row.Id, (int)Math.Round((resolveCue(row.Id)?.Volume ?? 1.0) * 100.0));
+        _board.Add(spec.Id, (int)Math.Round((resolveCue(spec.Id)?.Volume ?? 1.0) * 100.0));
         s.PaintButtons();
-        _cueStrips[row.Id] = s;
+        _cueStrips[spec.Id] = s;
         return s;
     }
 
@@ -1031,19 +1013,19 @@ public sealed class AudioMixerPanel : ContentControl
         /// vivo (fallback del espejo → audio por mpv), hay que recrearlo.</summary>
         public readonly bool MirrorAudio;
 
-        public CueStrip(ActiveCueInfo info, Cue? cue,
+        public CueStrip(MixerStripSpec spec, Cue? cue,
                         Action<int, double> commit, Action<int> activate)
         {
-            CueId = info.Id;
-            MirrorAudio = info.MirrorAudio;
-            bool isAudio = info.Type == CueType.Audio;
-            bool withVu = isAudio || info.MirrorAudio;
+            CueId = spec.Id;
+            MirrorAudio = spec.MirrorAudio;
+            bool isAudio = spec.Type == CueType.Audio;
+            bool withVu = isAudio || spec.MirrorAudio;
             string glyph = isAudio ? Icons.Audio : Icons.Clapper;
-            Init($"{glyph} {info.Number} · {info.Name}",
+            Init($"{glyph} {spec.Number} · {spec.Name}",
                  isAudio ? Frozen(new SolidColorBrush(Theme.InfoAlt))
                          : Frozen(new SolidColorBrush(Theme.MagentaAlt)),
                  withVu: withVu);
-            Root.ToolTip = $"{info.Number} · {info.Name}\n" + Loc.T(
+            Root.ToolTip = $"{spec.Number} · {spec.Name}\n" + Loc.T(
                 $"Clic en el título: editar en Inspector → {Icons.Volume} Audio",
                 $"Click the title: edit in Inspector → {Icons.Volume} Audio");
             TitleText.Cursor = System.Windows.Input.Cursors.Hand;

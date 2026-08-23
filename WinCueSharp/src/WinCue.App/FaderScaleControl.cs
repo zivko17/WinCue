@@ -9,12 +9,19 @@
 // Las marcas se colocan con la MISMA ley que mueve el fader (AudioLevels), así
 // que el rótulo «0» cae exactamente donde el fader da 0 dB. Si se cambia la ley,
 // la escala se entera sola — no hay una segunda tabla que mantener a mano.
+//
+// GEOMETRÍA COMPARTIDA (hitos-0-1, mixer): la conversión posición→píxel que
+// aquí abajo hacía OnRender a mano —contando el medio pomo del slider que
+// sobra arriba y abajo del recorrido— vive ahora en
+// WinCue.Presentation.FaderScaleLayout, con pruebas, para que Secuence pinte
+// la MISMA escala en Win2D sin una segunda tabla de números que mantener a la par.
 // =============================================================================
 
 using System.Globalization;
 using System.Windows;
 using System.Windows.Media;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
@@ -25,9 +32,6 @@ namespace WinCue.App;
 /// descontar o la escala queda corrida respecto al fader.</summary>
 public sealed class FaderScaleControl : FrameworkElement
 {
-    /// <summary>Alto del pomo del fader vertical (App.xaml, FaderThumb).</summary>
-    private const double ThumbH = 13.0;
-
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
     private static Pen FrozenPen(Pen p) { p.Freeze(); return p; }
 
@@ -41,13 +45,11 @@ public sealed class FaderScaleControl : FrameworkElement
         double w = ActualWidth, h = ActualHeight;
         if (w <= 0 || h <= 0)
             return;
-        double top = ThumbH / 2.0, travel = h - ThumbH;
-        if (travel <= 0)
-            return;
 
         foreach (double db in AudioLevels.ScaleTicks)
         {
-            double y = top + (1.0 - AudioLevels.DbToPosition(db)) * travel;
+            if (FaderScaleLayout.TickY(db, h) is not double y)
+                continue;
             // La unidad se marca más clara: es la referencia que se busca.
             bool unity = Math.Abs(db) < 0.001;
             dc.DrawLine(unity ? UnityPen : TickPen, new Point(w - 5, y), new Point(w, y));
