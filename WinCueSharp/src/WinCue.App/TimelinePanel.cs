@@ -15,6 +15,13 @@
 // se desplaza en vivo); arrastrar más allá del vecino = reordenar la lista;
 // clic = seleccionar en la tabla (y viceversa); Ctrl+rueda = zoom. Cursor
 // rojo y progreso verde con los ActiveCueInfo reales del controlador.
+//
+// Segunda pasada del traslado a WinCue.Presentation: el CÁLCULO de la
+// interacción también es compartido — TimelineViewport (zoom/scroll),
+// TimelineHitTest (qué hay bajo el punto), TimelineDragGesture (el arrastre
+// con su umbral, snap y topes) y TimelineEditing.CommitDrag (qué se escribe
+// al soltar). Aquí quedan el ratón/teclado de WPF, el pintado, el cursor de
+// edición con su scrub y el menú contextual.
 // =============================================================================
 
 using System.Globalization;
@@ -251,7 +258,6 @@ public sealed class TimelineCanvas : FrameworkElement
     // los ~40 sitios que ya los usaban por su nombre corto.
     private const double RulerH = TimelineLayout.RulerH;
     private const int MaxLayers = TimelineLayout.MaxLayers;
-    private const double SnapSeconds = 0.1;
 
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.TimelineBg));
     private static readonly Brush LayerABrush = Frozen(new SolidColorBrush(Theme.TimelineLayerA));
@@ -318,18 +324,12 @@ public sealed class TimelineCanvas : FrameworkElement
     private double? _editCursor;
     private bool _dragCursor;
 
-    private double _pxPerSec = 20;
-
-    /// <summary>Zoom MÍNIMO, en píxeles por segundo.
-    ///
-    /// Estaba en 1, y eso ponía un techo duro a lo que se podía ver de una vez:
-    /// con 1 px/s, en una pantalla de 1400 px no caben más de ~23 minutos, así
-    /// que en un show con vídeos largos «Fit» dejaba clips fuera y no había
-    /// forma de alejarse más. No era un fallo de ajuste sino un imposible
-    /// aritmético. Con 0,02 px/s entran veinte horas.</summary>
-    private const double MinPxPerSec = TimelineLayout.MinPxPerSec;
-    private const double MaxPxPerSec = TimelineLayout.MaxPxPerSec;
-    private double _scrollX;
+    // Zoom y scroll: estado y operaciones compartidos con Secuence
+    // (TimelineViewport, WinCue.Presentation) — zoom anclado al puntero,
+    // fit, topes del scroll y auto-desplazamiento al seleccionar.
+    private readonly TimelineViewport _vp = new();
+    private double _pxPerSec => _vp.PxPerSec;
+    private double _scrollX => _vp.ScrollX;
     private bool _fitDone;
 
     // Proyección calculada de la lista: Block/Span son ahora alias de
@@ -383,25 +383,10 @@ public sealed class TimelineCanvas : FrameworkElement
 
     private void OnFrameRendering(object? sender, EventArgs e) => InvalidateVisual();
 
-    // Arrastre (mover bloque/grupo, o redimensionar por los bordes). DragMode
-    // es alias de WinCue.Presentation.TimelineDragMode (ver los "using" al
-    // principio del archivo): mismo tipo que consume TimelineLayout.Project()
-    // al construir el TimelineDragOverride en RebuildLayout.
-    private Cue? _dragCue;
-    private DragMode _dragMode;
-    private bool _dragIsGroup;
-    private bool _dragMoved;
-    private Point _dragStart;
-    private double _dragOrigPreWait;
-    private int _dragOrigLayer;       // timeline_layer original (-1 = auto)
-    private bool _dragLayerTouched;   // el usuario movió el bloque en vertical
-    private Dictionary<int, double>? _dragAnchors;   // inicio pre-arrastre por cue
-    private double _dragPreWait;
-    private int _dragLayer;
-    // Redimensionado: borde izq = pre_wait+trim_start (deslizar punto de
-    // entrada), borde dcho = trim_end (media) o duration (wait/fade)
-    private double _dragOrigTrimStart, _dragOrigTrimEnd, _dragOrigDuration, _dragOrigEff;
-    private double _dragTrimStart, _dragTrimEnd, _dragDuration;
+    // Arrastre (mover bloque/grupo, o redimensionar por los bordes): el
+    // estado del gesto — umbral, snap, topes — es cálculo compartido
+    // (TimelineDragGesture, WinCue.Presentation). null = sin gesto en curso.
+    private TimelineDragGesture? _drag;
 
     // Mini-onda de los bloques de audio (picos por archivo, calculados aparte)
     private readonly Dictionary<string, (float[] Mins, float[] Maxs, double Dur)> _peaks = new();
@@ -474,21 +459,7 @@ public sealed class TimelineCanvas : FrameworkElement
         if (_model is null)
             return;
 
-        TimelineDragOverride? drag = _dragCue is null
-            ? null
-            : new TimelineDragOverride
-            {
-                CueId = _dragCue.Id,
-                IsGroup = _dragIsGroup,
-                Mode = _dragMode,
-                PreWait = _dragPreWait,
-                Layer = _dragLayer,
-                TrimStart = _dragTrimStart,
-                TrimEnd = _dragTrimEnd,
-                Duration = _dragDuration,
-            };
-
-        var proj = TimelineLayout.Project(_model, drag);
+        var proj = TimelineLayout.Project(_model, _drag?.ToOverride());
         _blocks.AddRange(proj.Blocks);
         _spans.AddRange(proj.Spans);
         _goMarks.AddRange(proj.GoMarks);
@@ -501,8 +472,8 @@ public sealed class TimelineCanvas : FrameworkElement
     /// pasada: la mini-onda no entra en el cálculo compartido — ver el
     /// encargo, hitos-0-1 — así que sigue resuelta aquí, tal cual antes.</summary>
     private double CurrentTrimStart(Cue cue) =>
-        _dragCue is not null && _dragCue.Id == cue.Id && _dragMode == DragMode.ResizeL
-            ? _dragTrimStart
+        _drag is { Mode: DragMode.ResizeL } d && d.Cue.Id == cue.Id
+            ? d.TrimStart
             : cue.TrimStart;
 
     private int VisibleLayers() => TimelineLayout.VisibleLayers(_blocks);
@@ -520,40 +491,27 @@ public sealed class TimelineCanvas : FrameworkElement
 
     private void ZoomAt(double factor, double anchorX)
     {
-        double sec = XToSec(anchorX);
-        _pxPerSec = Math.Clamp(_pxPerSec * factor, MinPxPerSec, MaxPxPerSec);
-        _scrollX = Math.Max(0, sec * _pxPerSec - anchorX);
+        _vp.ZoomAt(factor, anchorX);
         InvalidateVisual();
     }
 
     public void ZoomToFit()
     {
-        double total = Math.Max(10, TotalSeconds() + 2);
-        double w = Math.Max(200, ActualWidth > 0 ? ActualWidth : 900);
-        _pxPerSec = Math.Clamp((w - 20) / total, MinPxPerSec, MaxPxPerSec);
-        _scrollX = 0;
+        _vp.ZoomToFit(TotalSeconds(), ActualWidth);
         InvalidateVisual();
     }
 
     private void EnsureVisible(int cueId)
     {
-        if (ActualWidth <= 0 || !_startById.TryGetValue(cueId, out double start))
-            return;
-        double x = SecToX(start);
-        if (x < 0 || x > ActualWidth * 0.95)
-            _scrollX = Math.Max(0, start * _pxPerSec - ActualWidth * 0.3);
+        if (_startById.TryGetValue(cueId, out double start))
+            _vp.EnsureVisible(start, ActualWidth);
     }
 
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
-        if (Keyboard.Modifiers == ModifierKeys.Control)
-            ZoomAt(e.Delta > 0 ? 1.25 : 1 / 1.25, e.GetPosition(this).X);
-        else
-        {
-            double maxScroll = Math.Max(0, (TotalSeconds() + 10) * _pxPerSec - ActualWidth);
-            _scrollX = Math.Clamp(_scrollX - e.Delta * 0.6, 0, maxScroll);
-            InvalidateVisual();
-        }
+        _vp.Wheel(e.Delta, Keyboard.Modifiers == ModifierKeys.Control,
+            e.GetPosition(this).X, TotalSeconds(), ActualWidth);
+        InvalidateVisual();
         e.Handled = true;
     }
 
@@ -571,9 +529,7 @@ public sealed class TimelineCanvas : FrameworkElement
         if (!_fitDone && w > 0 && _blocks.Count > 0)
         {
             _fitDone = true;
-            double total = Math.Max(10, TotalSeconds() + 2);
-            _pxPerSec = Math.Clamp((w - 20) / total, MinPxPerSec, MaxPxPerSec);
-            _scrollX = 0;
+            _vp.Fit(TotalSeconds(), w);
         }
 
         int layers = VisibleLayers();
@@ -629,11 +585,11 @@ public sealed class TimelineCanvas : FrameworkElement
         }
 
         // Bloques (el arrastrado, encima)
-        foreach (var b in _blocks.Where(b => _dragCue is null || b.Cue.Id != _dragCue.Id))
+        foreach (var b in _blocks.Where(b => _drag is null || b.Cue.Id != _drag.Cue.Id))
             DrawBlock(dc, b, lh);
-        var dragBlock = _dragCue is null
+        var dragBlock = _drag is null
             ? null
-            : _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _dragCue.Id);
+            : _blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _drag.Cue.Id);
         if (dragBlock is not null)
             DrawBlock(dc, dragBlock, lh);
 
@@ -709,12 +665,14 @@ public sealed class TimelineCanvas : FrameworkElement
 
         var lbl = Label(TimelineLayout.SpanLabelText(span),
             Frozen(new SolidColorBrush(Colors.White)), 10);
-        double cw = Math.Min(lbl.WidthIncludingTrailingWhitespace + 12,
-            Math.Max(30, box.Width));
-        lbl.MaxTextWidth = Math.Max(1, cw - 10);
+        // Caja del asa: cálculo compartido (solo el ancho del texto lo mide
+        // WPF — el framework de quien pinta, ver TimelineHitTest.SpanChipRect)
+        var chipRect = TimelineHitTest.SpanChipRect(span, _pxPerSec, _scrollX,
+            lh, lbl.WidthIncludingTrailingWhitespace);
+        lbl.MaxTextWidth = Math.Max(1, chipRect.Width - 10);
         lbl.MaxLineCount = 1;
         lbl.Trimming = TextTrimming.CharacterEllipsis;
-        var chip = new Rect(box.X, box.Y, cw, 16);
+        var chip = new Rect(chipRect.X, chipRect.Y, chipRect.Width, chipRect.Height);
         return (lbl, chip, box, color);
     }
 
@@ -745,20 +703,11 @@ public sealed class TimelineCanvas : FrameworkElement
     }
 
     /// <summary>Asa de grupo bajo el punto (la del grupo más interno).</summary>
-    private Span? HitSpanChip(Point p)
-    {
-        double lh = LayerH;
-        Span? best = null;
-        foreach (var s in _spans)
-        {
-            var (_, chip, _, _) = SpanGeometry(s, lh);
-            if (!chip.Contains(p))
-                continue;
-            if (best is null || s.End - s.Start < best.End - best.Start)
-                best = s;
-        }
-        return best;
-    }
+    private Span? HitSpanChip(Point p) =>
+        TimelineHitTest.SpanChip(_spans, p.X, p.Y, _pxPerSec, _scrollX, LayerH,
+            span => Label(TimelineLayout.SpanLabelText(span),
+                Frozen(new SolidColorBrush(Colors.White)), 10)
+                .WidthIncludingTrailingWhitespace);
 
     private void DrawBlock(DrawingContext dc, Block b, double lh)
     {
@@ -927,45 +876,15 @@ public sealed class TimelineCanvas : FrameworkElement
     // Interacción: seleccionar, arrastrar (tiempo/pista) y reordenar
     // ------------------------------------------------------------------
 
-    private Block? HitBlock(Point p)
-    {
-        if (p.Y < RulerH)
-            return null;
-        double lh = LayerH;
-        int layer = (int)((p.Y - RulerH) / lh);
-        double sec = XToSec(p.X);
-        for (int i = _blocks.Count - 1; i >= 0; i--)
-        {
-            var b = _blocks[i];
-            if (b.Layer != layer || b.Ghost)   // los fantasmas no se editan
-                continue;
-            double wSec = Math.Max(b.Dur, 12 / _pxPerSec);
-            if (sec >= b.Start && sec <= b.Start + wSec)
-                return b;
-        }
-        return null;
-    }
+    // Hit-test: cálculo compartido (TimelineHitTest, WinCue.Presentation) —
+    // el pintado encima gana, los fantasmas no se editan, el asa del grupo
+    // más interno primero. Aquí solo se traduce el Point de WPF.
+    private Block? HitBlock(Point p) =>
+        TimelineHitTest.Block(_blocks, p.X, p.Y, _pxPerSec, _scrollX, LayerH);
 
     /// <summary>Recuadro de grupo bajo el punto (el más interno si hay anidados).</summary>
-    private Span? HitSpan(Point p)
-    {
-        if (p.Y < RulerH)
-            return null;
-        double lh = LayerH;
-        double sec = XToSec(p.X);
-        int layer = (int)((p.Y - RulerH) / lh);
-        Span? best = null;
-        foreach (var s in _spans)
-        {
-            if (sec < s.Start - 3 / _pxPerSec || sec > s.End + 3 / _pxPerSec)
-                continue;
-            if (layer < s.MinLayer || layer > s.MaxLayer)
-                continue;
-            if (best is null || s.End - s.Start < best.End - best.Start)
-                best = s;
-        }
-        return best;
-    }
+    private Span? HitSpan(Point p) =>
+        TimelineHitTest.Span(_spans, p.X, p.Y, _pxPerSec, _scrollX, LayerH);
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
     {
@@ -1038,55 +957,19 @@ public sealed class TimelineCanvas : FrameworkElement
             return;
         }
 
-        _dragCue = cue;
-        _dragIsGroup = isGroup;
-        _dragMoved = false;
-        _dragStart = p;
-        _dragOrigPreWait = cue.PreWait;
-        _dragOrigLayer = Math.Clamp(cue.TimelineLayer, -1, MaxLayers - 1);
-        _dragPreWait = _dragOrigPreWait;
-        // La vista previa retiene el bloque en la fila donde SE VE ahora:
-        // sin gesto vertical del usuario no salta de pista (ni en el
-        // arrastre ni al soltar), aunque su capa sea "auto"
-        _dragLayer = hitBlock?.Layer ?? _dragOrigLayer;
-        _dragLayerTouched = false;
-        // Anclas: dónde empieza cada bloque ANTES del arrastre — al soltar,
-        // los no arrastrados se recolocan para quedarse donde estaban
-        _dragAnchors = new Dictionary<int, double>(_startById);
-
-        // ¿Agarró un borde? → redimensionar en vez de mover
-        _dragMode = EdgeModeAt(hitBlock, p.X);
-        _dragOrigTrimStart = cue.TrimStart;
-        _dragOrigTrimEnd = cue.TrimEnd > 0 ? cue.TrimEnd : cue.Duration;
-        _dragOrigDuration = cue.Duration;
-        _dragOrigEff = hitBlock?.Dur ?? 0;
-        _dragTrimStart = _dragOrigTrimStart;
-        _dragTrimEnd = _dragOrigTrimEnd;
-        _dragDuration = _dragOrigDuration;
+        // El gesto (umbral, snap, topes, anclas) es cálculo compartido:
+        // ¿agarró un borde? → redimensionar en vez de mover
+        _drag = new TimelineDragGesture(cue, isGroup,
+            EdgeModeAt(hitBlock, p.X), hitBlock, p.X, p.Y, _startById);
 
         CaptureMouse();
         InvalidateVisual();
     }
 
-    /// <summary>Modo de arrastre según el punto: bordes (±5 px) = trim/duración.
-    /// Izquierdo solo para media (desliza el punto de entrada); derecho para
-    /// media (trim de salida) y WAIT/FADE (duración).</summary>
-    private DragMode EdgeModeAt(Block? b, double px)
-    {
-        if (b is null || b.Dur <= 0)
-            return DragMode.Move;
-        double x = SecToX(b.Start);
-        double bw = Math.Max(4, b.Dur * _pxPerSec);
-        if (bw < 18)
-            return DragMode.Move;
-        bool media = b.Cue.IsMedia();
-        bool durable = b.Cue.Type is CueType.Wait or CueType.Fade;
-        if (media && Math.Abs(px - x) <= 5)
-            return DragMode.ResizeL;
-        if ((media || durable) && Math.Abs(px - (x + bw)) <= 5)
-            return DragMode.ResizeR;
-        return DragMode.Move;
-    }
+    /// <summary>Modo de arrastre según el punto: bordes (±5 px) = trim/duración
+    /// — cálculo compartido (TimelineHitTest.EdgeMode).</summary>
+    private DragMode EdgeModeAt(Block? b, double px) =>
+        TimelineHitTest.EdgeMode(b, px, _pxPerSec, _scrollX);
 
     protected override void OnMouseMove(MouseEventArgs e)
     {
@@ -1096,7 +979,7 @@ public sealed class TimelineCanvas : FrameworkElement
             UpdateEditCursor(p.X);
             return;
         }
-        if (_dragCue is null)
+        if (_drag is null)
         {
             var over = HitSpanChip(p) is null ? HitBlock(p) : null;
             if (over is not null && EdgeModeAt(over, p.X) != DragMode.Move)
@@ -1108,53 +991,11 @@ public sealed class TimelineCanvas : FrameworkElement
             UpdateFadeTip(over);
             return;
         }
-        if (!_dragMoved &&
-            Math.Abs(p.X - _dragStart.X) < 4 && Math.Abs(p.Y - _dragStart.Y) < 4)
+
+        // El gesto aplica el umbral, el snap y los topes (cálculo compartido)
+        _drag.Update(p.X, p.Y, _pxPerSec, LayerH);
+        if (!_drag.Moved)
             return;
-        _dragMoved = true;
-
-        double dSec = Math.Round(
-            (p.X - _dragStart.X) / _pxPerSec / SnapSeconds) * SnapSeconds;
-
-        switch (_dragMode)
-        {
-            case DragMode.Move:
-                // Se permite "negativo" en la vista previa: arrastrar sobre el
-                // cue anterior = solapar (al soltar se encadena en paralelo)
-                _dragPreWait = _dragOrigPreWait + dSec;
-                // Vertical: fijar la pista (los grupos solo se mueven en tiempo)
-                if (!_dragIsGroup && Math.Abs(p.Y - _dragStart.Y) > LayerH * 0.5)
-                {
-                    _dragLayer = Math.Clamp(
-                        (int)((p.Y - RulerH) / LayerH), 0, MaxLayers - 1);
-                    _dragLayerTouched = true;   // gesto vertical del usuario
-                }
-                break;
-
-            case DragMode.ResizeL:
-                // Deslizar el punto de entrada: el borde derecho no se mueve
-                double dl = Math.Max(dSec,
-                    Math.Max(-_dragOrigTrimStart, -_dragOrigPreWait));
-                dl = Math.Min(dl, _dragOrigEff - 0.1);
-                _dragPreWait = _dragOrigPreWait + dl;
-                _dragTrimStart = _dragOrigTrimStart + dl;
-                break;
-
-            case DragMode.ResizeR:
-                if (_dragCue.IsMedia())
-                {
-                    double ne = _dragOrigTrimEnd + dSec;
-                    ne = Math.Max(ne, _dragTrimStart + 0.1);
-                    if (_dragOrigDuration > 0)
-                        ne = Math.Min(ne, _dragOrigDuration);
-                    _dragTrimEnd = ne;
-                }
-                else
-                {
-                    _dragDuration = Math.Max(0.1, _dragOrigDuration + dSec);
-                }
-                break;
-        }
 
         // Reproyección en vivo: el resto del show se desplaza con el arrastre
         RebuildLayout();
@@ -1181,106 +1022,22 @@ public sealed class TimelineCanvas : FrameworkElement
             ReleaseMouseCapture();
             return;
         }
-        if (_dragCue is null)
+        if (_drag is null)
             return;
-        var cue = _dragCue;
-        var mode = _dragMode;
-        bool isGroup = _dragIsGroup;
-        bool moved = _dragMoved;
-        bool layerTouched = _dragLayerTouched;
-        double preWait = _dragPreWait;
-        int layer = _dragLayer;
-        double trimStart = _dragTrimStart, trimEnd = _dragTrimEnd;
-        double duration = _dragDuration;
-        _dragCue = null;
+        var g = _drag;
+        _drag = null;
         ReleaseMouseCapture();
 
-        // Proyección LIMPIA (sin el arrastre): base para detectar cruces
-        RebuildLayout();
-
-        if (moved)
-        {
-            bool reordered = false;
-            switch (mode)
-            {
-                case DragMode.Move:
-                    reordered = TryReorder(cue, preWait - _dragOrigPreWait);
-                    if (!reordered)
-                    {
-                        bool linked = false;
-                        double committed = preWait < -1e-9
-                            ? LinkOverlapWithPrev(cue, preWait, out linked)
-                            : preWait;
-                        if (Math.Abs(committed - _dragOrigPreWait) > 1e-9)
-                            CommitField?.Invoke(cue.Id, "pre_wait",
-                                Math.Max(0, committed));
-                        // Pista: SIEMPRE manda el gesto vertical del usuario.
-                        // Sin gesto, un solape recién creado congela el bloque
-                        // en la fila donde se veía (la fila "auto" bailaría).
-                        if (!isGroup)
-                        {
-                            if (layerTouched && layer != cue.TimelineLayer)
-                                CommitField?.Invoke(cue.Id, "timeline_layer", layer);
-                            else if (linked && cue.TimelineLayer < 0 && layer >= 0)
-                                CommitField?.Invoke(cue.Id, "timeline_layer", layer);
-                        }
-                    }
-                    break;
-                case DragMode.ResizeL:
-                    if (Math.Abs(preWait - _dragOrigPreWait) > 1e-9)
-                        CommitField?.Invoke(cue.Id, "pre_wait", preWait);
-                    if (Math.Abs(trimStart - _dragOrigTrimStart) > 1e-9)
-                        CommitField?.Invoke(cue.Id, "trim_start", trimStart);
-                    break;
-                case DragMode.ResizeR:
-                    if (cue.IsMedia())
-                        CommitField?.Invoke(cue.Id, "trim_end", trimEnd);
-                    else
-                        CommitField?.Invoke(cue.Id, "duration", duration);
-                    break;
-            }
-
-            // Los DEMÁS bloques se quedan donde estaban: mover/redimensionar
-            // uno no arrastra al resto del show (sus pre_wait se compensan)
-            if (!reordered)
-                AnchorOthers(cue);
-
-            // Fades gestionados POR CAPA: solape en la misma capa = crossfade
-            // (audio); separar = quitarlo. Entre capas, nada automático.
-            if (!isGroup)
-                ReconcileSameLayerFades();
-        }
-        _dragAnchors = null;
+        // Qué escribe el soltar (reordenar, encadenar en paralelo, anclar a
+        // los demás, reconciliar crossfades) es política compartida:
+        // TimelineEditing.CommitDrag, WinCue.Presentation. Sin gesto real
+        // (un clic), no escribe nada.
+        if (_model is not null)
+            TimelineEditing.CommitDrag(_model, g,
+                (id, field, value) => CommitField?.Invoke(id, field, value),
+                (from, to) => MoveCueRequested?.Invoke(from, to),
+                AutoCrossfade);
         RefreshFromModel();
-    }
-
-    /// <summary>Tras un arrastre, recoloca los bloques NO arrastrados en el
-    /// tiempo donde estaban antes (ancla): el modelo de datos es relativo
-    /// (cadenas de pre_wait), pero el timeline se edita en absoluto — mover
-    /// un bloque no debe desplazar a los demás. Si un pre_wait tendría que
-    /// ser negativo (el bloque anterior creció por encima), se queda en 0:
-    /// ese desplazamiento es físicamente inevitable.</summary>
-    private void AnchorOthers(Cue dragged)
-    {
-        if (_model is null || _dragAnchors is null)
-            return;
-        RebuildLayout();
-        foreach (var c in _model.Cues)   // orden de lista: aguas arriba primero
-        {
-            if (c.Id == dragged.Id
-                || !_dragAnchors.TryGetValue(c.Id, out double want)
-                || _model.IsDescendant(c, dragged.Id)
-                || !_startById.TryGetValue(c.Id, out double now))
-                continue;
-            double delta = want - now;
-            if (Math.Abs(delta) < 0.02)
-                continue;
-            double npw = Math.Max(0.0, c.PreWait + delta);
-            if (Math.Abs(npw - c.PreWait) < 1e-9)
-                continue;
-            CommitField?.Invoke(c.Id, "pre_wait", Math.Round(npw, 3));
-            RebuildLayout();   // el ajuste restaura también a sus dependientes
-        }
     }
 
     /// <summary>Mueve el cursor de edición y hace SCRUB: busca el vídeo de la
@@ -1352,43 +1109,6 @@ public sealed class TimelineCanvas : FrameworkElement
         PlayFromRequested?.Invoke(items);
     }
 
-    /// <summary>Reconciliación de fades POR CAPA tras un arrastre (🔀 ON):
-    /// entre cada par de medias CONSECUTIVAS DE LA MISMA CAPA, el solape se
-    /// convierte en crossfade (audio mezcla; vídeo funde por opacidad — el
-    /// compositor da a cada cue su superficie y el motor mantiene vivo al
-    /// saliente durante el fundido) y al separarse el crossfade se retira.
-    /// Las CAPAS DISTINTAS son independientes: nunca se escriben fades entre
-    /// ellas — para fundir entre capas está el menú contextual "Crossfade
-    /// con…". Los fades de bloques sin vecino en su capa (primero/último/
-    /// aislados) NO se tocan (manuales del usuario).</summary>
-    private void ReconcileSameLayerFades()
-    {
-        if (!AutoCrossfade || _model is null)
-            return;
-        RebuildLayout();   // proyección con los commits del arrastre aplicados
-
-        foreach (var layerGroup in _blocks
-                     .Where(b => b.Cue.IsMedia() && b.Dur > 0 && !b.Ghost)
-                     .GroupBy(b => b.Layer))
-        {
-            var ordered = layerGroup.OrderBy(b => b.Start).ToList();
-            for (int i = 0; i + 1 < ordered.Count; i++)
-            {
-                var a = ordered[i];
-                var b = ordered[i + 1];
-                double overlap = a.Start + a.Dur - b.Start;
-                double xf = overlap > 0.05
-                    ? Math.Round(Math.Min(overlap,
-                        Math.Min(a.Dur, Math.Max(0.1, b.Dur))), 1)
-                    : 0.0;
-                if (Math.Abs(a.Cue.FadeOut - xf) > 0.01)
-                    CommitField?.Invoke(a.Cue.Id, "fade_out", xf);
-                if (Math.Abs(b.Cue.FadeIn - xf) > 0.01)
-                    CommitField?.Invoke(b.Cue.Id, "fade_in", xf);
-            }
-        }
-    }
-
     /// <summary>Crossfade EXPLÍCITO entre capas (menú contextual): el que
     /// empieza antes funde su salida y el que entra funde su entrada, ambos
     /// con la duración del solape. Es el "link" entre capas que el
@@ -1399,96 +1119,6 @@ public sealed class TimelineCanvas : FrameworkElement
         CommitField?.Invoke(first.Id, "fade_out", xf);
         CommitField?.Invoke(second.Id, "fade_in", xf);
         RefreshFromModel();
-    }
-
-    /// <summary>El bloque se soltó ANTES de su punto de disparo (montado sobre
-    /// el cue anterior): encadenarlos en PARALELO — el anterior pasa a
-    /// AUTO_CONTINUE y este cue recibe el pre_wait que lo deja exactamente
-    /// donde se soltó. Es lo que hace que "las capas se junten" en el timeline.
-    /// Dentro de un grupo TIMELINE los hijos ya son paralelos: ahí solo se
-    /// recorta el offset a 0 (encadenar duplicaría disparos).</summary>
-    private double LinkOverlapWithPrev(Cue cue, double draggedPre, out bool linked)
-    {
-        linked = false;
-        if (_model is null)
-            return 0;
-
-        // Hijo de grupo TIMELINE: el paralelismo ya existe vía pre_wait
-        if (cue.ParentId is int pid &&
-            _model.GetById(pid) is { Type: CueType.Group, GroupMode: GroupMode.Timeline })
-            return Math.Max(0, draggedPre);
-
-        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
-        int pos = siblings.FindIndex(c => c.Id == cue.Id);
-        if (pos <= 0
-            || !_startById.TryGetValue(cue.Id, out double cleanStart)
-            || !_startById.TryGetValue(siblings[pos - 1].Id, out double prevStart))
-            return 0;
-
-        var prev = siblings[pos - 1];
-        double desired = cleanStart + (draggedPre - _dragOrigPreWait);
-        double newTrigger = prevStart + prev.PostWait;   // disparo con AUTO_CONTINUE
-
-        if (prev.ContinueMode != ContinueMode.AutoContinue)
-            CommitField?.Invoke(prev.Id, "continue_mode", "AUTO_CONTINUE");
-        linked = true;
-
-        // La fila del bloque NUNCA se recoloca sola: la del arrastrado la
-        // decide el gesto del usuario (se fija fuera) y la del anterior solo
-        // se CONGELA donde se ve si estaba en "auto" (para que el apilado no
-        // la baile después). Misma pista = sustitución a corte, por diseño.
-        if (cue.IsMedia() && prev.IsMedia() && prev.TimelineLayer < 0)
-        {
-            int prevShown = _blocks.FirstOrDefault(
-                b => !b.Ghost && b.Cue.Id == prev.Id)?.Layer ?? 2;
-            CommitField?.Invoke(prev.Id, "timeline_layer", prevShown);
-        }
-
-        return Math.Max(0, desired - newTrigger);
-    }
-
-    /// <summary>Si el bloque (o grupo) se soltó más allá de su hermano
-    /// anterior/siguiente, reordena la lista y devuelve true. Es el "viceversa"
-    /// de la correlación lista↔timeline. Compara contra la proyección SIN el
-    /// arrastre: en una cadena secuencial los vecinos posteriores se desplazan
-    /// junto al bloque y nunca se cruzarían.</summary>
-    private bool TryReorder(Cue cue, double delta)
-    {
-        if (_model is null || Math.Abs(delta) < 0.05)
-            return false;
-
-        var siblings = _model.Cues.Where(c => c.ParentId == cue.ParentId).ToList();
-        int pos = siblings.FindIndex(c => c.Id == cue.Id);
-        if (pos < 0 || !_startById.TryGetValue(cue.Id, out double myStart))
-            return false;
-        double droppedStart = Math.Max(0, myStart + delta);
-
-        if (delta < 0 && pos > 0)
-        {
-            var prev = siblings[pos - 1];
-            if (_startById.TryGetValue(prev.Id, out double prevStart)
-                && droppedStart < prevStart)
-            {
-                MoveCueRequested?.Invoke(
-                    _model.IndexOfId(cue.Id), _model.IndexOfId(prev.Id));
-                return true;
-            }
-        }
-        else if (delta > 0 && pos < siblings.Count - 1)
-        {
-            var next = siblings[pos + 1];
-            if (_startById.TryGetValue(next.Id, out double nextStart)
-                && droppedStart > nextStart)
-            {
-                // Aterrizar DESPUÉS del bloque completo del vecino (grupos incl.)
-                int nextRow = _model.IndexOfId(next.Id);
-                int toRow = Math.Min(_model.Count - 1,
-                    _model.GroupExtent(nextRow) - 1);
-                MoveCueRequested?.Invoke(_model.IndexOfId(cue.Id), toRow);
-                return true;
-            }
-        }
-        return false;
     }
 
     // ------------------------------------------------------------------

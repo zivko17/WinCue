@@ -1,13 +1,14 @@
 // =============================================================================
 // TimelineLayout.cs — el CÁLCULO del timeline del show, sin framework.
 // =============================================================================
-// Primera pasada del traslado a Win2D (ver el encargo, hitos-0-1): SOLO el
-// timeline de SOLO LECTURA. Entra la proyección de la lista de cues en tiempo
-// (mapeo tiempo↔píxel, marcas de la regla según la escala, rectángulos de los
-// bloques, asignación a pistas, posición del playhead, detección de
-// solapamiento vía FadeSanity). NO entra en esta pasada: arrastrar bloques,
-// zoom con Ctrl+rueda, selección de ratón ni menú contextual — todo eso sigue
-// viviendo, sin tocar, en src/WinCue.App/TimelinePanel.cs.
+// Primera pasada del traslado a Win2D (ver el encargo, hitos-0-1): la
+// proyección de la lista de cues en tiempo (mapeo tiempo↔píxel, marcas de la
+// regla según la escala, rectángulos de los bloques, asignación a pistas,
+// posición del playhead, detección de solapamiento vía FadeSanity). La
+// SEGUNDA pasada trasladó también la interacción: TimelineViewport
+// (zoom/scroll), TimelineGesture (hit-test y arrastre) y TimelineEditing
+// (qué escribe el soltar); en TimelinePanel quedan solo WPF puro (ratón,
+// pintado, cursor de edición, menú contextual).
 //
 // Los valores son LOS DE HOY: RulerH, MaxLayers, InstantFootprint, la escalera
 // de RulerStep, el orden greedy de AssignLayers… proceden literalmente de
