@@ -11,6 +11,7 @@
 using System.Windows;
 using System.Windows.Input;
 using System.Windows.Media;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
@@ -37,16 +38,14 @@ public sealed class GeometryCanvasControl : FrameworkElement
     /// <summary>Arrastre de un tirador de esquina: nueva escala (×).</summary>
     public event Action<double>? Scaled;
 
-    /// <summary>Lado del tirador de esquina, en px de pantalla.</summary>
-    private const double HandleSize = 9;
-
-    /// <summary>Límites de la escala por ratón. Coinciden a propósito con los
-    /// del deslizador de «Escala (×)» del inspector: si el ratón pudiera pasar
-    /// de ahí, soltar el tirador dejaría el deslizador tope y el valor real
-    /// fuera de rango, y los dos controles dirían cosas distintas.</summary>
-    private const double MinScale = 0.1, MaxScale = 4.0;
-
-    private const double SurfW = 1920.0, SurfH = 1080.0;
+    // HandleSize, Min/MaxScale y SurfW/SurfH viven ahora en GeometryLayout
+    // (WinCue.Presentation): son parte del CÁLCULO compartido con Secuence, no
+    // de esta interfaz. Alias local de solo lectura para no reescribir los
+    // sitios que ya lo usaban por su nombre corto (mismo patrón que
+    // WaveformControl.RulerH/HandleHit) — SurfW/SurfH ya no hacía falta
+    // nombrarlos aquí: CanvasRect()/VideoRect() delegan en GeometryLayout con
+    // sus valores por defecto.
+    private const double HandleSize = GeometryLayout.HandleSize;
 
     private bool _custom;
     private bool _preserveAspect = true;
@@ -106,90 +105,41 @@ public sealed class GeometryCanvasControl : FrameworkElement
     }
 
     // ------------------------------------------------------------------
-    // Geometría interna
+    // Geometría interna — el CÁLCULO (mapeo de coordenadas, encaje del vídeo,
+    // esquinas rotadas, hit-test) vive en WinCue.Presentation.GeometryLayout,
+    // compartido con Secuence.App.GeometryCanvas. Aquí solo quedan estos
+    // wrappers: convierten entre System.Windows.Point/Rect (WPF) y
+    // GeoPoint/GeoRect (neutrales) en el borde, y leen el estado privado del
+    // control (_custom, _tx, _ty…) que GeometryLayout no conoce.
     // ------------------------------------------------------------------
 
+    private static GeoRect ToGeoRect(Rect r) => new(r.X, r.Y, r.Width, r.Height);
+    private static Rect ToRect(GeoRect r) => new(r.X, r.Y, r.Width, r.Height);
+    private static GeoPoint ToGeoPoint(Point p) => new(p.X, p.Y);
+    private static Point ToPoint(GeoPoint p) => new(p.X, p.Y);
+
     /// <summary>Rect del canvas ajustado al control (con margen).</summary>
-    private Rect CanvasRect()
-    {
-        const double margin = 14;
-        double w = Math.Max(40, ActualWidth - margin * 2);
-        double h = Math.Max(24, ActualHeight - margin * 2);
-        double s = Math.Min(w / SurfW, h / SurfH);
-        double cw = SurfW * s, ch = SurfH * s;
-        return new Rect((ActualWidth - cw) / 2, (ActualHeight - ch) / 2, cw, ch);
-    }
+    private Rect CanvasRect() => ToRect(GeometryLayout.CanvasRect(ActualWidth, ActualHeight));
 
-    private Rect VideoRect(Rect canvas)
-    {
-        // Vídeo 16:9 "contain" dentro del canvas (aprox. — la resolución real
-        // la muestra el visor de EDICIÓN), multiplicado por la escala activa
-        double scale = _custom ? _scaleX : _fullScalePct / 100.0;
-        double vw, vh;
-        if (!_custom && !_preserveAspect)
-        {
-            vw = canvas.Width; vh = canvas.Height;   // FULL sin aspecto = estirar
-        }
-        else
-        {
-            double s = Math.Min(canvas.Width / 16.0, canvas.Height / 9.0);
-            vw = 16.0 * s; vh = 9.0 * s;
-        }
-        vw *= scale; vh *= scale;
-
-        double pxPerUnit = canvas.Width / SurfW;
-        double cx = canvas.Left + canvas.Width / 2 + (_custom ? _tx * pxPerUnit : 0);
-        double cy = canvas.Top + canvas.Height / 2 - (_custom ? _ty * pxPerUnit : 0);
-        return new Rect(cx - vw / 2, cy - vh / 2, vw, vh);
-    }
+    private Rect VideoRect(Rect canvas) => ToRect(GeometryLayout.VideoRect(
+        ToGeoRect(canvas), _custom, _fullScalePct, _preserveAspect, _scaleX, _tx, _ty));
 
     /// <summary>Centro del vídeo en pantalla.</summary>
-    private static Point VideoCenter(Rect v) =>
-        new(v.Left + v.Width / 2, v.Top + v.Height / 2);
+    private static Point VideoCenter(Rect v) => ToPoint(GeometryLayout.VideoCenter(ToGeoRect(v)));
 
-    /// <summary>Las cuatro esquinas del vídeo, YA ROTADAS. Se rota aquí y no en
-    /// el DrawingContext porque estos puntos se usan también para acertar con el
-    /// ratón: si se dibujaran con un RotateTransform pero se comprobaran sin
-    /// rotar, con el vídeo a 90° los tiradores se verían en un sitio y
-    /// responderían en otro.</summary>
-    private Point[] HandlePoints(Rect v)
-    {
-        var c = VideoCenter(v);
-        var corners = new[]
-        {
-            new Point(v.Left,  v.Top),
-            new Point(v.Right, v.Top),
-            new Point(v.Right, v.Bottom),
-            new Point(v.Left,  v.Bottom),
-        };
-        if (_rot == 0)
-            return corners;
-
-        double rad = _rot * Math.PI / 180.0;
-        double cos = Math.Cos(rad), sin = Math.Sin(rad);
-        for (int i = 0; i < corners.Length; i++)
-        {
-            double dx = corners[i].X - c.X, dy = corners[i].Y - c.Y;
-            corners[i] = new Point(c.X + dx * cos - dy * sin,
-                                   c.Y + dx * sin + dy * cos);
-        }
-        return corners;
-    }
+    /// <summary>Las cuatro esquinas del vídeo, YA ROTADAS. Se rota en el
+    /// cálculo compartido y no en el DrawingContext porque estos puntos se
+    /// usan también para acertar con el ratón: si se dibujaran con un
+    /// RotateTransform pero se comprobaran sin rotar, con el vídeo a 90° los
+    /// tiradores se verían en un sitio y responderían en otro.</summary>
+    private Point[] HandlePoints(Rect v) =>
+        Array.ConvertAll(GeometryLayout.HandlePoints(ToGeoRect(v), _rot), ToPoint);
 
     /// <summary>Índice del tirador bajo el punto dado, o -1.</summary>
-    private int HitHandle(Point p)
-    {
-        if (!_custom)
-            return -1;
-        var pts = HandlePoints(VideoRect(CanvasRect()));
-        // Radio de agarre algo mayor que el dibujo: un tirador de 9 px es
-        // difícil de acertar si hay que clavarlo al píxel.
-        const double grab = HandleSize;
-        for (int i = 0; i < pts.Length; i++)
-            if (Math.Abs(p.X - pts[i].X) <= grab && Math.Abs(p.Y - pts[i].Y) <= grab)
-                return i;
-        return -1;
-    }
+    private int HitHandle(Point p) =>
+        GeometryLayout.HitHandle(ToGeoPoint(p), _custom, ToGeoRect(VideoRect(CanvasRect())), _rot);
+
+    private static double Dist(Point a, Point b) => GeometryLayout.Dist(ToGeoPoint(a), ToGeoPoint(b));
 
     // ------------------------------------------------------------------
     // Pintado
@@ -343,9 +293,8 @@ public sealed class GeometryCanvasControl : FrameworkElement
             // centro y no respecto a la esquina opuesta es lo que hace que el
             // vídeo no se desplace mientras se redimensiona — en un encuadre,
             // mover y escalar a la vez es justo lo que no quieres.
-            var c = VideoCenter(VideoRect(CanvasRect()));
-            double factor = Dist(pos, c) / _grabDist;
-            _scaleX = Math.Clamp(_scaleStart * factor, MinScale, MaxScale);
+            var c = ToGeoPoint(VideoCenter(VideoRect(CanvasRect())));
+            _scaleX = GeometryLayout.ScaleFromDrag(_scaleStart, _grabDist, ToGeoPoint(pos), c);
             InvalidateVisual();
             Scaled?.Invoke(Math.Round(_scaleX, 3));
             return;
@@ -353,18 +302,22 @@ public sealed class GeometryCanvasControl : FrameworkElement
 
         if (!_dragging)
             return;
-        double pxPerUnit = CanvasRect().Width / SurfW;
+        double pxPerUnit = GeometryLayout.PxPerUnit(ToGeoRect(CanvasRect()));
         if (pxPerUnit <= 0)
             return;
-        _tx = _txStart + (pos.X - _dragStart.X) / pxPerUnit;
-        _ty = _tyStart - (pos.Y - _dragStart.Y) / pxPerUnit;   // +Y hacia arriba
+        var (tx, ty) = GeometryLayout.TranslateFromDrag(
+            _txStart, _tyStart, ToGeoPoint(_dragStart), ToGeoPoint(pos), pxPerUnit);
+        _tx = tx;
+        _ty = ty;
 
         // Imán a los bordes y al centro del canvas. Se aplica DESPUÉS de mover
         // y sobre el valor ya calculado, no acumulando: si se acumulara, cada
         // fotograma pegado volvería a corregir y el vídeo se quedaría clavado
         // sin poder despegarlo.
         var canvasRect = CanvasRect();
-        var (dx, dy, sx, sy) = SnapDelta(canvasRect, VideoRect(canvasRect));
+        bool shiftPressed = Keyboard.Modifiers.HasFlag(ModifierKeys.Shift);
+        var (dx, dy, sx, sy) = GeometryLayout.SnapDelta(
+            ToGeoRect(canvasRect), ToGeoRect(VideoRect(canvasRect)), _rot, shiftPressed);
         _tx += dx / pxPerUnit;
         _ty -= dy / pxPerUnit;
         _snapX = sx;
@@ -386,67 +339,6 @@ public sealed class GeometryCanvasControl : FrameworkElement
             ReleaseMouseCapture();
             InvalidateVisual();
         }
-    }
-
-    private static double Dist(Point a, Point b)
-    {
-        double dx = a.X - b.X, dy = a.Y - b.Y;
-        return Math.Sqrt(dx * dx + dy * dy);
-    }
-
-    /// <summary>Contorno del vídeo ALINEADO CON LOS EJES. A 90° y 270° el
-    /// rectángulo ocupa el ancho por el alto y al revés; sin esto el imán
-    /// pegaría por un borde que no es el que se ve.</summary>
-    private Rect SnapBounds(Rect video)
-    {
-        if (_rot != 90 && _rot != 270)
-            return video;
-        var c = VideoCenter(video);
-        double w = video.Height, h = video.Width;
-        return new Rect(c.X - w / 2, c.Y - h / 2, w, h);
-    }
-
-    /// <summary>Pega el vídeo a los bordes y al centro del canvas si anda cerca.
-    /// Devuelve el desplazamiento a aplicar, en píxeles de pantalla.
-    ///
-    /// Con Shift NO imanta: encuadrar a dos píxeles del borde es una petición
-    /// legítima, y un imán sin escape la vuelve imposible.</summary>
-    private (double dx, double dy, bool snapX, bool snapY) SnapDelta(Rect canvas, Rect video)
-    {
-        if (Keyboard.Modifiers.HasFlag(ModifierKeys.Shift))
-            return (0, 0, false, false);
-
-        const double threshold = 8;   // px de pantalla
-        var v = SnapBounds(video);
-
-        double bestX = 0, bestY = 0;
-        bool gotX = false, gotY = false;
-
-        void TryX(double delta)
-        {
-            if (Math.Abs(delta) <= threshold && (!gotX || Math.Abs(delta) < Math.Abs(bestX)))
-            {
-                bestX = delta;
-                gotX = true;
-            }
-        }
-        void TryY(double delta)
-        {
-            if (Math.Abs(delta) <= threshold && (!gotY || Math.Abs(delta) < Math.Abs(bestY)))
-            {
-                bestY = delta;
-                gotY = true;
-            }
-        }
-
-        TryX(canvas.Left - v.Left);                                   // borde izquierdo
-        TryX(canvas.Right - v.Right);                                 // borde derecho
-        TryX((canvas.Left + canvas.Width / 2) - (v.Left + v.Width / 2));   // centrado
-        TryY(canvas.Top - v.Top);
-        TryY(canvas.Bottom - v.Bottom);
-        TryY((canvas.Top + canvas.Height / 2) - (v.Top + v.Height / 2));
-
-        return (gotX ? bestX : 0, gotY ? bestY : 0, gotX, gotY);
     }
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
