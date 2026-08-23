@@ -14,4 +14,17 @@
     <Nullable>enable</Nullable>
   </PropertyGroup>
 
+  <!-- ==========================================================================
+       TimelineLayout.cs (hitos-0-1, timeline) necesita recorrer un CueModel
+       real: Cue/CueModel/GroupMode/ActiveCueInfo/IShowClock son el MOTOR
+       (net8.0 a secas, sin una sola línea de WPF ni de WinUI — comprobado en
+       sus .csproj), no "framework de interfaz". La regla de la cabecera de
+       este fichero sigue intacta: si algo de aquí necesitara Color, Brush o
+       cualquier tipo de WPF/WinUI, ESE sería el sitio equivocado.
+       ========================================================================== -->
+  <ItemGroup>
+    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
+    <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
+  </ItemGroup>
+
 </Project>
