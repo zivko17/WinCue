@@ -38,6 +38,17 @@
             <KeyboardAccelerator Key="Escape" Invoked="OnStopAllAccelerator"/>
         </Grid.KeyboardAccelerators>
 
+        <!-- Columna 0: todo lo de siempre (transport, activos, tabla,
+             timeline). Columna 1: el INSPECTOR, ancho fijo, a la derecha de
+             todo — mismo sitio relativo que WPF (BottomTabs, pestaña
+             Inspector), aunque aquí no hay pestañas: con el conjunto de
+             campos de esta pasada (ver InspectorPanel.cs) un panel fijo
+             entero, no compartido con otra cosa. -->
+        <Grid.ColumnDefinitions>
+            <ColumnDefinition Width="*"/>
+            <ColumnDefinition Width="380"/>
+        </Grid.ColumnDefinitions>
+
         <Grid.RowDefinitions>
             <RowDefinition Height="Auto"/> <!-- 0: transport -->
             <RowDefinition Height="Auto"/> <!-- 1: activos -->
@@ -252,7 +263,8 @@
         </Grid>
 
         <!-- Tabla -->
-        <ListView x:Name="CueList" Grid.Row="4" SelectionMode="None"
+        <ListView x:Name="CueList" Grid.Row="4" SelectionMode="Single"
+                  SelectionChanged="OnCueSelectionChanged"
                   Background="{x:Bind local:Theme.WindowBgBrush}">
             <ListView.ItemContainerStyle>
                 <Style TargetType="ListViewItem">
@@ -339,6 +351,20 @@
         <Border Grid.Row="5" Background="{x:Bind local:Theme.PanelBgBrush}"
                 BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
             <ContentControl x:Name="TimelineHost" HorizontalContentAlignment="Stretch"
+                            VerticalContentAlignment="Stretch"/>
+        </Border>
+
+        <!-- ═══════════ INSPECTOR (primera pasada, hitos-0-1) ═══════════ -->
+        <!-- InspectorPanel.cs: identidad, temporización, fundidos y
+             reproducción de la Cue seleccionada en la tabla — ver la
+             cabecera de ese archivo para el alcance exacto y lo que queda
+             fuera (rack de audio, geometría, canvas, disparadores remotos).
+             RowSpan cubre las seis filas: es la única columna de la derecha
+             de toda la ventana, de arriba abajo. -->
+        <Border Grid.Column="1" Grid.Row="0" Grid.RowSpan="6"
+                Background="{x:Bind local:Theme.PanelBgBrush}"
+                BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="1,0,0,0">
+            <ContentControl x:Name="InspectorHost" HorizontalContentAlignment="Stretch"
                             VerticalContentAlignment="Stretch"/>
         </Border>
     </Grid>

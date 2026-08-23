@@ -63,6 +63,25 @@ public sealed partial class MainWindow : Window, IShowView
     // ver la cabecera de ese archivo para el alcance exacto de esta pasada.
     private readonly TimelineCanvas _timeline = new();
 
+    // ── Inspector de cues (primera pasada, hitos-0-1) ───────────────────
+    // InspectorPanel.cs: identidad/temporización/fundidos/reproducción del
+    // cue seleccionado en la tabla — ver la cabecera de ese archivo para el
+    // alcance exacto.
+    private readonly InspectorPanel _inspector = new();
+
+    /// <summary>CueId del cue seleccionado en la tabla, o -1. Se guarda
+    /// aparte de CueList.SelectedItem porque RefreshRow REEMPLAZA la
+    /// instancia CueRow de la fila editada en cada commit del inspector (ver
+    /// RefreshRow) — sin esto, cada campo comprometido perdería la selección
+    /// visual y el inspector se repoblaría solo de leer su propio commit.</summary>
+    private int _selectedCueId = -1;
+
+    /// <summary>true mientras RefreshRow reasigna CueList.SelectedItem para
+    /// conservar el resaltado tras reemplazar la fila: evita que ese
+    /// reasignado dispare OnCueSelectionChanged y repueble el inspector en
+    /// mitad de una edición que él mismo acaba de comprometer.</summary>
+    private bool _suppressSelectionSync;
+
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
     // timer, porque IShowView.UpdateCountdown no lo alimenta a él (ver más
@@ -131,6 +150,45 @@ public sealed partial class MainWindow : Window, IShowView
 
         TimelineHost.Content = _timeline;
         _timeline.SetModel(_model);
+
+        InspectorHost.Content = _inspector;
+        // El picker necesita el hwnd propio (misma trampa que OnOpenShowAsync/
+        // OnSaveShowAsAsync): el inspector no tiene por qué saber de eso, así
+        // que MainWindow resuelve el archivo y el inspector solo recibe la ruta.
+        _inspector.BrowseFile = BrowseFileAsync;
+    }
+
+    /// <summary>Selector de archivo para el campo Archivo del inspector — sin
+    /// filtro de extensión, igual que el OpenFileDialog de WPF (el inspector
+    /// acepta cualquier fichero y deja que MediaImporter detecte el tipo).</summary>
+    private async Task<string?> BrowseFileAsync()
+    {
+        var picker = new FileOpenPicker();
+        InitializeWithWindow.Initialize(picker, _hwndPropio);
+        picker.FileTypeFilter.Add("*");
+        picker.SuggestedStartLocation = PickerLocationId.DocumentsLibrary;
+        var file = await picker.PickSingleFileAsync();
+        return file?.Path;
+    }
+
+    /// <summary>Selección de fila en la tabla: repuebla el inspector con el
+    /// cue elegido (o lo deshabilita si no hay selección). Se suprime
+    /// mientras RefreshRow reasigna la selección tras un commit propio del
+    /// inspector — ver _suppressSelectionSync.</summary>
+    private void OnCueSelectionChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_suppressSelectionSync)
+            return;
+        if (CueList.SelectedItem is CueRow row)
+        {
+            _selectedCueId = row.CueId;
+            _inspector.SetCue(_model.GetById(row.CueId));
+        }
+        else
+        {
+            _selectedCueId = -1;
+            _inspector.SetCue(null);
+        }
     }
 
     private void AddAccelerator(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers,
@@ -149,6 +207,19 @@ public sealed partial class MainWindow : Window, IShowView
         RebuildHotkeys();
         UpdateTransport(controller.IsPaused);
         _timeline.Clock = controller.Clock;
+
+        // Inspector → controlador (edición en vivo campo a campo) — mismo
+        // camino que WinCue.App.MainWindow.xaml.cs.Attach: cueId → row por
+        // CueModel.IndexOfId, y de ahí a MainController.OnCueEditCommitted,
+        // que aplica el cambio EN VIVO si el cue está sonando y marca el show
+        // como modificado (HasUnsavedChanges, ver PushUndo).
+        _inspector.CommitField = (cueId, key, value) =>
+        {
+            int row = _model.IndexOfId(cueId);
+            if (row >= 0)
+                controller.OnCueEditCommitted(row,
+                    new Dictionary<string, object?> { [key] = value });
+        };
 
         _clockTimer = DispatcherQueue.CreateTimer();
         _clockTimer.Interval = TimeSpan.FromMilliseconds(250);
@@ -428,6 +499,20 @@ public sealed partial class MainWindow : Window, IShowView
         // la ListView repinte solo esa fila, no la tabla entera.
         var refreshed = new CueRow(cue, _model) { IsPlayhead = wasPlayhead };
         _rows[index] = refreshed;
+
+        // El commit del inspector llega justo por aquí (MainController.
+        // OnCueEditCommitted → _view.RefreshRow): la fila reemplazada deja
+        // de ser el objeto que la ListView tenía seleccionado. Reasignar la
+        // selección al reemplazo conserva el resaltado SIN pasar por
+        // OnCueSelectionChanged (_suppressSelectionSync), que si no
+        // repoblaría el inspector con sus propios valores recién guardados
+        // en mitad de la edición.
+        if (refreshed.CueId == _selectedCueId)
+        {
+            _suppressSelectionSync = true;
+            try { CueList.SelectedItem = refreshed; }
+            finally { _suppressSelectionSync = false; }
+        }
     }
 
     public void ReloadTable()
@@ -436,6 +521,12 @@ public sealed partial class MainWindow : Window, IShowView
         SetPlayhead(_playheadIndex);
         RebuildHotkeys();
         _timeline.RefreshFromModel();
+
+        // Show nuevo (o recargado): igual que WPF (UpdateInspector tras
+        // ReloadTable), el inspector se deselecciona en vez de intentar
+        // adivinar si el mismo CueId de antes sigue significando lo mismo.
+        _selectedCueId = -1;
+        _inspector.SetCue(null);
     }
 
     public void AppendCueRow(Cue cue)
