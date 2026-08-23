@@ -561,9 +561,6 @@ public sealed class EqEditorControl : ContentControl
 /// manejadores arrastrables (4 bandas + HPF/LPF).</summary>
 public sealed class EqCurveCanvas : FrameworkElement
 {
-    private const double DbRange = 18.0;   // eje Y: ±18 dB
-    private const double FMin = 20.0, FMax = 20000.0;
-
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.EqBg));
     private static readonly Pen GridPen = FrozenPen(Theme.EqGrid, 1);
     private static readonly Pen ZeroPen = FrozenPen(Theme.EqZero, 1);
@@ -602,11 +599,9 @@ public sealed class EqCurveCanvas : FrameworkElement
     //
     // Queda una escala honesta: dBFS de verdad, con un dedo de aire por encima
     // de 0 para que subir la ganancia de pantalla suba la traza en vez de
-    // aplastarla contra el borde.
-
-    /// <summary>Suelo y techo de la escala, en dBFS reales.</summary>
-    private const double RtaFloorDb = -72.0;
-    private const double RtaTopDb = 6.0;
+    // aplastarla contra el borde. Suelo/techo (RtaFloorDb/RtaTopDb) viven en
+    // WinCue.Presentation.EqCurveLayout, junto con el resto del cálculo de
+    // este lienzo (ver la cabecera del archivo).
     private static readonly Pen CurvePen = FrozenPen(Theme.Standby, 2.2);
     private static readonly Pen CurveOffPen = FrozenPen(Theme.EqCurveOff, 1.5);
     private static readonly Pen CurveGlowPen = FrozenPen(Theme.Alpha(Theme.Standby, 0x46), 5.5);
@@ -626,8 +621,8 @@ public sealed class EqCurveCanvas : FrameworkElement
     private Cue? _cue;
     private float[]? _smooth;     // RTA con balística (ataque directo, release suave)
     private float[]? _peakHold;   // picos con caída lenta (peak-hold)
-    private int _drag = int.MinValue;      // 0..3 banda · -2 HPF · -3 LPF
-    private int _hover = int.MinValue;
+    private int _drag = EqHandle.None;      // 0..3 banda · HPF/LPF (ver EqHandle)
+    private int _hover = EqHandle.None;
 
     public EqCurveCanvas()
     {
@@ -643,9 +638,10 @@ public sealed class EqCurveCanvas : FrameworkElement
         InvalidateVisual();
     }
 
-    /// <summary>Espectro nuevo (~12 Hz). Aquí se aplica la balística de un
-    /// analizador de verdad: ataque instantáneo, release ~30 dB/s y picos con
-    /// caída lenta — sin esto las barras parpadean y se ve amateur.</summary>
+    /// <summary>Espectro nuevo (~12 Hz). La balística de un analizador de
+    /// verdad (ataque instantáneo, release ~30 dB/s, picos con caída lenta —
+    /// sin esto las barras parpadean y se ve amateur) vive en
+    /// EqCurveLayout.RtaStep, compartida con Secuence.</summary>
     public void SetSpectrum(float[]? spectrum)
     {
         if (spectrum is null)
@@ -653,47 +649,20 @@ public sealed class EqCurveCanvas : FrameworkElement
             _smooth = null;
             _peakHold = null;
         }
-        else if (_smooth is null || _smooth.Length != spectrum.Length)
-        {
-            _smooth = (float[])spectrum.Clone();
-            _peakHold = (float[])spectrum.Clone();
-        }
         else
         {
-            for (int i = 0; i < spectrum.Length; i++)
-            {
-                float v = spectrum[i];
-                _smooth[i] = v >= _smooth[i]
-                    ? v                                     // ataque directo
-                    : Math.Max(v, _smooth[i] - 2.4f);       // release ~30 dB/s
-                _peakHold![i] = Math.Max(v, _peakHold[i] - 0.65f);  // ~8 dB/s
-            }
+            (_smooth, _peakHold) = EqCurveLayout.RtaStep(_smooth, _peakHold, spectrum);
         }
         InvalidateVisual();
     }
 
-    // ── Mapeos de ejes ─────────────────────────────────────────────────
-    private double XFromFreq(double f) =>
-        Math.Log10(Math.Clamp(f, FMin, FMax) / FMin) / 3.0 * ActualWidth;
-    private double FreqFromX(double x) =>
-        FMin * Math.Pow(10.0, 3.0 * Math.Clamp(x / Math.Max(1, ActualWidth), 0, 1));
-    private double YFromDb(double db) =>
-        ActualHeight / 2.0 - db / DbRange * (ActualHeight / 2.0 - 6);
-    private double DbFromY(double y) =>
-        (ActualHeight / 2.0 - y) / (ActualHeight / 2.0 - 6) * DbRange;
+    // ── Mapeos de ejes — cálculo en EqCurveLayout (WinCue.Presentation) ─
+    private double XFromFreq(double f) => EqCurveLayout.XFromFreq(f, ActualWidth);
+    private double FreqFromX(double x) => EqCurveLayout.FreqFromX(x, ActualWidth);
+    private double YFromDb(double db) => EqCurveLayout.YFromDb(db, ActualHeight);
+    private double DbFromY(double y) => EqCurveLayout.DbFromY(y, ActualHeight);
 
-    private static AudioEqParams ParamsFrom(Cue c) => new(
-        GainDb: 0.0,   // la curva muestra solo filtros; la ganancia va al fader
-        EqEnabled: c.EqEnabled,
-        HpfOn: c.HpfOn, HpfFreq: c.HpfFreq,
-        LpfOn: c.LpfOn, LpfFreq: c.LpfFreq,
-        Bands: new[]
-        {
-            new EqBand(c.Eq1Freq, c.Eq1Gain, c.Eq1Q),
-            new EqBand(c.Eq2Freq, c.Eq2Gain, c.Eq2Q),
-            new EqBand(c.Eq3Freq, c.Eq3Gain, c.Eq3Q),
-            new EqBand(c.Eq4Freq, c.Eq4Gain, c.Eq4Q),
-        });
+    private static AudioEqParams ParamsFrom(Cue c) => EqCurveLayout.EqParamsFromCue(c);
 
     private (double Freq, double Gain, double Q) Band(int i) => _cue is null
         ? (1000, 0, 1)
@@ -714,15 +683,16 @@ public sealed class EqCurveCanvas : FrameworkElement
         if (_cue is null || w < 40)
             return;
 
-        // Rejilla: décadas + subdivisiones y líneas de dB
-        foreach (double f in new[] { 20.0, 50, 100, 200, 500, 1000, 2000, 5000, 10000, 20000 })
+        // Rejilla: décadas + subdivisiones y líneas de dB (frecuencias/dB
+        // compartidos con Secuence — EqCurveLayout.GridFrequencies/GridDbLines)
+        foreach (double f in EqCurveLayout.GridFrequencies)
         {
             double x = XFromFreq(f);
             dc.DrawLine(GridPen, new Point(x, 0), new Point(x, h));
             string label = f >= 1000 ? $"{f / 1000:0}k" : $"{f:0}";
             dc.DrawText(Text(label, GridText, 9), new Point(x + 2, h - 13));
         }
-        foreach (double db in new[] { -12.0, -6, 6, 12 })
+        foreach (double db in EqCurveLayout.GridDbLines)
         {
             double y = YFromDb(db);
             dc.DrawLine(GridPen, new Point(0, y), new Point(w, y));
@@ -731,36 +701,28 @@ public sealed class EqCurveCanvas : FrameworkElement
         dc.DrawLine(ZeroPen, new Point(0, YFromDb(0)), new Point(w, YFromDb(0)));
 
         // RTA detrás: ÁREA suavizada con degradado + contorno + peak-hold
-        // (estilo analizador pro; dBFS -90..0 + ganancia de pantalla)
+        // (estilo analizador pro; dBFS -90..0 + ganancia de pantalla). Los
+        // puntos vienen ya en píxeles de EqCurveLayout — aquí solo se trazan.
         if (_smooth is { Length: > 1 } spec)
         {
-            double YFromRta(double db) => h * (1.0 - Math.Clamp(
-                (db - RtaFloorDb) / (RtaTopDb - RtaFloorDb), 0.0, 1.0));
-            var area = new StreamGeometry();
-            using (var ctx = area.Open())
+            var areaPts = EqCurveLayout.RtaAreaPoints(spec, RtaGainDb, w, h);
+            if (areaPts.Count > 0)
             {
-                ctx.BeginFigure(new Point(0, h + 1), true, true);
-                ctx.LineTo(new Point(0, YFromRta(spec[0] + RtaGainDb)), false, false);
-                for (int i = 0; i < spec.Length; i++)
-                    ctx.LineTo(new Point((i + 0.5) / spec.Length * w,
-                        YFromRta(spec[i] + RtaGainDb)), true, true);
-                ctx.LineTo(new Point(w, YFromRta(spec[^1] + RtaGainDb)), true, true);
-                ctx.LineTo(new Point(w, h + 1), false, false);
+                var area = new StreamGeometry();
+                using (var ctx = area.Open())
+                {
+                    ctx.BeginFigure(ToPoint(areaPts[0]), true, true);
+                    for (int i = 1; i < areaPts.Count; i++)
+                        ctx.LineTo(ToPoint(areaPts[i]), true, true);
+                }
+                area.Freeze();
+                dc.DrawGeometry(RtaFill, RtaLine, area);
             }
-            area.Freeze();
-            dc.DrawGeometry(RtaFill, RtaLine, area);
 
             // Picos: segmento fino y brillante por banda, cayendo despacio
             if (_peakHold is { } pk)
-                for (int i = 0; i < pk.Length; i++)
-                {
-                    double y = YFromRta(pk[i] + RtaGainDb);
-                    if (y >= h - 1)
-                        continue;
-                    double x0 = (double)i / pk.Length * w + 1;
-                    double x1 = (double)(i + 1) / pk.Length * w - 1;
-                    dc.DrawLine(RtaPeakPen, new Point(x0, y), new Point(x1, y));
-                }
+                foreach (var (a, b) in EqCurveLayout.RtaPeakSegments(pk, RtaGainDb, w, h))
+                    dc.DrawLine(RtaPeakPen, ToPoint(a), ToPoint(b));
         }
 
         // Curva de respuesta de los filtros: relleno hasta 0 dB + glow + trazo
@@ -768,17 +730,17 @@ public sealed class EqCurveCanvas : FrameworkElement
         bool eqOn = _cue.EqEnabled || _cue.HpfOn || _cue.LpfOn;
         var pen = eqOn ? CurvePen : CurveOffPen;
         double y0 = YFromDb(0);
+        var curvePts = EqCurveLayout.ResponseCurve(eq, w, h);
         var curve = new StreamGeometry();
         var curveArea = new StreamGeometry();
         using (var ctx = curve.Open())
         using (var actx = curveArea.Open())
         {
-            bool started = false;
             actx.BeginFigure(new Point(0, y0), true, true);
-            for (int px = 0; px <= (int)w; px += 3)
+            bool started = false;
+            foreach (var gp in curvePts)
             {
-                double db = EqChain.ResponseDb(eq, FreqFromX(px));
-                var pt = new Point(px, Math.Clamp(YFromDb(db), -20, h + 20));
+                var pt = ToPoint(gp);
                 if (!started) { ctx.BeginFigure(pt, false, false); started = true; }
                 else ctx.LineTo(pt, true, false);
                 actx.LineTo(pt, true, true);
@@ -795,15 +757,15 @@ public sealed class EqCurveCanvas : FrameworkElement
         dc.DrawGeometry(null, pen, curve);
 
         // Manejadores HPF/LPF (cuadrados en la línea de 0 dB)
-        DrawFilterHandle(dc, -2, _cue.HpfFreq, _cue.HpfOn, "HPF");
-        DrawFilterHandle(dc, -3, _cue.LpfFreq, _cue.LpfOn, "LPF");
+        DrawFilterHandle(dc, EqHandle.Hpf, _cue.HpfFreq, _cue.HpfOn, "HPF");
+        DrawFilterHandle(dc, EqHandle.Lpf, _cue.LpfFreq, _cue.LpfOn, "LPF");
 
         // Manejadores de banda: anillo de color con centro oscuro (estilo
         // plugin pro) y halo al pasar el ratón o arrastrar
         for (int i = 0; i < 4; i++)
         {
             var (f, g, _) = Band(i);
-            var center = new Point(XFromFreq(f), YFromDb(g));
+            var center = ToPoint(EqCurveLayout.BandPoint(f, g, w, h));
             byte alpha = _cue.EqEnabled ? (byte)235 : (byte)90;
             var c = BandColors[i];
             bool hot = i == _drag || i == _hover;
@@ -841,23 +803,22 @@ public sealed class EqCurveCanvas : FrameworkElement
         t, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
         new Typeface("Segoe UI"), size, b, 1.0);
 
+    private static Point ToPoint(GeoPoint p) => new(p.X, p.Y);
+
     // ── Interacción ────────────────────────────────────────────────────
 
     private int HitHandle(Point p)
     {
         if (_cue is null)
-            return int.MinValue;
+            return EqHandle.None;
+        var bands = new (double Freq, double Gain)[4];
         for (int i = 0; i < 4; i++)
         {
             var (f, g, _) = Band(i);
-            if ((new Point(XFromFreq(f), YFromDb(g)) - p).Length <= 10)
-                return i;
+            bands[i] = (f, g);
         }
-        if ((new Point(XFromFreq(_cue.HpfFreq), YFromDb(0)) - p).Length <= 10)
-            return -2;
-        if ((new Point(XFromFreq(_cue.LpfFreq), YFromDb(0)) - p).Length <= 10)
-            return -3;
-        return int.MinValue;
+        return EqCurveLayout.HitHandle(new GeoPoint(p.X, p.Y), bands,
+            _cue.HpfFreq, _cue.LpfFreq, ActualWidth, ActualHeight);
     }
 
     protected override void OnMouseDown(MouseButtonEventArgs e)
@@ -865,7 +826,7 @@ public sealed class EqCurveCanvas : FrameworkElement
         if (e.ChangedButton != MouseButton.Left || _cue is null)
             return;
         _drag = HitHandle(e.GetPosition(this));
-        if (_drag != int.MinValue)
+        if (_drag != EqHandle.None)
         {
             CaptureMouse();
             UpdateReadout();
@@ -876,7 +837,7 @@ public sealed class EqCurveCanvas : FrameworkElement
     protected override void OnMouseMove(MouseEventArgs e)
     {
         var p = e.GetPosition(this);
-        if (_drag == int.MinValue)
+        if (_drag == EqHandle.None)
         {
             int h = HitHandle(p);
             if (h != _hover)
@@ -884,26 +845,26 @@ public sealed class EqCurveCanvas : FrameworkElement
                 _hover = h;
                 InvalidateVisual();
             }
-            Cursor = h != int.MinValue ? Cursors.SizeAll : Cursors.Arrow;
+            Cursor = h != EqHandle.None ? Cursors.SizeAll : Cursors.Arrow;
             return;
         }
         if (_cue is null)
             return;
 
-        double freq = Math.Round(FreqFromX(p.X));
+        double freq = EqCurveLayout.FreqFromDragX(p.X, ActualWidth);
         if (_drag >= 0)
         {
-            double gain = Math.Round(Math.Clamp(DbFromY(p.Y), -DbRange, DbRange), 1);
+            double gain = EqCurveLayout.GainFromDragY(p.Y, ActualHeight);
             Commit?.Invoke($"eq{_drag + 1}_freq", freq);
             Commit?.Invoke($"eq{_drag + 1}_gain", gain);
         }
-        else if (_drag == -2)
+        else if (_drag == EqHandle.Hpf)
         {
-            Commit?.Invoke("hpf_freq", Math.Clamp(freq, 20, 2000));
+            Commit?.Invoke("hpf_freq", EqCurveLayout.ClampHpfFreq(freq));
         }
         else
         {
-            Commit?.Invoke("lpf_freq", Math.Clamp(freq, 200, 20000));
+            Commit?.Invoke("lpf_freq", EqCurveLayout.ClampLpfFreq(freq));
         }
         UpdateReadout();
         InvalidateVisual();
@@ -911,9 +872,9 @@ public sealed class EqCurveCanvas : FrameworkElement
 
     protected override void OnMouseUp(MouseButtonEventArgs e)
     {
-        if (_drag != int.MinValue)
+        if (_drag != EqHandle.None)
         {
-            _drag = int.MinValue;
+            _drag = EqHandle.None;
             ReleaseMouseCapture();
             InvalidateVisual();
         }
@@ -922,12 +883,11 @@ public sealed class EqCurveCanvas : FrameworkElement
     /// <summary>Rueda sobre una banda (o arrastrándola): ajustar su Q.</summary>
     protected override void OnMouseWheel(MouseWheelEventArgs e)
     {
-        int target = _drag != int.MinValue ? _drag : HitHandle(e.GetPosition(this));
+        int target = _drag != EqHandle.None ? _drag : HitHandle(e.GetPosition(this));
         if (_cue is null || target < 0)
             return;
         var (_, _, q) = Band(target);
-        double newQ = Math.Round(Math.Clamp(
-            q * (e.Delta > 0 ? 1.12 : 1 / 1.12), 0.1, 12.0), 2);
+        double newQ = EqCurveLayout.QFromWheel(q, e.Delta > 0);
         Commit?.Invoke($"eq{target + 1}_q", newQ);
         UpdateReadout(target);
         InvalidateVisual();
@@ -942,8 +902,8 @@ public sealed class EqCurveCanvas : FrameworkElement
         string text = id switch
         {
             >= 0 and <= 3 => FormatBand(id),
-            -2 => $"HPF {_cue.HpfFreq:0} Hz",
-            -3 => $"LPF {_cue.LpfFreq:0} Hz",
+            EqHandle.Hpf => $"HPF {_cue.HpfFreq:0} Hz",
+            EqHandle.Lpf => $"LPF {_cue.LpfFreq:0} Hz",
             _ => "",
         };
         if (text.Length > 0)
@@ -971,10 +931,6 @@ public sealed class EqCurveCanvas : FrameworkElement
 /// medidor GR en vivo (cuánta reducción está aplicando ahora mismo).</summary>
 public sealed class CompCurveCanvas : FrameworkElement
 {
-    private const double DbMin = -60.0;
-    private const double GrScaleDb = 24.0;   // fondo de escala del medidor
-    private const double MeterW = 16;
-
     private static readonly Brush BgBrush = Frozen(new SolidColorBrush(Theme.EqBg));
     private static readonly Pen GridPen = FrozenPen(Theme.EqGrid, 1);
     private static readonly Pen UnityPen = MakeUnityPen();
@@ -1021,21 +977,9 @@ public sealed class CompCurveCanvas : FrameworkElement
         InvalidateVisual();
     }
 
-    private double PlotW => Math.Max(1, ActualWidth - MeterW - 4);
-    private double XFromDb(double db) => (db - DbMin) / -DbMin * PlotW;
-    private double DbFromX(double x) => DbMin + Math.Clamp(x / PlotW, 0, 1) * -DbMin;
-    private double YFromDb(double db) => (db / DbMin) * ActualHeight;
-
-    /// <summary>Transferencia del compresor (entrada dB → salida dB).</summary>
-    private double OutDb(double inDb)
-    {
-        if (_cue is null)
-            return inDb;
-        double outDb = inDb <= _cue.CompThreshold
-            ? inDb
-            : _cue.CompThreshold + (inDb - _cue.CompThreshold) / Math.Max(1.0, _cue.CompRatio);
-        return outDb + _cue.CompMakeup;
-    }
+    // Ejes, transferencia y muestreo: cálculo en CompCurveLayout
+    // (WinCue.Presentation), compartido con Secuence.
+    private double PlotW => CompCurveLayout.PlotWidth(ActualWidth);
 
     protected override void OnRender(DrawingContext dc)
     {
@@ -1046,26 +990,27 @@ public sealed class CompCurveCanvas : FrameworkElement
         double pw = PlotW;
 
         // Rejilla cada 12 dB + diagonal 1:1 de referencia
-        foreach (double db in new[] { -48.0, -36, -24, -12 })
+        foreach (double db in CompCurveLayout.GridDbLines)
         {
-            double x = XFromDb(db), y = YFromDb(db);
+            double x = CompCurveLayout.XFromDb(db, pw), y = CompCurveLayout.YFromDb(db, h);
             dc.DrawLine(GridPen, new Point(x, 0), new Point(x, h));
             dc.DrawLine(GridPen, new Point(0, y), new Point(pw, y));
         }
-        dc.DrawLine(UnityPen, new Point(XFromDb(DbMin), YFromDb(DbMin)),
-            new Point(XFromDb(0), YFromDb(0)));
+        dc.DrawLine(UnityPen,
+            new Point(CompCurveLayout.XFromDb(CompCurveLayout.DbMin, pw), CompCurveLayout.YFromDb(CompCurveLayout.DbMin, h)),
+            new Point(CompCurveLayout.XFromDb(0, pw), CompCurveLayout.YFromDb(0, h)));
         dc.DrawText(Text("COMP  in→out dB", GridText, 8), new Point(4, 2));
 
         // Curva de transferencia
         var pen = _cue.CompEnabled ? CurvePen : CurveOffPen;
+        var pts = CompCurveLayout.TransferCurve(_cue.CompThreshold, _cue.CompRatio, _cue.CompMakeup, pw, h);
         var geo = new StreamGeometry();
         using (var ctx = geo.Open())
         {
             bool started = false;
-            for (int px = 0; px <= (int)pw; px += 2)
+            foreach (var gp in pts)
             {
-                double outDb = Math.Clamp(OutDb(DbFromX(px)), DbMin, 6.0);
-                var pt = new Point(px, Math.Clamp(YFromDb(outDb), -10, h + 10));
+                var pt = ToPoint(gp);
                 if (!started) { ctx.BeginFigure(pt, false, false); started = true; }
                 else ctx.LineTo(pt, true, false);
             }
@@ -1074,25 +1019,24 @@ public sealed class CompCurveCanvas : FrameworkElement
         dc.DrawGeometry(null, pen, geo);
 
         // Manejador del umbral (sobre la curva, arrastrable en X)
-        double tx = XFromDb(_cue.CompThreshold);
-        double ty = YFromDb(Math.Clamp(OutDb(_cue.CompThreshold), DbMin, 0));
-        dc.DrawEllipse(ThrBrush, null, new Point(tx, ty), _drag ? 6 : 5, _drag ? 6 : 5);
+        var thr = ToPoint(CompCurveLayout.ThresholdPoint(_cue.CompThreshold, _cue.CompRatio, _cue.CompMakeup, pw, h));
+        dc.DrawEllipse(ThrBrush, null, thr, _drag ? 6 : 5, _drag ? 6 : 5);
         dc.DrawText(Text($"{_cue.CompThreshold:0} dB · {_cue.CompRatio:0.#}:1",
-            GridText, 8), new Point(Math.Min(tx + 6, pw - 70), Math.Max(2, ty - 14)));
+            GridText, 8), new Point(Math.Min(thr.X + 6, pw - 70), Math.Max(2, thr.Y - 14)));
 
         // ── Medidor GR (derecha): cuánta reducción aplica AHORA ─────────
-        var meterRect = new Rect(pw + 4, 0, MeterW, h);
+        var meterRect = new Rect(pw + 4, 0, CompCurveLayout.MeterW, h);
         dc.DrawRectangle(GrBg, null, meterRect);
         if (_cue.CompEnabled && _gr > 0.05f)
         {
-            double frac = Math.Clamp(_gr / GrScaleDb, 0, 1);
+            double frac = CompCurveLayout.GrFraction(_gr);
             dc.DrawRectangle(GrBrush, null,
-                new Rect(pw + 4, 0, MeterW, frac * h));   // crece de ARRIBA abajo
+                new Rect(pw + 4, 0, CompCurveLayout.MeterW, frac * h));   // crece de ARRIBA abajo
         }
-        foreach (double mark in new[] { 6.0, 12, 18 })
+        foreach (double mark in CompCurveLayout.GrMarks)
         {
-            double y = mark / GrScaleDb * h;
-            dc.DrawLine(GridPen, new Point(pw + 4, y), new Point(pw + 4 + MeterW, y));
+            double y = mark / CompCurveLayout.GrScaleDb * h;
+            dc.DrawLine(GridPen, new Point(pw + 4, y), new Point(pw + 4 + CompCurveLayout.MeterW, y));
         }
         dc.DrawText(Text("GR", GridText, 8), new Point(pw + 6, h - 12));
         if (_cue.CompEnabled && _gr > 0.05f)
@@ -1109,8 +1053,7 @@ public sealed class CompCurveCanvas : FrameworkElement
             return;   // el medidor no se arrastra
         _drag = true;
         CaptureMouse();
-        Commit?.Invoke("comp_threshold",
-            Math.Round(Math.Clamp(DbFromX(p.X), -60.0, 0.0), 1));
+        Commit?.Invoke("comp_threshold", CompCurveLayout.ThresholdFromDragX(p.X, PlotW));
         InvalidateVisual();
     }
 
@@ -1118,8 +1061,7 @@ public sealed class CompCurveCanvas : FrameworkElement
     {
         if (!_drag || _cue is null)
             return;
-        Commit?.Invoke("comp_threshold",
-            Math.Round(Math.Clamp(DbFromX(e.GetPosition(this).X), -60.0, 0.0), 1));
+        Commit?.Invoke("comp_threshold", CompCurveLayout.ThresholdFromDragX(e.GetPosition(this).X, PlotW));
         InvalidateVisual();
     }
 
@@ -1138,8 +1080,7 @@ public sealed class CompCurveCanvas : FrameworkElement
     {
         if (_cue is null)
             return;
-        double newRatio = Math.Round(Math.Clamp(
-            _cue.CompRatio * (e.Delta > 0 ? 1.15 : 1 / 1.15), 1.0, 20.0), 2);
+        double newRatio = CompCurveLayout.RatioFromWheel(_cue.CompRatio, e.Delta > 0);
         Commit?.Invoke("comp_ratio", newRatio);
         InvalidateVisual();
         e.Handled = true;
@@ -1148,6 +1089,8 @@ public sealed class CompCurveCanvas : FrameworkElement
     private static FormattedText Text(string t, Brush b, double size) => new(
         t, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
         new Typeface("Segoe UI"), size, b, 1.0);
+
+    private static Point ToPoint(GeoPoint p) => new(p.X, p.Y);
 
     private static Brush Frozen(Brush b) { b.Freeze(); return b; }
 

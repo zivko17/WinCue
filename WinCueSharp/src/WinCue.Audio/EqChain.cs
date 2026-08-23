@@ -6,10 +6,17 @@
 // por canal. Configure() se llama desde el main thread; publica el array de
 // etapas por intercambio de referencia, así el hilo RT nunca ve coeficientes
 // a medio escribir. Los estados se conservan por índice al reconfigurar
-// (edición en vivo sin clics). ResponseDb() da la curva teórica para la UI.
+// (edición en vivo sin clics).
+//
+// Los COEFICIENTES (Peaking/Highpass/Lowpass/Coefficients) y ResponseDb()
+// viven en WinCue.Presentation.EqResponse — es la MISMA fórmula que la curva
+// del editor de EQ dibuja en pantalla (WinCue.App/Secuence.App), y solo puede
+// haber una copia: aquí solo queda el estado en tiempo real (Stage, Z1/Z2) y
+// el procesado de audio de verdad.
 // =============================================================================
 
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.Audio;
 
@@ -74,7 +81,7 @@ public sealed class EqChain
 
         var old = _stages;
         var list = new List<Stage>();
-        foreach (var (b0, b1, b2, a1, a2) in Coefficients(eq, _sampleRate))
+        foreach (var (b0, b1, b2, a1, a2) in EqResponse.Coefficients(eq, _sampleRate))
         {
             var s = new Stage { B0 = b0, B1 = b1, B2 = b2, A1 = a1, A2 = a2 };
             int idx = list.Count;
@@ -160,81 +167,13 @@ public sealed class EqChain
     /// el medidor GR. float: la lectura/escritura es atómica.</summary>
     public float CurrentGainReductionDb { get; private set; }
 
-    // ------------------------------------------------------------------
-    // Coeficientes (RBJ cookbook) — compartidos con la curva de la UI
-    // ------------------------------------------------------------------
-
-    private static IEnumerable<(double B0, double B1, double B2, double A1, double A2)>
-        Coefficients(AudioEqParams eq, int fs)
-    {
-        if (eq.HpfOn)
-            yield return Highpass(eq.HpfFreq, 0.7071, fs);
-        if (eq.EqEnabled && eq.Bands is not null)
-            foreach (var b in eq.Bands)
-                if (Math.Abs(b.GainDb) > 0.01)
-                    yield return Peaking(b.Freq, b.GainDb, b.Q, fs);
-        if (eq.LpfOn)
-            yield return Lowpass(eq.LpfFreq, 0.7071, fs);
-    }
-
-    private static (double, double, double, double, double) Peaking(
-        double freq, double gainDb, double q, int fs)
-    {
-        double a = Math.Pow(10.0, gainDb / 40.0);
-        double w0 = 2.0 * Math.PI * Clamp(freq, fs) / fs;
-        double alpha = Math.Sin(w0) / (2.0 * Math.Max(0.05, q));
-        double cosw = Math.Cos(w0);
-        double a0 = 1.0 + alpha / a;
-        return ((1.0 + alpha * a) / a0, -2.0 * cosw / a0, (1.0 - alpha * a) / a0,
-                -2.0 * cosw / a0, (1.0 - alpha / a) / a0);
-    }
-
-    private static (double, double, double, double, double) Highpass(
-        double freq, double q, int fs)
-    {
-        double w0 = 2.0 * Math.PI * Clamp(freq, fs) / fs;
-        double alpha = Math.Sin(w0) / (2.0 * q);
-        double cosw = Math.Cos(w0);
-        double a0 = 1.0 + alpha;
-        return ((1.0 + cosw) / 2.0 / a0, -(1.0 + cosw) / a0, (1.0 + cosw) / 2.0 / a0,
-                -2.0 * cosw / a0, (1.0 - alpha) / a0);
-    }
-
-    private static (double, double, double, double, double) Lowpass(
-        double freq, double q, int fs)
-    {
-        double w0 = 2.0 * Math.PI * Clamp(freq, fs) / fs;
-        double alpha = Math.Sin(w0) / (2.0 * q);
-        double cosw = Math.Cos(w0);
-        double a0 = 1.0 + alpha;
-        return ((1.0 - cosw) / 2.0 / a0, (1.0 - cosw) / a0, (1.0 - cosw) / 2.0 / a0,
-                -2.0 * cosw / a0, (1.0 - alpha) / a0);
-    }
-
-    private static double Clamp(double freq, int fs) =>
-        Math.Clamp(freq, 10.0, fs * 0.49);
-
     public static double DbToLin(double db) => Math.Pow(10.0, db / 20.0);
 
     /// <summary>Respuesta teórica de la cadena en dB a una frecuencia dada
-    /// (para pintar la curva del editor; incluye la ganancia del clip).</summary>
-    public static double ResponseDb(AudioEqParams eq, double freq, int sampleRate = 48000)
-    {
-        double db = eq.GainDb;
-        double w = 2.0 * Math.PI * freq / sampleRate;
-        double cosw = Math.Cos(w), sinw = Math.Sin(w);
-        double cos2 = Math.Cos(2 * w), sin2 = Math.Sin(2 * w);
-        foreach (var (b0, b1, b2, a1, a2) in Coefficients(eq, sampleRate))
-        {
-            // |H(e^jw)| con z^-1 = cos(w) - j·sin(w)
-            double numRe = b0 + b1 * cosw + b2 * cos2;
-            double numIm = -(b1 * sinw + b2 * sin2);
-            double denRe = 1.0 + a1 * cosw + a2 * cos2;
-            double denIm = -(a1 * sinw + a2 * sin2);
-            double mag2 = (numRe * numRe + numIm * numIm)
-                        / Math.Max(1e-18, denRe * denRe + denIm * denIm);
-            db += 10.0 * Math.Log10(Math.Max(1e-12, mag2));
-        }
-        return db;
-    }
+    /// (para pintar la curva del editor; incluye la ganancia del clip).
+    /// Delega en WinCue.Presentation.EqResponse — ver la cabecera del
+    /// archivo. Queda aquí para no romper a quien ya llama EqChain.ResponseDb
+    /// (tests incluidos).</summary>
+    public static double ResponseDb(AudioEqParams eq, double freq, int sampleRate = 48000) =>
+        EqResponse.ResponseDb(eq, freq, sampleRate);
 }
