@@ -1,0 +1,21 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <!-- ==========================================================================
+       WinCue.Presentation — lo que la interfaz necesita y NO es de ningún
+       framework de interfaz: medidas, valores de color, glifos de icono.
+       net8.0 a secas, como el motor: lo consumen WinCue.App (WPF) y, cuando
+       exista, Secuence.App (WinUI 3). Si algo de aquí necesita un tipo de WPF
+       o de WinUI, es que no es de aquí.
+       ========================================================================== -->
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <Nullable>enable</Nullable>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <ProjectReference Include="..\WinCue.Core\WinCue.Core.csproj" />
+  </ItemGroup>
+
+</Project>

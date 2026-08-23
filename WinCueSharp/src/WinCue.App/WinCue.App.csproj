@@ -5,6 +5,7 @@
     <ProjectReference Include="..\WinCue.Audio\WinCue.Audio.csproj" />
     <ProjectReference Include="..\WinCue.Video\WinCue.Video.csproj" />
     <ProjectReference Include="..\WinCue.Controller\WinCue.Controller.csproj" />
+    <ProjectReference Include="..\WinCue.Presentation\WinCue.Presentation.csproj" />
   </ItemGroup>
 
   <PropertyGroup>

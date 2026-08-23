@@ -14,7 +14,7 @@
 // NO metas colores aquí — esos son de Theme.
 // =============================================================================
 
-namespace WinCue.App;
+namespace WinCue.Presentation;
 
 /// <summary>Medidas compartidas de los controles de la interfaz.</summary>
 public static class UiMetrics

@@ -18,6 +18,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Threading;
 using WinCue.Controller;
+using WinCue.Presentation;
 using WinCue.Core;
 
 namespace WinCue.App;
