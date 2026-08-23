@@ -91,6 +91,35 @@ jobs:
       - name: Restaurar
         run: dotnet restore WinCueSharp/WinCueSharp.sln
 
+      # Secuence.App (WinUI 3) necesita las tareas Appx de Visual Studio
+      # (MrtCore.PriGen.targets → ExpandPriContent): `dotnet build` no las
+      # trae, y el autorresuelto del .csproj solo sondea las rutas clásicas de
+      # VS 2022 — la imagen del runner mueve Visual Studio de sitio sin avisar
+      # (así se cayó el primer build de Secuence aquí: ninguna sonda casó y
+      # MSBuild cayó a una ruta bajo el SDK de dotnet que no existe). vswhere
+      # es la herramienta OFICIAL para encontrar VS: se busca AppxPackage en
+      # cada instalación (v17, v18, la que haya) y se exporta como variable de
+      # entorno — MSBuild trata el entorno como propiedad, y la condición
+      # '$(AppxMSBuildToolsPath)' == '' del .csproj deja ganar este valor.
+      - name: Localizar las tareas Appx de Visual Studio (Secuence.App)
+        shell: pwsh
+        run: |
+          $vswhere = "${env:ProgramFiles(x86)}\Microsoft Visual Studio\Installer\vswhere.exe"
+          $roots = @(& $vswhere -products * -requires Microsoft.Component.MSBuild -property installationPath)
+          $appx = $roots |
+            ForEach-Object { Get-ChildItem -Path (Join-Path $_ 'MSBuild\Microsoft\VisualStudio') -Directory -Filter 'v*' -ErrorAction SilentlyContinue } |
+            ForEach-Object { Join-Path $_.FullName 'AppxPackage' } |
+            Where-Object { Test-Path (Join-Path $_ 'Microsoft.Build.Packaging.Pri.Tasks.dll') } |
+            Select-Object -First 1
+          if (-not $appx) {
+            # Último recurso: la DLL puede vivir fuera del árbol MSBuild clásico
+            $hit = Get-ChildItem 'C:\Program Files\Microsoft Visual Studio' -Recurse -Filter 'Microsoft.Build.Packaging.Pri.Tasks.dll' -ErrorAction SilentlyContinue | Select-Object -First 1
+            if ($hit) { $appx = $hit.DirectoryName }
+          }
+          if (-not $appx) { throw 'Sin AppxPackage en ninguna instalacion de Visual Studio del runner: Secuence.App no puede compilar aqui.' }
+          "AppxMSBuildToolsPath=$appx\" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          Write-Host "AppxMSBuildToolsPath=$appx\"
+
       # TreatWarningsAsErrors se fuerza AQUÍ y no en Directory.Build.props: en
       # local sigue en false para no interrumpir mientras se trabaja, pero nada
       # entra en la rama con un warning. Comprobado que hoy compila a cero.

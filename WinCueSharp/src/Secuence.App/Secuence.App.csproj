@@ -45,6 +45,13 @@
        puesto — y solo actúa si nadie fijó la propiedad ya a mano: la condición
        de la primera línea hace que un -p:AppxMSBuildToolsPath=... explícito
        (como el de los comandos documentados en el hito 0) siga ganando.
+
+       EN EL RUNNER DE CI estas sondas NO casan (la imagen mueve Visual Studio
+       de sitio): allí el paso «Localizar las tareas Appx» de ci.yml encuentra
+       la ruta con vswhere y la exporta como VARIABLE DE ENTORNO — MSBuild
+       trata el entorno como propiedad, así que la misma condición de arriba
+       la deja ganar. Verificado en Actions el 2026-08-23 (run #5 rojo sin
+       esto; la trampa estaba anotada en el traspaso como "sin verificar").
        ========================================================================== -->
   <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == ''">
     <_SecuenceVsRoot Condition="Exists('C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Enterprise</_SecuenceVsRoot>
