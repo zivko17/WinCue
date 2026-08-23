@@ -18,6 +18,7 @@ using System.Windows.Controls;
 using NAudio.Midi;
 using WinCue.Audio;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 

@@ -14,6 +14,7 @@ using System.Windows.Threading;
 using Microsoft.Win32;
 using WinCue.Controller;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 

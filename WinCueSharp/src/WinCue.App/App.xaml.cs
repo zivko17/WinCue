@@ -16,6 +16,7 @@ using System.Windows.Threading;
 using WinCue.Audio;
 using WinCue.Controller;
 using WinCue.Core;
+using WinCue.Presentation;
 using WinCue.Video;
 
 namespace WinCue.App;
@@ -90,7 +91,7 @@ public partial class App : Application
         Theme.Install(Resources);
         // Fuente de iconos, por el mismo motivo y en el mismo momento: los
         // glifos viven en el Área de Uso Privado y sin esto saldrían en blanco.
-        Icons.InstallFont();
+        IconFont.InstallFont();
 
         Action<Action> dispatch = action => Dispatcher.BeginInvoke(action);
         var settings = SettingsManager.Instance;

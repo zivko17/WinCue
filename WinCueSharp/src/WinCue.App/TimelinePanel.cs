@@ -24,6 +24,7 @@ using System.Windows.Input;
 using System.Windows.Media;
 using WinCue.Controller;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
@@ -1261,14 +1262,14 @@ public sealed class TimelineCanvas : FrameworkElement
         return s >= 60 ? $"{m}:{rest:00.#}" : $"{rest:0.#}s";
     }
 
-    // Icons.Font y no "Segoe UI": estas etiquetas llevan glifos de icono
+    // IconFont.Font y no "Segoe UI": estas etiquetas llevan glifos de icono
     // mezclados con el texto (el tipo de cue, la marca de GO). FormattedText no
     // hereda la fuente por defecto de la app — es dibujo directo, fuera del
     // árbol visual — así que aquí hay que nombrarla. La fuente es compuesta:
     // el icono sale de Phosphor y las letras de Segoe UI, como antes.
     private static FormattedText Label(string text, Brush brush, double size) => new(
         text, CultureInfo.InvariantCulture, FlowDirection.LeftToRight,
-        new Typeface(Icons.Font, FontStyles.Normal, FontWeights.Normal,
+        new Typeface(IconFont.Font, FontStyles.Normal, FontWeights.Normal,
                      FontStretches.Normal), size, brush, 1.0);
 
     private static Color Darken(Color c, double f) => Color.FromRgb(

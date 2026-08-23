@@ -37,4 +37,19 @@ public class UiMetricsTests
         Assert.Equal(74, UiMetrics.DbReadoutWidth);
         Assert.Equal(124, UiMetrics.DbReadoutWideWidth);
     }
+
+    // Red de regresión del traslado: estas siete quedaron sin fijar en la
+    // tarea 5 (revisión posterior) y son las mismas medidas de los strips y
+    // botones MUTE/SOLO que ya vivían en la interfaz de WPF.
+    [Fact]
+    public void LosStripsYSusBotonesMidenLoMismoQueAntesDelTraslado()
+    {
+        Assert.Equal(104, UiMetrics.WideMuteWidth);
+        Assert.Equal(26, UiMetrics.WideMuteHeight);
+        Assert.Equal(54, UiMetrics.StripButtonWidth);
+        Assert.Equal(24, UiMetrics.StripButtonHeight);
+        Assert.Equal(140, UiMetrics.StripWidth);
+        Assert.Equal(34, UiMetrics.StripCollapsedWidth);
+        Assert.Equal(292, UiMetrics.StripHeight);
+    }
 }

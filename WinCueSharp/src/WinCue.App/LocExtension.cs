@@ -14,6 +14,7 @@
 
 using System.Windows.Markup;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 

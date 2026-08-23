@@ -14,6 +14,7 @@ using System.Windows.Controls;
 using System.Windows.Media;
 using System.Windows.Threading;
 using WinCue.Core;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
