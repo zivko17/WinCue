@@ -19,9 +19,9 @@
 // la cabecera de VuMeterCanvas.cs para la razón completa.
 //
 // SIMPLIFICACIONES DELIBERADAS DE ESTA PASADA (documentadas, no descuidos):
-//   · La etiqueta del bloque sigue siendo "número · nombre" a secas — los
-//     prefijos ↗/∞/📌 son glifos de Icons (Phosphor) y Win2D/DirectWrite no
-//     resuelve por NOMBRE una fuente cargada solo para XAML (ver IconFont.cs).
+//   · La etiqueta del bloque YA lleva sus prefijos ↗/∞/📌: Win2D no resuelve
+//     la fuente de iconos por NOMBRE ni por "ms-appx:///" (eso lanza), pero sí
+//     por un URI de ARCHIVO — IconFont.Win2DFamily, comprobado al arrancar.
 //     El aviso de solapamiento sigue siendo la marca triangular lisa.
 //   · Los recuadros de grupo (spans) y los marcadores GO YA SE PINTAN, con el
 //     mismo reparto que WinCue (relleno debajo, marco y asa por ENCIMA de los
@@ -240,7 +240,8 @@ public sealed class TimelineCanvas : UserControl
     /// en un campo porque CanvasTextFormat es descartable y este control no
     /// lo es (CA1001); la medida ya aloja un CanvasTextLayout de todas
     /// formas.</summary>
-    private static CanvasTextFormat SpanFormat() => new() { FontSize = 10 };
+    private static CanvasTextFormat SpanFormat() =>
+        new() { FontSize = 10, FontFamily = IconFont.Win2DFamily };
 
     /// <summary>Asa de grupo bajo el punto (la del grupo MÁS INTERNO, que lo
     /// decide el cálculo compartido). El ancho del rótulo lo mide Win2D:
@@ -253,7 +254,7 @@ public sealed class TimelineCanvas : UserControl
         using var format = SpanFormat();
         return TimelineHitTest.SpanChip(_projection.Spans, p.X, p.Y,
             _vp.PxPerSec, _vp.ScrollX, LayerH,
-            span => MeasureText(_canvas, TimelineLayout.SpanLabelText(span, withIcon: false), format));
+            span => MeasureText(_canvas, TimelineLayout.SpanLabelText(span), format));
     }
 
     /// <summary>Cuerpo del recuadro de un grupo bajo el punto.</summary>
@@ -543,7 +544,8 @@ public sealed class TimelineCanvas : UserControl
         // La caja y su etiqueta son cálculo COMPARTIDO (TimelineLayout.
         // SpanBoxRect / SpanLabelText); aquí solo se pinta. El orden es el de
         // WinCue: relleno → marcas GO → bloques → marcos y asas.
-        using var spanFormat = new CanvasTextFormat { FontSize = 10 };
+        using var spanFormat = new CanvasTextFormat
+        { FontSize = 10, FontFamily = IconFont.Win2DFamily };
         foreach (var span in _projection.Spans)
         {
             var box = SpanBox(span, lh);
@@ -554,13 +556,11 @@ public sealed class TimelineCanvas : UserControl
         }
 
         // ── Marcadores GO: a partir de ahí el tiempo es ESTIMADO ──
-        // WinCue rotula "▸GO" con el glifo de Phosphor delante; aquí va solo
-        // "GO". No es un descuido: Win2D/DirectWrite NO resuelve la fuente de
-        // iconos, ni por nombre ni por la cadena "ms-appx://…#Phosphor" que sí
-        // vale en XAML — se probó y DrawText lanza ArgumentException. Es la
-        // misma limitación por la que las etiquetas de bloque se quedan sin
-        // sus prefijos ↗/∞/📌 (ver la cabecera de este archivo).
-        using var goFormat = new CanvasTextFormat { FontSize = 9 };
+        // El rótulo lleva el glifo delante, como en WinCue. Win2D no resuelve
+        // "ms-appx://…" —eso lanza ArgumentException— pero sí un URI de
+        // ARCHIVO: IconFont.Win2DFamily.
+        using var goFormat = new CanvasTextFormat
+        { FontSize = 9, FontFamily = IconFont.Win2DFamily };
         foreach (double t in _projection.GoMarks)
         {
             float x = (float)_vp.SecToX(t);
@@ -572,7 +572,7 @@ public sealed class TimelineCanvas : UserControl
             // se pinta con Win2D contra la fuente de iconos, no con un
             // TextBlock: la trampa del cuadradito es de los controles de
             // XAML, no de esto.
-            ds.DrawText("GO", x + 2, (float)(h - 15),
+            ds.DrawText($"{Icons.Go}GO", x + 2, (float)(h - 15),
                 ToColor(Palette.Go), goFormat);
         }
 
@@ -601,7 +601,7 @@ public sealed class TimelineCanvas : UserControl
                 selected ? ToColor(Palette.White) : ToColor(color, 200),
                 selected ? 2f : 1.6f);
 
-            string text = TimelineLayout.SpanLabelText(span, withIcon: false);
+            string text = TimelineLayout.SpanLabelText(span);
             var chip = SpanChipBox(ds, span, lh, text, spanFormat);
             ds.FillRoundedRectangle(chip, 3, 3, ToColor(color, 235));
             // Recortado al asa: un nombre largo no puede salirse del grupo.
@@ -687,10 +687,15 @@ public sealed class TimelineCanvas : UserControl
 
         if (rect.Width > 30)
         {
-            string text = $"{b.Cue.DisplayNumber} · {b.Cue.Name}";
+            // Etiqueta COMPARTIDA (TimelineLayout.BlockLabelText): trae los
+            // prefijos ↗ fantasma, ∞/×N repeticiones y 📌 pista fijada. Antes
+            // se construía a mano y sin ellos porque Win2D no resolvía la
+            // fuente de iconos; con IconFont.Win2DFamily ya se puede.
+            string text = TimelineLayout.BlockLabelText(b);
             using var format = new CanvasTextFormat
             {
                 FontSize = 11,
+                FontFamily = IconFont.Win2DFamily,
                 WordWrapping = CanvasWordWrapping.NoWrap,
                 TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
                 TrimmingSign = CanvasTrimmingSign.Ellipsis,

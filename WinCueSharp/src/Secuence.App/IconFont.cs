@@ -48,6 +48,21 @@ public static class IconFont
     /// coinciden en "Phosphor").</summary>
     public static readonly FontFamily Font = new($"ms-appx:///{RutaEnPaquete}#Phosphor");
 
+    /// <summary>La MISMA fuente, en la forma que entiende Win2D.
+    ///
+    /// Win2D/DirectWrite NO resuelve `ms-appx:///` —el esquema que sí vale en
+    /// XAML—: DrawText lanza ArgumentException. Lo que sí admite es un URI de
+    /// ARCHIVO con la familia detrás, y el .ttf está copiado junto al
+    /// ejecutable, así que se construye desde ahí.
+    ///
+    /// Se comprueba al arrancar (ver ComprobarWin2D): que el archivo esté no
+    /// significa que la fuente se aplique, y esa distinción ya se pagó una vez
+    /// con el esquema de URI.</summary>
+    public static readonly string Win2DFamily =
+        new Uri(System.IO.Path.Combine(AppContext.BaseDirectory,
+            RutaEnPaquete.Replace('/', System.IO.Path.DirectorySeparatorChar))).AbsoluteUri
+        + "#Phosphor";
+
     /// <summary>Comprueba que la fuente de iconos se aplicó DE VERDAD, no solo
     /// que el archivo exista en disco — que es justo la distinción que se nos
     /// escapó la primera vez: el .ttf estaba desde el principio (488.636
@@ -68,6 +83,41 @@ public static class IconFont
     /// MainWindow.xaml.cs), ANTES de mostrar la tabla, para que un fallo
     /// salga como excepción con nombre y no como una interfaz llena de
     /// cuadritos.</summary>
+    /// <summary>Lo mismo que <see cref="Comprobar"/> pero para Win2D, que
+    /// carga la fuente por su PROPIO camino (DirectWrite) y con OTRO esquema
+    /// de URI. Que XAML la pinte no dice nada de si Win2D la pinta: son dos
+    /// cargadores distintos, y ya se comprobó por las malas que
+    /// <c>ms-appx:///</c> vale en uno y revienta en el otro.
+    ///
+    /// Mismo criterio que la de XAML: se mide el MISMO glifo con la fuente de
+    /// iconos y sin ella. Si las dos medidas coinciden, es que Win2D cayó al
+    /// sustituto del sistema y los glifos saldrían como cuadraditos.</summary>
+    public static void ComprobarWin2D()
+    {
+        string glifo = Icons.Get(nameof(Icons.Audio));
+        var device = Microsoft.Graphics.Canvas.CanvasDevice.GetSharedDevice();
+
+        using var conIcono = new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
+        { FontSize = 16, FontFamily = Win2DFamily };
+        using var conDefecto = new Microsoft.Graphics.Canvas.Text.CanvasTextFormat
+        { FontSize = 16 };
+
+        using var layoutIcono = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(
+            device, glifo, conIcono, float.MaxValue, float.MaxValue);
+        using var layoutDefecto = new Microsoft.Graphics.Canvas.Text.CanvasTextLayout(
+            device, glifo, conDefecto, float.MaxValue, float.MaxValue);
+
+        double anchoIcono = layoutIcono.LayoutBounds.Width;
+        double anchoDefecto = layoutDefecto.LayoutBounds.Width;
+
+        if (anchoIcono <= 0 || Math.Abs(anchoIcono - anchoDefecto) < 0.5)
+            throw new InvalidOperationException(
+                $"Win2D no aplicó la fuente de iconos ({Win2DFamily}): el glifo de prueba mide " +
+                $"{anchoIcono:0.0}px, igual que con la fuente por defecto. Win2D/DirectWrite NO " +
+                "admite \"ms-appx:///\" —eso lanza ArgumentException al pintar— y necesita un URI " +
+                "de ARCHIVO; comprueba que assets/Phosphor.ttf se copia junto al ejecutable.");
+    }
+
     public static void Comprobar()
     {
         string glifo = Icons.Get(nameof(Icons.Audio));

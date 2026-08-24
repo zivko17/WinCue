@@ -112,6 +112,9 @@ public partial class App : Application
         // aplicó de verdad, mejor una excepción con nombre aquí que una tabla
         // llena de cuadritos (ver IconFont.Comprobar para el porqué exacto).
         IconFont.Comprobar();
+        // Y la MISMA fuente por el camino de Win2D, que es otro cargador: que
+        // XAML la pinte no dice nada de si DirectWrite la resuelve.
+        IconFont.ComprobarWin2D();
 
         // Idioma de la interfaz (ui_language): faltaba por completo en esta
         // App.xaml.cs — Loc.T() ya se usa por toda Secuence.App (InspectorPanel,
