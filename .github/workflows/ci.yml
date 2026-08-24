@@ -30,7 +30,12 @@ on:
   push:
     # secuence/**: la rama de Secuence vive fuera de pruebas-v2 hasta que se
     # integre; sin esta entrada, sus empujones no ejecutaban el CI.
-    branches: [pruebas-v2, main, 'secuence/**']
+    # claude/**: las ramas de trabajo del agente. Importa MÁS que las otras:
+    # Secuence.App es WinUI 3 y NO se compila fuera de Windows, así que este
+    # runner es el ÚNICO sitio donde su código se compila antes de llegar a la
+    # máquina de Andrés. Sin esta entrada, un error de compilación viajaba
+    # entero hasta su build local.
+    branches: [pruebas-v2, main, 'secuence/**', 'claude/**']
     paths:
       - 'WinCueSharp/**'
       - '.github/workflows/ci.yml'
