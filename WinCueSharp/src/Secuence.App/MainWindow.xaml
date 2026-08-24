@@ -720,6 +720,8 @@
             <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Extended"
                       SelectionChanged="OnCueSelectionChanged"
                       RightTapped="OnCueListRightTapped"
+                      AllowDrop="True"
+                      DragOver="OnCueListDragOver" Drop="OnCueListDrop"
                       Background="{x:Bind local:Theme.WindowBgBrush}">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">

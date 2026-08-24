@@ -251,6 +251,9 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Agrupar con `Ctrl+G`.** Antes de esto, en Secuence no había forma de meter
   un cue dentro de un grupo: se podía crear el GROUP y nada más.
 - **Menú contextual de la tabla** con las acciones de WinCue.
+- **Soltar archivos del Explorador sobre la tabla** — alta por el mismo
+  camino que el botón IMPORTAR. En modo SHOW se rechaza ya en el `DragOver`,
+  para que el cursor lo diga antes de soltar.
 - **Selección múltiple** en la tabla (`Extended`: Ctrl suma, Mayús extiende),
   con agrupar / copiar / duplicar / borrar operando sobre el bloque entero.
   El inspector enseña la fila que se ACABA de tocar, no la primera: al
@@ -266,9 +269,9 @@ pantalla por la propia sesión, que sí podía mirar — ver
 **Inmediato** (revisado el 2026-08-24; lo que estaba aquí y ya está hecho se
 ha movido a la lista de arriba):
 
-- **Arrastrar y soltar archivos** sobre la tabla. WinCue lo tiene
-  (`AddCuesFromFiles` desde el `DragDrop`); en Secuence solo se importa por
-  el botón.
+- **Reordenar filas arrastrándolas** dentro de la tabla. Es la OTRA mitad del
+  `Drop` de WinCue (formato `"WinCueRow"` → `OnMoveCue`); soltar archivos ya
+  está. En Secuence se reordena desde el timeline, no desde la tabla.
 - **Barra de estado.**
 - **Timeline: el cursor de edición** con scrub y doble clic (clic en la regla
   lo coloca, doble clic reproduce desde ahí). Es lo único que queda de la

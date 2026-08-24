@@ -20,7 +20,9 @@ using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Input;
 using Microsoft.UI.Xaml.Media;
+using Windows.ApplicationModel.DataTransfer;
 using Windows.Foundation;
+using Windows.Storage;
 using Windows.Storage.Pickers;
 using WinCue.Controller;
 using WinCue.Core;
@@ -805,6 +807,57 @@ public sealed partial class MainWindow : Window, IShowView
         Item(nameof(CueType.Memo), Loc.T("Nota", "Memo"));
         Item(nameof(CueType.Group), Loc.T("Grupo", "Group"));
         AddButton.Flyout = flyout;
+    }
+
+    // ── Soltar archivos sobre la tabla ─────────────────────────────────
+    // Equivalente de WinCue.App.OnGridDrop en su rama de FileDrop. El alta la
+    // hace el MISMO camino compartido que el botón IMPORTAR
+    // (CueListEditor.AddCuesFromFiles, que ya valida con MediaImporter y
+    // decide audio o vídeo por extensión): aquí solo se sacan las rutas.
+    //
+    // En modo SHOW no se acepta el arrastre — el candado de SHOW es sobre la
+    // LISTA (añadir / insertar / borrar / importar), y esto es añadir. Se
+    // rechaza ya en el DragOver para que el cursor lo diga antes de soltar,
+    // en vez de tragarse el gesto y no hacer nada.
+
+    private void OnCueListDragOver(object sender, DragEventArgs e)
+    {
+        if (_controller is null
+            || ModeToggle.IsChecked == true
+            || !e.DataView.Contains(StandardDataFormats.StorageItems))
+            return;
+
+        e.AcceptedOperation = DataPackageOperation.Copy;
+        if (e.DragUIOverride is not null)
+        {
+            e.DragUIOverride.Caption = Loc.T("Añadir cues", "Add cues");
+            e.DragUIOverride.IsGlyphVisible = true;
+        }
+        e.Handled = true;
+    }
+
+    private async void OnCueListDrop(object sender, DragEventArgs e)
+    {
+        if (_controller is null
+            || ModeToggle.IsChecked == true
+            || !e.DataView.Contains(StandardDataFormats.StorageItems))
+            return;
+
+        // Deferral: GetStorageItemsAsync es asíncrono y sin esto el sistema da
+        // por terminado el arrastre —y suelta el DataView— antes de que
+        // lleguen las rutas.
+        var deferral = e.GetDeferral();
+        try
+        {
+            var items = await e.DataView.GetStorageItemsAsync();
+            // Solo archivos: soltar una CARPETA no añade nada, igual que en
+            // WinCue (allí el FileDrop de una carpeta lo descarta
+            // MediaImporter por extensión).
+            var paths = items.OfType<StorageFile>().Select(f => f.Path).ToList();
+            if (paths.Count > 0)
+                _controller.AddCuesFromFiles(PrimaryRow(), paths);
+        }
+        finally { deferral.Complete(); }
     }
 
     // ── Menú contextual de la tabla (botón derecho) ────────────────────
