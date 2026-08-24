@@ -147,8 +147,20 @@ public sealed partial class MainWindow : Window, IShowView
         // destruir — aquí, en cambio, si el operador confirma, se deja pasar
         // el cierre real (_closeConfirmed evita volver a preguntar cuando
         // Close() se llama una segunda vez desde dentro del propio handler).
+        WireSplitters();
+
         _appWindow.Closing += async (_, args) =>
         {
+            // El alto del panel de pestañas se GUARDA, y se guarda ANTES de
+            // mirar si hay cambios sin guardar: si no, cerrar un show limpio
+            // —que es lo normal— se llevaba por delante el tamaño que acababa
+            // de dejar el operador. Aquí la ventana sigue montada; después del
+            // cierre real ActualHeight ya no vale nada (mismo motivo que en
+            // WinCue.App.OnClosing).
+            if (BottomPaneRow.ActualHeight > 0)
+                _settings.Set("bottom_pane_height",
+                    (int)Math.Round(BottomPaneRow.ActualHeight));
+
             if (_closeConfirmed || _controller?.HasUnsavedChanges != true)
                 return;
             args.Cancel = true;
@@ -160,6 +172,7 @@ public sealed partial class MainWindow : Window, IShowView
 
         GoIcon.Text = Icons.Play;
         PauseIcon.Text = Icons.Pause;
+        // (los separadores se cablean en WireSplitters, llamado más arriba)
         StopAllIcon.Text = Icons.Stop;
         FadeAllIcon.Text = Icons.Fade;
         PanicIcon.Text = Icons.Warning;
@@ -255,6 +268,49 @@ public sealed partial class MainWindow : Window, IShowView
     // colores que usa WinCue para pestaña activa/inactiva (Theme.WindowBg +
     // Theme.Warn vs. Theme.DeeperBg + Theme.TextDim).
     // ==================================================================
+
+    /// <summary>Los dos separadores arrastrables, con los MISMOS topes que los
+    /// dos GridSplitter de WinCue (MainWindow.xaml). WinUI 3 no trae
+    /// GridSplitter: el control es PaneSplitter y el cálculo de hasta dónde
+    /// llega el arrastre es WinCue.Presentation.SplitterDrag, con pruebas.
+    ///
+    /// Diferencia deliberada entre los dos, copiada de WinCue: el ancho de la
+    /// columna izquierda NO se guarda (cada arranque vuelve a 455), el alto
+    /// del panel de pestañas SÍ.</summary>
+    private void WireSplitters()
+    {
+        // Columna izquierda: crece al arrastrar hacia la DERECHA.
+        LeftSplitter.Rows = false;
+        LeftSplitter.GrowsAgainstDrag = false;
+        LeftSplitter.MinSize = 200;
+        LeftSplitter.MaxSize = 760;
+        LeftSplitter.NeighbourMin = 400;
+        LeftSplitter.Current = () => LeftPaneColumn.ActualWidth;
+        LeftSplitter.Available = () => RootGrid.ActualWidth;
+        LeftSplitter.Apply = w => LeftPaneColumn.Width = new GridLength(w, GridUnitType.Pixel);
+
+        // Panel de pestañas: crece al arrastrar hacia ARRIBA, que es lo que
+        // hace falta para que quepa el rack de audio entero.
+        BottomSplitter.Rows = true;
+        BottomSplitter.GrowsAgainstDrag = true;
+        BottomSplitter.MinSize = 140;
+        BottomSplitter.MaxSize = 900;
+        BottomSplitter.NeighbourMin = 120;
+        BottomSplitter.Current = () => BottomPaneRow.ActualHeight;
+        // El hueco que se reparten son SUS DOS filas más el separador, no el
+        // alto de la ventana: por encima están la cabecera de columnas y la
+        // fila de pestañas, que no entran en el reparto.
+        BottomSplitter.Available = () =>
+            CueListRow.ActualHeight + BottomSplitter.ActualHeight + BottomPaneRow.ActualHeight;
+        BottomSplitter.Apply = h => BottomPaneRow.Height = new GridLength(h, GridUnitType.Pixel);
+
+        // Alto tal como se dejó la última vez. El tope de abajo es el MinHeight
+        // de la fila; el de arriba evita que un valor raro guardado en otra
+        // pantalla deje la lista de cues sin sitio (los dos, de WinCue).
+        int panelH = _settings.Get("bottom_pane_height", 330);
+        BottomPaneRow.Height =
+            new GridLength(Math.Clamp(panelH, 140, 900), GridUnitType.Pixel);
+    }
 
     private void OnTimelineTabClick(object sender, RoutedEventArgs e) => SelectTab(0);
     private void OnInspectorTabClick(object sender, RoutedEventArgs e) => SelectTab(1);

@@ -258,20 +258,18 @@
         </Grid.KeyboardAccelerators>
 
         <!-- Columna 0: previos PGM/PVW + EN REPRODUCCIÓN (equivalente al panel
-             izquierdo de WinCue, MonitorHost + ActiveList). Columna 1: tabla +
-             pestañas — mismo reparto que el Grid de 3 columnas de WinCue
-             (aquí en 2: el GridSplitter arrastrable no tiene equivalente
-             razonable en WinUI 3 sin traer una dependencia nueva — ver el
-             informe — así que la columna izquierda queda de ancho FIJO). -->
+             izquierdo de WinCue, MonitorHost + ActiveList). Columna 1: el
+             separador arrastrable. Columna 2: tabla + pestañas. Las MISMAS
+             tres columnas que el Grid raíz de WinCue. -->
         <Grid.ColumnDefinitions>
-            <!-- 455: EL MISMO ancho por defecto que la columna izquierda de
-                 WinCue (MainWindow.xaml, ColumnDefinition Width="455"). Estaba
-                 en 380 y con ello los monitores PGM/PVW salían bastante más
-                 pequeños que los de WinCue. Allí la columna es arrastrable
-                 (MinWidth 200 / MaxWidth 760); aquí sigue siendo fija — ver
-                 más abajo el porqué —, pero al menos arranca igual. -->
-            <ColumnDefinition Width="455"/>
-            <ColumnDefinition Width="*"/>
+            <!-- 455 / 200 / 760: los MISMOS tres números que la columna
+                 izquierda de WinCue (MainWindow.xaml, ColumnDefinition
+                 Width="455" MinWidth="200" MaxWidth="760"). Este ancho NO se
+                 guarda al cerrar, tampoco en WinCue: cada arranque vuelve a
+                 455. El que sí se guarda es el alto del panel de pestañas. -->
+            <ColumnDefinition x:Name="LeftPaneColumn" Width="455" MinWidth="200" MaxWidth="760"/>
+            <ColumnDefinition Width="Auto"/>
+            <ColumnDefinition Width="*" MinWidth="400"/>
         </Grid.ColumnDefinitions>
 
         <Grid.RowDefinitions>
@@ -283,7 +281,7 @@
 
         <!-- ═══════════ TRANSPORT ═══════════ -->
         <!-- Padding 8,6: el de WinCue.App/MainWindow.xaml (Border x:Name="TopBar"). -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,6">
+        <Border Grid.Row="0" Grid.ColumnSpan="3" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -425,7 +423,7 @@
         </Border>
 
         <!-- ═══════════ HERRAMIENTAS: Abrir · Guardar · Añadir · Importar · Eliminar ═══════════ -->
-        <Border Grid.Row="1" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.ToolbarBgBrush}" Padding="8,4">
+        <Border Grid.Row="1" Grid.ColumnSpan="3" Background="{x:Bind local:Theme.ToolbarBgBrush}" Padding="8,4">
             <StackPanel Orientation="Horizontal" Spacing="6">
                 <Button x:Name="OpenButton" Click="OnOpenClick" ToolTipService.ToolTip="Ctrl+O">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -646,13 +644,30 @@
         </Border>
 
         <!-- ═══════════ CENTRO: tabla + pestañas Timeline/Inspector/Mixer ═══════════ -->
-        <Grid Grid.Row="2" Grid.Column="1">
+        <!-- Separador arrastrable de la columna izquierda, el equivalente al
+             GridSplitter de WinCue (Grid.Column="1", Width="5"). WinUI 3 no
+             trae GridSplitter: esto es local:PaneSplitter, y los topes los
+             pone MainWindow.xaml.cs con los números de WinCue. -->
+        <local:PaneSplitter x:Name="LeftSplitter" Grid.Row="2" Grid.Column="1"
+                            Width="5" Background="{x:Bind local:Theme.DividerBrush}"/>
+
+        <Grid Grid.Row="2" Grid.Column="2">
             <Grid.RowDefinitions>
-                <RowDefinition Height="Auto"/> <!-- cabecera de columnas -->
-                <RowDefinition Height="*"/>    <!-- tabla -->
-                <RowDefinition Height="Auto"/> <!-- pestañas -->
-                <RowDefinition Height="330"/>  <!-- contenido de la pestaña (mismo alto inicial que WinCue.App.MainWindow.xaml, BottomPaneRow) -->
+                <RowDefinition Height="Auto"/> <!-- 0: cabecera de columnas -->
+                <!-- MinHeight 120: el de la fila de la lista en WinCue. Sin él,
+                     subir el separador podía dejar la tabla sin sitio. -->
+                <RowDefinition x:Name="CueListRow" Height="*" MinHeight="120"/>  <!-- 1: tabla -->
+                <RowDefinition Height="Auto"/> <!-- 2: separador -->
+                <RowDefinition Height="Auto"/> <!-- 3: pestañas -->
+                <!-- El 330 es solo el arranque de la PRIMERA vez: a partir de
+                     ahí manda el que deje el operador, que se guarda al cerrar
+                     (bottom_pane_height) — igual que en WinCue. -->
+                <RowDefinition x:Name="BottomPaneRow" Height="330" MinHeight="140"/> <!-- 4 -->
             </Grid.RowDefinitions>
+
+            <local:PaneSplitter x:Name="BottomSplitter" Grid.Row="2"
+                                Height="5" HorizontalAlignment="Stretch"
+                                Background="{x:Bind local:Theme.DividerBrush}"/>
 
             <!-- Cabecera de columnas -->
             <Grid Grid.Row="0" Background="{x:Bind local:Theme.HeaderBgBrush}" Height="30">
@@ -776,7 +791,7 @@
                  Style TargetType="TabItem"). El Style inicial de aquí es solo
                  el de arranque — SelectTab() (MainWindow.xaml.cs) lo
                  intercambia por TabButtonFlat en la pestaña que gane. -->
-            <StackPanel Grid.Row="2" Orientation="Horizontal" Spacing="2" Margin="0,6,0,0">
+            <StackPanel Grid.Row="3" Orientation="Horizontal" Spacing="2" Margin="0,6,0,0">
                 <Button x:Name="TimelineTabButton" Click="OnTimelineTabClick"
                         Style="{StaticResource TabButtonRelief}">
                     <StackPanel Orientation="Horizontal" Spacing="6">
@@ -804,7 +819,7 @@
                  MixerHost EN LA MISMA celda, apilados — solo uno visible cada
                  vez (SelectTab, MainWindow.xaml.cs). Mismo fondo de panel que
                  WinCue.App usa para las tres pestañas (PanelBg). -->
-            <Border Grid.Row="3" Background="{x:Bind local:Theme.PanelBgBrush}"
+            <Border Grid.Row="4" Background="{x:Bind local:Theme.PanelBgBrush}"
                     BorderBrush="{x:Bind local:Theme.DividerBrush}" BorderThickness="0,1,0,0">
                 <Grid>
                     <ContentControl x:Name="TimelineHost" HorizontalContentAlignment="Stretch"
@@ -823,7 +838,7 @@
              que TallyLabel en WinCue.App (vive en la ventana de CONTROL, no
              en la de salida). -->
         <!-- Padding 8,4: el de WinCue.App/MainWindow.xaml (Border x:Name="StatusBar"). -->
-        <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,4">
+        <Border Grid.Row="3" Grid.ColumnSpan="3" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>
