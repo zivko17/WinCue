@@ -204,8 +204,11 @@ public sealed class InspectorPanel : ContentControl
         Foreground = Theme.TextDimmerBrush,
         FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
         FontSize = 10,
-        Margin = new Thickness(10, 2, 10, 0),
+        Margin = new Thickness(0, 4, 0, 0),
         TextWrapping = TextWrapping.Wrap,
+        // 190: el tope que le pone WinCue. Sin él, la pista de uso ensancha la
+        // columna de parámetros y le come sitio a la gráfica de al lado.
+        MaxWidth = 190,
         Text = Loc.T("arrastrar punto = frec/gan · rueda = Q", "drag point = freq/gain · wheel = Q"),
     };
     private readonly TextBlock _noAnalyzerNote = new()
@@ -215,10 +218,46 @@ public sealed class InspectorPanel : ContentControl
             "No analyzer (RTA/GR): this video's audio is played by mpv. Gain, EQ and compressor DO work, but there are meters only when audio goes through the rack (MIRRORED AUDIO)."),
         Foreground = Theme.WarnBrush,
         FontSize = 10,
-        Margin = new Thickness(10, 4, 10, 0),
+        Padding = new Thickness(6, 4, 6, 4),
+        Margin = new Thickness(8, 6, 8, 0),
         TextWrapping = TextWrapping.Wrap,
+        // Va ENCIMA de la gráfica (misma celda), pegado arriba y a lo ancho:
+        // el mismo sitio que en WinCue, donde comparte columna con el lienzo.
+        HorizontalAlignment = HorizontalAlignment.Stretch,
+        VerticalAlignment = VerticalAlignment.Top,
         Visibility = Visibility.Collapsed,
     };
+
+    /// <summary>Lo que se ve en el sitio del rack cuando el cue no tiene audio
+    /// que tratar. WinCue no deja el hueco en blanco: cambia el Content del
+    /// control entero por este texto (EqEditorControl.SetCue).</summary>
+    private readonly TextBlock _noAudioNote = new()
+    {
+        Text = Loc.T(
+            "Este tipo de cue no tiene audio: la ganancia, la EQ y el compresor son para cues de AUDIO y de VÍDEO.",
+            "This cue type has no audio: gain, EQ and compressor are for AUDIO and VIDEO cues."),
+        Foreground = Theme.TextFaintBrush,
+        HorizontalAlignment = HorizontalAlignment.Center,
+        VerticalAlignment = VerticalAlignment.Center,
+        TextWrapping = TextWrapping.Wrap,
+        Margin = new Thickness(10, 20, 10, 20),
+    };
+
+    // Fader de GANANCIA del clip (dB), columna 0 del rack.
+    private Slider? _gainSlider;
+    private readonly TextBlock _gainLabel = new()
+    {
+        Text = "0.0 dB",
+        FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+        FontSize = 12,
+        Foreground = Theme.StandbyBrush,
+        // Ancho FIJO y centrado, como todas las lecturas de la consola: la
+        // cifra cambia de ancho al mover el fader y sin reservarlo arrastra la
+        // columna (mismo motivo que en WinCue).
+        Width = UiMetrics.DbReadoutWidth,
+        TextAlignment = TextAlignment.Center,
+    };
+
     private Microsoft.UI.Dispatching.DispatcherQueueTimer? _eqTimer;
 
     // ── Geometría de vídeo ──────────────────────────────────────────────
@@ -327,7 +366,7 @@ public sealed class InspectorPanel : ContentControl
                 c => c.FadeStopOnDone));
         Conditional(c => c.Type == CueType.Group, () =>
             Cmb("group_mode", Loc.T("Modo de grupo:", "Group mode:"), c => c.GroupMode.ToString(),
-                CueChoices.GroupModes));
+                CueChoices.GroupModes, TargetLabelWidth));
         Chk("stop_others",
             Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
             c => c.StopOthers);
@@ -365,8 +404,10 @@ public sealed class InspectorPanel : ContentControl
         // La barra de onda va A LO ANCHO, bajo las dos columnas — igual que en
         // WinCue, donde el DockPanel la deja debajo del bloque de campos.
         _root = timeLoops;
-        Header(Loc.T("BARRA DE TRIM — arrastra los manejadores",
-                     "TRIM BAR — drag the handles"));
+        // La cabecera la pone WaveformRow, que es quien sabe qué está
+        // rotulando. Estaba TAMBIÉN aquí y salía dos veces seguidas; no se
+        // veía porque el panel de pestañas se quedaba corto y la segunda caía
+        // fuera de lo visible.
         WaveformRow();
 
         // ── Geometría y Audio: cada una en la suya, como WinCue ──
@@ -538,7 +579,13 @@ public sealed class InspectorPanel : ContentControl
     private void WaveformRow()
     {
         Header(Loc.T("BARRA DE TRIM — arrastra los manejadores", "TRIM BAR — drag the handles"));
-        _wave.Margin = new Thickness(10, 2, 10, 6);
+        // (0,4,0,0), el de WinCue. La página de la pestaña YA mete 10 px por
+        // lado (Tab(), igual que WinCue.Page()); poner otros 10 aquí dejaba la
+        // barra 20 px por dentro y sin alinear con los campos de encima.
+        _wave.Margin = new Thickness(0, 4, 0, 0);
+        // El MinHeight del propio control se anula, o gana él (mismo motivo
+        // que en WinCue.App).
+        _wave.MinHeight = 0;
         _wave.Height = UiMetrics.TrimBarHeight;
         _root.Children.Add(_wave);
         _wave.MarkersChanged += (start, end) =>
@@ -546,12 +593,17 @@ public sealed class InspectorPanel : ContentControl
             if (_cue is null) return;
             Commit("trim_start", Math.Round(start, 3));
             Commit("trim_end", Math.Round(end, 3));
+            // Commit pudo dejar al inspector sin cue (recarga de la tabla que
+            // se lleva la selección) — la misma caída que se arregló dentro de
+            // Commit, que aquí seguía viva porque el guardián de arriba mira
+            // ANTES de commitear.
+            if (_cue is not { } cue) return;
             // Reflejar en los campos numéricos sin re-commitear
             _loading = true;
             try
             {
-                _loaders["trim_start"](_cue);
-                _loaders["trim_end"](_cue);
+                _loaders["trim_start"](cue);
+                _loaders["trim_end"](cue);
             }
             finally { _loading = false; }
         };
@@ -649,7 +701,16 @@ public sealed class InspectorPanel : ContentControl
         return cols;
     }
 
-    private StackPanel LabeledRow(string label)
+    /// <summary>Ancho de etiqueta por defecto: el de WinCue.App.LabeledRow.</summary>
+    private const double LabelWidth = 185;
+
+    /// <summary>El de la columna DESTINO. WinCue no pasa por LabeledRow en esa
+    /// columna: FileRow, TargetCombo y CmbInline se escriben la etiqueta a mano
+    /// y las tres la ponen a 210, así que la columna entera va más ancha que
+    /// las demás. Aquí se le pone nombre en vez de repetir el número.</summary>
+    private const double TargetLabelWidth = 210;
+
+    private StackPanel LabeledRow(string label, double labelWidth = LabelWidth)
     {
         var row = new StackPanel
         { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
@@ -659,7 +720,7 @@ public sealed class InspectorPanel : ContentControl
             // 185 y margen (0,2,0,2): los de WinCue.App.LabeledRow. Con 150 las
             // etiquetas largas se partían en dos líneas y las filas no
             // cuadraban entre columnas.
-            Width = 185,
+            Width = labelWidth,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Theme.TextTertiaryBrush,
         });
@@ -667,13 +728,26 @@ public sealed class InspectorPanel : ContentControl
         return row;
     }
 
+    /// <summary>Caja de texto del inspector, con las medidas de
+    /// WinCue.App.InspectorPanel.MakeTextBox.
+    ///
+    /// MinWidth = 0 NO es adorno: el estilo por defecto del TextBox de WinUI 3
+    /// trae MinWidth = 64 (TextControlThemeMinWidth), así que TODA caja más
+    /// estrecha que eso —las de banda de la EQ son de 38, 42 y 52— se pintaba
+    /// a 64 y las tres salían del mismo ancho. Es el mismo caso que el
+    /// MinHeight de la barra de trim: si no se anula, gana el del control.
+    ///
+    /// El relleno es (4,2,4,2), el de WPF, y no (6,4): con el de WinUI las
+    /// filas salían más altas y el inspector entero se leía más suelto que el
+    /// de WinCue.</summary>
     private static TextBox MakeTextBox(double width) => new()
     {
         Background = Theme.ControlBgBrush,
         Foreground = Theme.TextPrimaryBrush,
         BorderBrush = Theme.DividerBrush,
-        Padding = new Thickness(6, 4, 6, 4),
+        Padding = new Thickness(4, 2, 4, 2),
         VerticalAlignment = VerticalAlignment.Center,
+        MinWidth = 0,
         Width = width,
     };
 
@@ -755,6 +829,11 @@ public sealed class InspectorPanel : ContentControl
             Foreground = Theme.TextPrimaryBrush,
             Margin = inRow ? new Thickness(0, 0, 16, 0) : new Thickness(0, 3, 0, 3),
             VerticalAlignment = VerticalAlignment.Center,
+            // El CheckBox de WinUI 3 trae MinWidth = 120 de serie
+            // (CheckBoxMinWidth): una casilla con la palabra «HPF» reservaba
+            // 120 px y abría un hueco enorme entre ella y su campo. El de WPF
+            // mide lo que mide su contenido.
+            MinWidth = 0,
         };
         cb.Checked += (_, _) => Commit(key, true);
         cb.Unchecked += (_, _) => Commit(key, false);
@@ -808,9 +887,10 @@ public sealed class InspectorPanel : ContentControl
     }
 
     /// <summary>Fila etiquetada que solo se ve para ciertos cues.</summary>
-    private StackPanel ConditionalRow(string label, Func<Cue, bool> visibleIf)
+    private StackPanel ConditionalRow(string label, Func<Cue, bool> visibleIf,
+                                      double labelWidth = LabelWidth)
     {
-        var row = LabeledRow(label);
+        var row = LabeledRow(label, labelWidth);
         _conditional.Add((row, visibleIf));
         return row;
     }
@@ -872,8 +952,10 @@ public sealed class InspectorPanel : ContentControl
     private void TargetCombo()
     {
         var row = ConditionalRow(Loc.T("Cue objetivo:", "Target cue:"),
-            c => c.TargetsOther());
-        var combo = new ComboBox { MinWidth = 230 };
+            c => c.TargetsOther(), TargetLabelWidth);
+        // 260 y no los 230 de Cmb: aquí la opción es "12 · Nombre del cue" y no
+        // una etiqueta de enum. Es el ancho que le da WinCue.App.TargetCombo.
+        var combo = new ComboBox { MinWidth = 260 };
         combo.SelectionChanged += (_, _) =>
         {
             if ((combo.SelectedItem as ComboBoxItem)?.Tag is int id)
@@ -899,6 +981,13 @@ public sealed class InspectorPanel : ContentControl
                     combo.SelectedItem = item;
                     return;
                 }
+            // El objetivo apuntaba a un cue que ya no está (lo borraron con el
+            // FADE todavía apuntándole). WinCue.App.TargetCombo cae aquí a
+            // "(sin objetivo)"; sin esta línea el desplegable se quedaba
+            // enseñando el objetivo del cue ANTERIOR, que no es de este cue.
+            // Va dentro de un loader, o sea con _loading puesto: seleccionar
+            // no comete nada.
+            combo.SelectedIndex = 0;
         };
     }
 
@@ -1003,9 +1092,9 @@ public sealed class InspectorPanel : ContentControl
     /// demás, la lista viene de CueChoices: repetir aquí las opciones de un
     /// enum es exactamente la copia que la regla 2 prohíbe.</summary>
     private void Cmb(string key, string label, Func<Cue, string> read,
-                     IReadOnlyList<CueChoice> items)
+                     IReadOnlyList<CueChoice> items, double labelWidth = LabelWidth)
     {
-        var row = LabeledRow(label);
+        var row = LabeledRow(label, labelWidth);
         var combo = new ComboBox { MinWidth = 230 };
         foreach (var (value, text) in items)
             combo.Items.Add(new ComboBoxItem { Content = text, Tag = value });
@@ -1033,10 +1122,12 @@ public sealed class InspectorPanel : ContentControl
     /// BrowseFile porque el picker necesita el hwnd de la ventana.</summary>
     private void FileRow()
     {
-        var row = LabeledRow(Loc.T("Archivo:", "File:"));
+        var row = LabeledRow(Loc.T("Archivo:", "File:"), TargetLabelWidth);
         _conditional.Add((row, c => c.IsMedia() || c.Type == CueType.Script));
 
-        var tb = MakeTextBox(220);
+        // 300: el de WinCue.App.FileRow. Con 220 una ruta corriente no cabía y
+        // había que pasearla con el cursor para leer el final.
+        var tb = MakeTextBox(300);
         WireTextCommit(tb, "file_path", () => tb.Text);
         row.Children.Add(tb);
 
@@ -1076,17 +1167,29 @@ public sealed class InspectorPanel : ContentControl
     {
         var page = _root;
 
+        // Reparto de la pestaña como en WinCue.App.BuildAudioTab: el strip de
+        // niveles a la izquierda con un FILETE de 1 px separándolo (no un
+        // hueco de 30), y el rack llenando lo que quede.
         var grid = new Grid();
         grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
-        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
         grid.ColumnDefinitions.Add(
             new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
 
         var levels = new StackPanel();
+        // 360 y no menos: con menos, el desplegable de «salida de este cue» se
+        // corta contra la columna de GANANCIA, y un desplegable que no deja
+        // leer lo elegido no sirve para lo único que hace (nota de WinCue).
+        var levelsHost = new Border
+        {
+            BorderBrush = Theme.DividerBrush,
+            BorderThickness = new Thickness(0, 0, 1, 0),
+            MaxWidth = 360,
+            Child = levels,
+        };
         var rack = new StackPanel();
-        Grid.SetColumn(levels, 0);
-        Grid.SetColumn(rack, 2);
-        grid.Children.Add(levels);
+        Grid.SetColumn(levelsHost, 0);
+        Grid.SetColumn(rack, 1);
+        grid.Children.Add(levelsHost);
         grid.Children.Add(rack);
         page.Children.Add(grid);
 
@@ -1769,86 +1872,226 @@ public sealed class InspectorPanel : ContentControl
     {
         bool AudioOrVideo(Cue c) => c.Type is CueType.Audio or CueType.Video;
 
-        var header = LastAdded(() => Header(Loc.T("GANANCIA / EQ", "GAIN / EQ")));
-        _conditional.Add((header, AudioOrVideo));
+        var page = _root;
 
-        // Ganancia de clip (dB, pre-EQ) — aparte del fader de VOLUMEN de arriba.
-        var gainRow = LabeledRow(Loc.T("Ganancia (dB):", "Gain (dB):"));
-        gainRow.Children.Add(EqNumBox("gain_db", c => c.GainDb, -24, 12, 80));
-        _conditional.Add((gainRow, AudioOrVideo));
+        // Rejilla del rack: el MISMO reparto que WinCue.App.EqEditorControl —
+        //   [GANANCIA] [params EQ][gráfica EQ] [params COMP][gráfica COMP]
+        // Cada herramienta pegada a SU gráfica, y las dos gráficas a lo alto.
+        // Apilado en vertical, como estaba, la pestaña dejaba ~1000 px de la
+        // derecha en negro y mandaba el compresor entero detrás del scroll.
+        var grid = new Grid
+        {
+            Margin = new Thickness(10, 6, 10, 8),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        // 96 y no 74: la lectura en dB va enmarcada y con ancho fijo
+        // (DbReadoutWidth) más su marco y su margen. Mismo número y mismo
+        // motivo que en WinCue, donde en 74 se salía contra la gráfica.
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(96) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        { Width = new GridLength(3, GridUnitType.Star), MinWidth = 220 });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition
+        { Width = new GridLength(2, GridUnitType.Star), MinWidth = 180 });
+        page.Children.Add(grid);
+        _conditional.Add((grid, AudioOrVideo));
 
-        var eqOnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
-        eqOnRow.Children.Add(EqCheck("eq_enabled", Loc.T("EQ activa", "EQ active"), c => c.EqEnabled));
-        _root.Children.Add(eqOnRow);
-        _conditional.Add((eqOnRow, AudioOrVideo));
+        // El rack entero se va y en su sitio queda el aviso, en vez de un
+        // hueco en blanco: es lo que hace WinCue cambiando el Content.
+        page.Children.Add(_noAudioNote);
+        _conditional.Add((_noAudioNote, c => !AudioOrVideo(c)));
 
-        var hpfRow = HpfLpfRow("HPF", "hpf_on", "hpf_freq", c => c.HpfOn, c => c.HpfFreq, EqCurveLayout.ClampHpfFreq);
-        _conditional.Add((hpfRow, AudioOrVideo));
-        var lpfRow = HpfLpfRow("LPF", "lpf_on", "lpf_freq", c => c.LpfOn, c => c.LpfFreq, EqCurveLayout.ClampLpfFreq);
-        _conditional.Add((lpfRow, AudioOrVideo));
+        // ── Columna 0: fader de GANANCIA del clip (dB, pre-EQ) ──
+        // Mismo reparto que la columna de VOL de al lado: rótulo, lectura
+        // DEBAJO del rótulo, y el fader al final. Era una caja numérica, que
+        // no es el mismo mando ni mide lo mismo que su vecino.
+        var gainPanel = new StackPanel
+        {
+            Margin = new Thickness(0, 0, 10, 0),
+            VerticalAlignment = VerticalAlignment.Top,
+        };
+        gainPanel.Children.Add(new TextBlock
+        {
+            Text = Loc.T("GANANCIA", "GAIN"),
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = Theme.TextDimBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+        gainPanel.Children.Add(new Border
+        {
+            Background = Theme.SunkenBgBrush,
+            BorderBrush = Theme.DividerBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 4, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Child = _gainLabel,
+        });
+        var gain = new Slider
+        {
+            Orientation = Orientation.Vertical,
+            Minimum = -24,
+            Maximum = 12,
+            StepFrequency = 0.1,
+            // Medidas COMPARTIDAS con el fader de VOL: si no, en la misma
+            // pestaña y a dos dedos salen de dos tamaños distintos.
+            Width = UiMetrics.FaderWidth,
+            Height = UiMetrics.FaderHeight,
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 4, 0, 0),
+        };
+        ToolTipService.SetToolTip(gain, Loc.T("Doble clic: volver a 0 dB",
+                                              "Double-click: back to 0 dB"));
+        gain.ValueChanged += (_, _) =>
+        {
+            // La lectura se pone al día SIEMPRE (también al cargar el cue); lo
+            // que se calla mientras _loading es el commit.
+            _gainLabel.Text = $"{gain.Value:+0.0;-0.0;0.0} dB";
+            if (!_loading)
+                Commit("gain_db", Math.Round(gain.Value, 1));
+        };
+        gain.DoubleTapped += (_, e) =>
+        {
+            gain.Value = 0.0;   // reset rápido, como los faders de volumen
+            e.Handled = true;
+        };
+        _gainSlider = gain;
+        _loaders["gain_db"] = c => gain.Value = Math.Clamp(c.GainDb, -24, 12);
+        gainPanel.Children.Add(gain);
+        Grid.SetColumn(gainPanel, 0);
+        grid.Children.Add(gainPanel);
+
+        // ── Columna 1: parámetros de la EQ ──
+        var eqPars = new StackPanel { Margin = new Thickness(0, 0, 8, 0) };
+        Grid.SetColumn(eqPars, 1);
+        grid.Children.Add(eqPars);
+        _root = eqPars;
+        eqPars.Children.Add(EqCheck("eq_enabled", Loc.T("EQ activa", "EQ active"), c => c.EqEnabled));
+        HpfLpfRow("HPF", "hpf_on", "hpf_freq", c => c.HpfOn, c => c.HpfFreq, EqCurveLayout.ClampHpfFreq);
+        HpfLpfRow("LPF", "lpf_on", "lpf_freq", c => c.LpfOn, c => c.LpfFreq, EqCurveLayout.ClampLpfFreq);
 
         var bandColors = new[] { Theme.Pgm, Theme.Warn, Theme.Go, Theme.Blue };
         for (int i = 0; i < 4; i++)
-        {
-            var row = BandRow(i + 1, bandColors[i]);
-            _conditional.Add((row, AudioOrVideo));
-        }
+            BandRow(i + 1, bandColors[i]);
 
+        RtaRow();
+        eqPars.Children.Add(_eqReadout);
+
+        // ── Columna 2: gráfica de la EQ, con el aviso encima ──
         _eqCanvas.Height = UiMetrics.EqCanvasHeight;
-        _eqCanvas.Margin = new Thickness(10, 6, 10, 0);
+        _eqCanvas.Margin = new Thickness(0);
         _eqCanvas.Commit = (k, v) => Commit(k, v);
         _eqCanvas.ReadoutChanged += text => _eqReadout.Text = text;
-        _root.Children.Add(_eqCanvas);
-        _conditional.Add((_eqCanvas, AudioOrVideo));
+        Grid.SetColumn(_eqCanvas, 2);
+        grid.Children.Add(_eqCanvas);
 
-        _root.Children.Add(_eqReadout);
-        _conditional.Add((_eqReadout, AudioOrVideo));
+        // Visibilidad real (AudioOrVideo Y sin analizador) la decide SyncEqUi:
+        // depende de AudioAnalysisProvider, no solo del tipo de cue, así que
+        // no encaja en el patrón _conditional (Func<Cue,bool> fijo).
+        Grid.SetColumn(_noAnalyzerNote, 2);
+        grid.Children.Add(_noAnalyzerNote);
 
-        // Visibilidad real (AudioOrVideo Y sin analizador) la decide
-        // SyncEqUi — depende de AudioAnalysisProvider, no solo del tipo de
-        // cue, así que no encaja en el patrón _conditional (Func<Cue,bool>
-        // fijo). Se registra igualmente para que quede oculta por defecto
-        // hasta el primer SetCue.
-        _root.Children.Add(_noAnalyzerNote);
+        // ── Columna 3: parámetros del compresor, UNA FILA POR PARÁMETRO ──
+        // Cinco filas, no dos apretadas: es como se leen en WinCue y es lo que
+        // deja la columna del ancho que espera la gráfica de al lado.
+        var compPars = new StackPanel { Margin = new Thickness(14, 0, 8, 0) };
+        Grid.SetColumn(compPars, 3);
+        grid.Children.Add(compPars);
+        _root = compPars;
+        compPars.Children.Add(EqCheck("comp_enabled", Loc.T("Compresor", "Compressor"), c => c.CompEnabled));
+        CompRow(Loc.T("Umbral", "Threshold"), "comp_threshold", c => c.CompThreshold, -60, 0, "dB");
+        CompRow("Ratio", "comp_ratio", c => c.CompRatio, 1, 20, ":1");
+        CompRow(Loc.T("Ataque", "Attack"), "comp_attack", c => c.CompAttack, 0.1, 200, "ms");
+        CompRow("Release", "comp_release", c => c.CompRelease, 5, 2000, "ms", "0");
+        CompRow("Makeup", "comp_makeup", c => c.CompMakeup, 0, 24, "dB");
+        compPars.Children.Add(new TextBlock
+        {
+            Foreground = Theme.TextDimmerBrush,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            FontSize = 10,
+            Margin = new Thickness(0, 4, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            MaxWidth = 130,
+            Text = Loc.T("arrastrar = umbral · rueda = ratio · GR = reducción en vivo",
+                         "drag = threshold · wheel = ratio · GR = live reduction"),
+        });
 
-        var compHeader = LastAdded(() => Header(Loc.T("COMPRESOR", "COMPRESSOR")));
-        _conditional.Add((compHeader, AudioOrVideo));
-
-        var compOnRow = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
-        compOnRow.Children.Add(EqCheck("comp_enabled", Loc.T("Compresor", "Compressor"), c => c.CompEnabled));
-        _root.Children.Add(compOnRow);
-        _conditional.Add((compOnRow, AudioOrVideo));
-
-        var compRow1 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
-        compRow1.Children.Add(FieldLabelInline(Loc.T("Umbral", "Threshold")));
-        compRow1.Children.Add(EqNumBox("comp_threshold", c => c.CompThreshold, -60, 0, 50));
-        compRow1.Children.Add(FieldLabelInline("dB"));
-        compRow1.Children.Add(FieldLabelInline("Ratio"));
-        compRow1.Children.Add(EqNumBox("comp_ratio", c => c.CompRatio, 1, 20, 40));
-        compRow1.Children.Add(FieldLabelInline(":1"));
-        _root.Children.Add(compRow1);
-        _conditional.Add((compRow1, AudioOrVideo));
-
-        var compRow2 = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
-        compRow2.Children.Add(FieldLabelInline(Loc.T("Ataque", "Attack")));
-        compRow2.Children.Add(EqNumBox("comp_attack", c => c.CompAttack, 0.1, 200, 44));
-        compRow2.Children.Add(FieldLabelInline("ms"));
-        compRow2.Children.Add(FieldLabelInline("Release"));
-        compRow2.Children.Add(EqNumBox("comp_release", c => c.CompRelease, 5, 2000, 48, "0"));
-        compRow2.Children.Add(FieldLabelInline("ms"));
-        compRow2.Children.Add(FieldLabelInline("Makeup"));
-        compRow2.Children.Add(EqNumBox("comp_makeup", c => c.CompMakeup, 0, 24, 44));
-        compRow2.Children.Add(FieldLabelInline("dB"));
-        _root.Children.Add(compRow2);
-        _conditional.Add((compRow2, AudioOrVideo));
-
+        // ── Columna 4: gráfica del compresor ──
         _compCanvas.Height = UiMetrics.EqCanvasHeight;
-        _compCanvas.Margin = new Thickness(10, 6, 10, 10);
+        _compCanvas.Margin = new Thickness(0);
         _compCanvas.Commit = (k, v) => Commit(k, v);
-        _root.Children.Add(_compCanvas);
-        _conditional.Add((_compCanvas, AudioOrVideo));
+        Grid.SetColumn(_compCanvas, 4);
+        grid.Children.Add(_compCanvas);
 
+        _root = page;
         _loaders["__eq_sync"] = SyncEqUi;
+    }
+
+    /// <summary>Fila de un parámetro del compresor: rótulo de ancho fijo +
+    /// caja + unidad. Mismo reparto que CompRow en
+    /// WinCue.App.EqEditorControl, incluidos el 50 del rótulo y el 44 de la
+    /// caja — es lo que alinea las cinco filas entre sí.</summary>
+    private void CompRow(string label, string key, Func<Cue, double> read,
+                         double min, double max, string unit, string fmt = "0.#")
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
+        var lbl = FieldLabelInline(label);
+        lbl.Width = 50;
+        row.Children.Add(lbl);
+        row.Children.Add(EqNumBox(key, read, min, max, 44, fmt));
+        row.Children.Add(FieldLabelInline(unit));
+        _root.Children.Add(row);
+    }
+
+    /// <summary>Ganancia de VISUALIZACIÓN del analizador: no toca el audio ni
+    /// el cue, solo cuánto se levanta el RTA en la gráfica. Faltaba entera en
+    /// Secuence — el lienzo ya leía EqCurveCanvas.RtaGainDb, pero no había
+    /// forma de moverla.</summary>
+    private void RtaRow()
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 0) };
+        row.Children.Add(new TextBlock
+        {
+            Text = "RTA +",
+            Foreground = Theme.TextDimBrush,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(0, 0, 3, 0),
+        });
+        var slider = new Slider
+        {
+            Minimum = 0,
+            Maximum = 48,
+            Value = EqCurveCanvas.RtaGainDb,
+            Width = 80,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        ToolTipService.SetToolTip(slider,
+            Loc.T("Ganancia de visualización del analizador (solo pantalla)",
+                  "Analyzer display gain (screen only)"));
+        var label = new TextBlock
+        {
+            Text = $"{EqCurveCanvas.RtaGainDb:0} dB",
+            Foreground = Theme.TextDimBrush,
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            FontSize = 11,
+            VerticalAlignment = VerticalAlignment.Center,
+            Margin = new Thickness(3, 0, 0, 0),
+        };
+        slider.ValueChanged += (_, _) =>
+        {
+            EqCurveCanvas.RtaGainDb = slider.Value;
+            label.Text = $"{slider.Value:0} dB";
+            _eqCanvas.Refresh();
+        };
+        row.Children.Add(slider);
+        row.Children.Add(label);
+        _root.Children.Add(row);
     }
 
     /// <summary>Repuebla los dos lienzos y decide si la nota "sin analizador"
@@ -1875,6 +2118,9 @@ public sealed class InspectorPanel : ContentControl
             Foreground = Theme.TextPrimaryBrush,
             VerticalAlignment = VerticalAlignment.Center,
             Margin = new Thickness(0, 0, 6, 0),
+            // Ver Chk: sin esto, «HPF» y «LPF» reservan 120 px cada una y
+            // empujan sus campos fuera de la columna.
+            MinWidth = 0,
         };
         cb.Checked += (_, _) => Commit(key, true);
         cb.Unchecked += (_, _) => Commit(key, false);
@@ -1914,7 +2160,7 @@ public sealed class InspectorPanel : ContentControl
     private StackPanel HpfLpfRow(string label, string onKey, string freqKey,
         Func<Cue, bool> onRead, Func<Cue, double> freqRead, Func<double, double> clamp)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
         row.Children.Add(EqCheck(onKey, label, onRead));
         row.Children.Add(EqNumBox(freqKey, freqRead, 0, 20000, 52, "0"));
         row.Children.Add(FieldLabelInline("Hz"));
@@ -1930,7 +2176,7 @@ public sealed class InspectorPanel : ContentControl
     /// WinCue.App.EqEditorControl.</summary>
     private StackPanel BandRow(int n, Color dotColor)
     {
-        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        var row = new StackPanel { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 0) };
         row.Children.Add(new Ellipse
         {
             Width = 10,
