@@ -412,6 +412,16 @@ public sealed partial class MainWindow : Window, IShowView
                     new Dictionary<string, object?> { [key] = value });
         };
 
+        // Cue objetivo de un START/STOP/FADE: el inspector no conoce el
+        // CueModel, se lo damos aquí (igual que WinCue.App le pasa allCues a
+        // SetCue). Se lee al repoblar, así que siempre ve la lista de ahora.
+        _inspector.AllCues = () => _model.Cues;
+
+        // Aviso de fundido incoherente: los segundos que le quedan al vídeo
+        // SALIENTE de la misma pista salen de la proyección del timeline —
+        // mismo cableado que WinCue.App (Timeline.OutgoingRemaining).
+        _inspector.CrossfadeHeadroomProvider = cueId => _timeline.OutgoingRemaining(cueId);
+
         // Rack de audio del inspector (EQ + compresor): RTA, medidor GR y el
         // aviso de "sin analizador" por cue — MISMO cableado que
         // WinCue.App.MainWindow.xaml.cs.Attach (GetAudioSpectrum/

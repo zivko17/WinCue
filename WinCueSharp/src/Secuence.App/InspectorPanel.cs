@@ -1,5 +1,5 @@
 // =============================================================================
-// InspectorPanel.cs — Inspector de cue, PRIMERA PASADA (WinUI 3, declarativo).
+// InspectorPanel.cs — Inspector de cue (WinUI 3, declarativo).
 // =============================================================================
 // Equivalente de src/WinCue.App/InspectorPanel.cs para esta interfaz, NO una
 // copia (regla 2 del proyecto: lo compartido sube, no se copia entre
@@ -10,16 +10,34 @@
 // "loaders" para repoblar al cambiar de cue), solo que con los tipos de
 // Microsoft.UI.Xaml.Controls en vez de System.Windows.Controls.
 //
-// ALCANCE de esta pasada (ver el encargo — "hitos-0-1", inspector de cues):
-// las propiedades que gobiernan un show.
-//   - Identidad: número, nombre, archivo (el tipo se ve en la cabecera, como
-//     en WPF: WinCue tampoco deja editar el tipo desde el inspector).
+// ALCANCE (ver el encargo — "hitos-0-1", inspector de cues): las propiedades
+// que gobiernan un show. Tras la SEGUNDA PASADA, el mismo conjunto de campos
+// que la pestaña «Básicos» + «Disparadores» + «Tiempo y bucles» de WinCue:
+//   - Identidad: número, nombre, color de etiqueta, armado, flag, notas (el
+//     tipo se ve en la cabecera, como en WPF: WinCue tampoco deja editarlo
+//     desde el inspector).
+//   - Destino: archivo, cue objetivo (START/STOP/FADE), «detener el objetivo
+//     al llegar a 0», modo de grupo, «detener los demás al empezar».
 //   - Temporización: pre-wait, duración, post-wait, encadenado (continue_mode).
-//   - Fundidos: fade in, fade out.
-//   - Reproducción: loop, play count, trim (inicio/fin), volumen.
+//   - Fundidos: fade in, fade out, con el AVISO de fundido incoherente
+//     (FadeSanity, compartido — el mismo que marca el timeline).
+//   - Reproducción: loop, play count, trim (inicio/fin), velocidad, mantener
+//     el tono, volumen.
+//   - Disparadores: hotkey, segundo disparo (retrigger), «fundir y parar
+//     otros» (con tiempo y ámbito), wall-clock y MIDI.
 //
-// FUERA de esta pasada, a propósito: los disparadores remotos (hotkey/MIDI/
-// wall-clock) — sin equivalente en Secuence todavía.
+// LAS OPCIONES de cada desplegable (continue_mode, group_mode, retrigger,
+// fade_others_scope, midi_type) y la paleta de colores de etiqueta vienen de
+// WinCue.Presentation.CueChoices — una sola definición para los dos
+// productos, con pruebas que exigen que cada valor de cada enum tenga su
+// etiqueta (CueChoicesTests). Antes estaban escritas en línea en WinCue, y
+// repetirlas aquí era exactamente la clase de copia que la regla 2 prohíbe:
+// añadir un modo al enum habría dejado a un producto sin ofrecerlo, en
+// silencio.
+//
+// PENDIENTE conocido: el HOTKEY por cue se guarda y WinCue lo respeta, pero
+// Secuence todavía no construye los atajos por cue (RebuildHotkeys solo cubre
+// Espacio/Esc) — el campo lleva su aclaración en pantalla, no es un engaño.
 //
 // RACK DE AUDIO (sumado en la tarea "editor de EQ", séptimo y último control
 // pintado a mano, hitos-0-1): ganancia de clip + EQ paramétrica de 4 bandas
@@ -91,6 +109,18 @@ public sealed class InspectorPanel : ContentControl
     /// igual que no sabe de FileOpenPicker en absoluto.</summary>
     public Func<Task<string?>>? BrowseFile;
 
+    /// <summary>Los cues del show, para el desplegable de «cue objetivo» de un
+    /// START/STOP/FADE. Lo pone MainWindow: el inspector no conoce el CueModel
+    /// — mismo reparto que el parámetro allCues de
+    /// WinCue.App.InspectorPanel.SetCue.</summary>
+    public Func<IReadOnlyList<Cue>>? AllCues;
+
+    /// <summary>Segundos que le quedan al vídeo saliente de la misma pista
+    /// cuando este cue entra (del timeline), para el aviso de fundido
+    /// incoherente. Mismo contrato que
+    /// WinCue.App.InspectorPanel.CrossfadeHeadroomProvider.</summary>
+    public Func<int, double?>? CrossfadeHeadroomProvider;
+
     private Cue? _cue;
     private bool _loading;   // suprime commits al repoblar (igual que en WPF)
 
@@ -112,6 +142,44 @@ public sealed class InspectorPanel : ContentControl
     }
     private readonly WaveformCanvas _wave = new();
     private string _waveLoadedPath = "";
+
+    // ── Aviso de fundido incoherente ───────────────────────────────────
+    // El CÁLCULO es compartido (WinCue.Core.FadeSanity, el mismo que usa el
+    // inspector de WPF y el indicador de solapamiento del timeline): aquí
+    // solo se pinta. Aviso SUAVE — no impide guardar ni recorta ningún valor,
+    // solo cuenta qué va a pasar.
+    private readonly TextBlock _fadeWarn = new()
+    {
+        Foreground = Theme.WarnBrush,
+        TextWrapping = TextWrapping.Wrap,
+        MaxWidth = 300,
+        FontSize = 11,
+        Margin = new Thickness(10, 2, 10, 4),
+        Visibility = Visibility.Collapsed,
+    };
+
+    /// <summary>Campos cuya edición puede volver coherente (o incoherente) un
+    /// fundido — misma lista que WinCue.App.InspectorPanel.FadeWarnKeys.</summary>
+    private static readonly HashSet<string> FadeWarnKeys = new(StringComparer.Ordinal)
+    { "fade_in", "fade_out", "trim_start", "trim_end", "duration", "loop", "file_path" };
+
+    private void UpdateFadeWarning(Cue cue)
+    {
+        double? remaining = cue.Type == CueType.Video
+            ? CrossfadeHeadroomProvider?.Invoke(cue.Id) : null;
+        var issues = FadeSanity.Check(cue, remaining);
+        string? text = FadeSanity.ShortText(issues);
+        if (text is null)
+        {
+            _fadeWarn.Visibility = Visibility.Collapsed;
+            ToolTipService.SetToolTip(_fadeWarn, null);
+            return;
+        }
+        _fadeWarn.Text = text;
+        ToolTipService.SetToolTip(_fadeWarn,
+            FadeSanity.Explain(issues, FadeSanity.EffectiveDuration(cue), remaining));
+        _fadeWarn.Visibility = Visibility.Visible;
+    }
 
     // ── Rack de audio: ganancia + EQ + compresor ────────────────────────
     /// <summary>Espectro (~12 Hz) del cue dado, o null si no suena — mismo
@@ -198,7 +266,25 @@ public sealed class InspectorPanel : ContentControl
         Header(Loc.T("IDENTIDAD", "IDENTITY"));
         Txt("number", Loc.T("Número:", "Number:"), c => c.Number);
         Txt("name", Loc.T("Nombre:", "Name:"), c => c.Name);
+        ColorSwatches();
+        Chk("armed", Loc.T("Armado", "Armed"), c => c.Armed);
+        Chk("flagged", $"{Icons.Flag} Flag", c => c.Flagged, icon: true);
+        TxtMultiline("notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
+            c => c.Notes);
+
+        Header(Loc.T("DESTINO", "TARGET"));
         FileRow();
+        TargetCombo();
+        Conditional(c => c.Type == CueType.Fade, () =>
+            Chk("fade_stop_on_done",
+                Loc.T("Detener el objetivo al llegar a 0", "Stop the target when it reaches 0"),
+                c => c.FadeStopOnDone));
+        Conditional(c => c.Type == CueType.Group, () =>
+            Cmb("group_mode", Loc.T("Modo de grupo:", "Group mode:"), c => c.GroupMode.ToString(),
+                CueChoices.GroupModes));
+        Chk("stop_others",
+            Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
+            c => c.StopOthers);
 
         Header(Loc.T("TEMPORIZACIÓN", "TIMING"));
         Cmb("continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
@@ -212,15 +298,21 @@ public sealed class InspectorPanel : ContentControl
         Header(Loc.T("FUNDIDOS", "FADES"));
         TimeF("fade_in", "Fade in:", c => c.FadeIn);
         TimeF("fade_out", "Fade out:", c => c.FadeOut);
+        _root.Children.Add(_fadeWarn);
 
         Header(Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         Chk("loop", Loc.T("Loop infinito (hasta STOP)", "Infinite loop (until STOP)"), c => c.Loop);
         Int("play_count", Loc.T("Repeticiones (play count):", "Repeats (play count):"), c => c.PlayCount);
         TimeF("trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
         TimeF("trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
+        Num("rate", Loc.T("Velocidad (1.0 = normal):", "Speed (1.0 = normal):"), c => c.Rate);
+        Chk("preserve_pitch",
+            Loc.T("Mantener el tono al cambiar la velocidad", "Preserve pitch when changing speed"),
+            c => c.PreservePitch);
         WaveformRow();
         VolumeField();
 
+        TriggersSection();
         GeometrySection();
         EqSection();
 
@@ -284,6 +376,7 @@ public sealed class InspectorPanel : ContentControl
             foreach (var (el, visibleIf) in _conditional)
                 el.Visibility = visibleIf(cue) ? Visibility.Visible : Visibility.Collapsed;
             UpdateWave(cue);
+            UpdateFadeWarning(cue);
         }
         finally
         {
@@ -304,6 +397,9 @@ public sealed class InspectorPanel : ContentControl
         // el MISMO objeto que el modelo acaba de mutar, así que basta con
         // releerlo — no hace falta repoblar el resto del formulario.
         _header.Text = HeaderText(_cue);
+
+        if (FadeWarnKeys.Contains(key))
+            UpdateFadeWarning(_cue);
 
         // Sincronía barra de trim ↔ campos numéricos / archivo (mismo reparto
         // que WinCue.App.InspectorPanel.Commit).
@@ -495,11 +591,18 @@ public sealed class InspectorPanel : ContentControl
         _loaders[key] = c => tb.Text = read(c).ToString(CultureInfo.InvariantCulture);
     }
 
-    private void Chk(string key, string label, Func<Cue, bool> read)
+    /// <summary>Casilla de un campo booleano. icon: true cuando la etiqueta
+    /// EMPIEZA por un glifo de Icons (Phosphor): en WinUI 3 el FontFamily es
+    /// del control entero, así que el texto se parte en dos TextBlock — el
+    /// glifo con Phosphor y las letras con la fuente normal. Es la misma
+    /// razón por la que la tabla de cues nunca mezcla glifo y texto en un
+    /// mismo TextBlock (ver IconFont.cs); en WPF no hace falta porque su
+    /// fuente compuesta resuelve por rango.</summary>
+    private void Chk(string key, string label, Func<Cue, bool> read, bool icon = false)
     {
         var cb = new CheckBox
         {
-            Content = label,
+            Content = icon ? IconLabel(label) : label,
             Foreground = Theme.TextPrimaryBrush,
             Margin = new Thickness(10, 3, 10, 3),
         };
@@ -509,8 +612,222 @@ public sealed class InspectorPanel : ContentControl
         _loaders[key] = c => cb.IsChecked = read(c);
     }
 
+    /// <summary>Etiqueta que empieza por un glifo de icono: glifo con Phosphor
+    /// y el resto con la fuente normal, en una fila. Ver Chk(icon: true).</summary>
+    private static UIElement IconLabel(string label)
+    {
+        var row = new StackPanel { Orientation = Orientation.Horizontal };
+        row.Children.Add(new TextBlock
+        {
+            Text = label[..1],
+            FontFamily = IconFont.Font,
+            FontSize = 14,
+            Margin = new Thickness(0, 0, 4, 0),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        row.Children.Add(new TextBlock
+        {
+            Text = label[1..].TrimStart(),
+            VerticalAlignment = VerticalAlignment.Center,
+        });
+        return row;
+    }
+
+    /// <summary>Construye lo que <paramref name="build"/> añada y lo hace
+    /// visible solo para los cues que cumplan <paramref name="visibleIf"/> —
+    /// mismo papel que el helper Conditional del inspector de WPF. Envuelve
+    /// TODO lo añadido (una fila, una casilla…) para no depender de que sea
+    /// un único control.</summary>
+    private void Conditional(Func<Cue, bool> visibleIf, Action build)
+    {
+        int before = _root.Children.Count;
+        build();
+        for (int i = before; i < _root.Children.Count; i++)
+            if (_root.Children[i] is FrameworkElement el)
+                _conditional.Add((el, visibleIf));
+    }
+
+    /// <summary>Fila etiquetada que solo se ve para ciertos cues.</summary>
+    private StackPanel ConditionalRow(string label, Func<Cue, bool> visibleIf)
+    {
+        var row = LabeledRow(label);
+        _conditional.Add((row, visibleIf));
+        return row;
+    }
+
+    /// <summary>Fila de muestras de color de etiqueta. La paleta, su orden y
+    /// las etiquetas son cálculo COMPARTIDO (WinCue.Presentation.CueChoices.
+    /// Colors): aquí solo se pinta. Con el color de un GRUPO se pinta su
+    /// recuadro en la tabla y en el timeline, así que la muestra activa tiene
+    /// que verse — misma marca que en WinCue.</summary>
+    private void ColorSwatches()
+    {
+        var row = LabeledRow(Loc.T("Color:", "Color:"));
+        var swatches = new List<(Button Btn, CueColorChoice Choice, TextBlock Mark)>();
+        foreach (var choice in CueChoices.Colors)
+        {
+            var mark = new TextBlock
+            {
+                FontFamily = IconFont.Font,
+                FontSize = 13,
+                FontWeight = FontWeights.Bold,
+                HorizontalAlignment = HorizontalAlignment.Center,
+                VerticalAlignment = VerticalAlignment.Center,
+            };
+            var btn = new Button
+            {
+                Width = 26,
+                Height = 22,
+                Margin = new Thickness(2, 0, 2, 0),
+                Padding = new Thickness(0),
+                Background = choice.HasColor
+                    ? Theme.Solid(Theme.Hex(choice.Rgb))
+                    : Theme.TransparentBrush,
+                BorderBrush = Theme.TextFaintBrush,
+                Content = mark,
+            };
+            ToolTipService.SetToolTip(btn, choice.Label);
+            string key = choice.Key;
+            btn.Click += (_, _) => Commit("color", key);
+            row.Children.Add(btn);
+            swatches.Add((btn, choice, mark));
+        }
+        _loaders["color"] = c =>
+        {
+            foreach (var (_, choice, mark) in swatches)
+            {
+                bool active = choice.Key == c.Color;
+                // La marca va oscura sobre el color y clara sobre el hueco de
+                // «sin color»: contraste en los dos casos (igual que WinCue).
+                mark.Text = active ? Icons.Check : choice.HasColor ? "" : Icons.NoColor;
+                mark.Foreground = active && choice.HasColor
+                    ? Theme.TextOnAccentBrush : Theme.TextPrimaryBrush;
+            }
+        };
+    }
+
+    /// <summary>Cue objetivo de un START/STOP/FADE. La lista de candidatos la
+    /// da AllCues (la pone MainWindow): el inspector no conoce el CueModel,
+    /// igual que en WPF.</summary>
+    private void TargetCombo()
+    {
+        var row = ConditionalRow(Loc.T("Cue objetivo:", "Target cue:"),
+            c => c.TargetsOther());
+        var combo = new ComboBox { MinWidth = 230 };
+        combo.SelectionChanged += (_, _) =>
+        {
+            if ((combo.SelectedItem as ComboBoxItem)?.Tag is int id)
+                Commit("target_id", id == -1 ? null : id);
+        };
+        row.Children.Add(combo);
+        _loaders["target_id"] = c =>
+        {
+            combo.Items.Clear();
+            combo.Items.Add(new ComboBoxItem
+            { Content = Loc.T("(sin objetivo)", "(no target)"), Tag = -1 });
+            if (AllCues is not null)
+                foreach (var other in AllCues())
+                    if (other.Id != c.Id)
+                        combo.Items.Add(new ComboBoxItem
+                        {
+                            Content = $"{other.DisplayNumber} · {other.Name}",
+                            Tag = other.Id,
+                        });
+            foreach (ComboBoxItem item in combo.Items)
+                if ((int)item.Tag == (c.TargetId ?? -1))
+                {
+                    combo.SelectedItem = item;
+                    return;
+                }
+        };
+    }
+
+    /// <summary>Disparadores del cue más allá del GO: tecla local, qué hacer
+    /// si se re-dispara, «fundir y parar otros», hora del día (wall-clock) y
+    /// MIDI. Los MISMOS campos que la pestaña «Disparadores» de WinCue, con
+    /// las opciones compartidas (CueChoices) — el backend que los atiende ya
+    /// es común (WinCue.Controller + WinCue.Remote), así que esto es
+    /// exponerlos, no implementarlos.</summary>
+    private void TriggersSection()
+    {
+        Header(Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
+        Txt("hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
+        Note(Loc.T(
+            "Los hotkeys por cue todavía no se atienden en Secuence:\nel campo se guarda y WinCue lo respeta.",
+            "Per-cue hotkeys are not handled in Secuence yet:\nthe field is saved and WinCue honours it."));
+        Cmb("retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
+            CueChoices.RetriggerModes);
+
+        Header(Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
+        Chk("fade_others",
+            Loc.T("Al dispararse, funde y para otros cues", "On trigger, fade and stop other cues"),
+            c => c.FadeOthers);
+        Num("fade_others_time", Loc.T("Tiempo del fundido (s):", "Fade time (s):"), c => c.FadeOthersTime);
+        Cmb("fade_others_scope", Loc.T("Ámbito:", "Scope:"), c => c.FadeOthersScope.ToString(),
+            CueChoices.FadeScopes);
+
+        Header(Loc.T("WALL-CLOCK (disparo por hora)", "WALL-CLOCK (time-of-day trigger)"));
+        Chk("wallclock_enabled", Loc.T("Disparar a una hora del día", "Trigger at a time of day"),
+            c => c.WallclockEnabled);
+        Txt("wallclock_time", Loc.T("Hora (HH:MM:SS, 24h):", "Time (HH:MM:SS, 24h):"), c => c.WallclockTime);
+        Note(Loc.T("Se dispara cada día a esa hora\nmientras el show esté abierto.",
+                   "Triggers every day at that time\nwhile the show is open."));
+
+        Header("MIDI");
+        Chk("midi_enabled", Loc.T("Disparo por MIDI", "MIDI trigger"), c => c.MidiEnabled);
+        Cmb("midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
+            CueChoices.MidiTypes);
+        Int("midi_channel", Loc.T("Canal:", "Channel:"), c => c.MidiChannel);
+        Int("midi_note", Loc.T("Nota / CC:", "Note / CC:"), c => c.MidiNote);
+        Int("midi_velocity", Loc.T("Velocity (-1 = cualquiera):", "Velocity (-1 = any):"), c => c.MidiVelocity);
+    }
+
+    /// <summary>Campo numérico con decimales (tiempo de fundido de "parar
+    /// otros", velocidad…). Los TIEMPOS de cue van por TimeF, que usa el
+    /// formato compartido de CueTimeField; esto es para las cifras sueltas
+    /// que WPF también muestra como número corriente (helper Num allí).</summary>
+    private void Num(string key, string label, Func<Cue, double> read)
+    {
+        var row = LabeledRow(label);
+        var tb = MakeTextBox(90);
+        WireTextCommit(tb, key, () =>
+            double.TryParse(tb.Text, NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
+                ? v : (object?)null);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c).ToString("0.###", CultureInfo.InvariantCulture);
+    }
+
+    /// <summary>Notas del cue: varias líneas, con el mismo destino que en WPF
+    /// (se muestran en standby). AcceptsReturn implica que Enter NO comete —
+    /// mete un salto de línea, como debe— así que aquí el commit es solo al
+    /// perder el foco.</summary>
+    private void TxtMultiline(string key, string label, Func<Cue, string> read)
+    {
+        var row = LabeledRow(label);
+        var tb = MakeTextBox(220);
+        tb.AcceptsReturn = true;
+        tb.TextWrapping = TextWrapping.Wrap;
+        tb.Height = 60;
+        tb.VerticalAlignment = VerticalAlignment.Top;
+        tb.LostFocus += (_, _) => Commit(key, tb.Text);
+        row.Children.Add(tb);
+        _loaders[key] = c => tb.Text = read(c);
+    }
+
+    /// <summary>Aclaración discreta bajo un campo — mismo papel que el helper
+    /// Note del inspector de WPF.</summary>
+    private void Note(string text) => _root.Children.Add(new TextBlock
+    {
+        Text = text,
+        FontSize = 11,
+        Foreground = Theme.TextFaintBrush,
+        TextWrapping = TextWrapping.Wrap,
+        MaxWidth = 300,
+        Margin = new Thickness(10, 0, 10, 6),
+    });
+
     private void Cmb(string key, string label, Func<Cue, string> read,
-                     params (string Value, string Label)[] items)
+                     IReadOnlyList<CueChoice> items)
     {
         var row = LabeledRow(label);
         var combo = new ComboBox { MinWidth = 230 };

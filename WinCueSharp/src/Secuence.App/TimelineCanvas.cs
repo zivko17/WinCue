@@ -136,6 +136,14 @@ public sealed class TimelineCanvas : UserControl
         _canvas.Invalidate();
     }
 
+    /// <summary>Segundos que le QUEDAN al vídeo SALIENTE de la misma pista
+    /// cuando este cue entra, según la proyección. null = no hay saliente vivo
+    /// (no hay cruce) o el saliente no acaba nunca (loop). Es el dato que
+    /// convierte "fade_in de 8 s" en "el cruce no cabe" — lo consume el aviso
+    /// de fundido del inspector, igual que en WinCue.</summary>
+    public double? OutgoingRemaining(int cueId) =>
+        TimelineLayout.OutgoingRemaining(_projection.Blocks, cueId);
+
     /// <summary>Selección desde la tabla (-1 = nada): resalta el bloque y lo
     /// trae a la vista si quedó fuera — mismo contrato que WinCue.</summary>
     public void SetSelected(int cueId)

@@ -54,9 +54,13 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
 `MixerLayout`, `WaveformLayout`, `GeometryLayout`, `EqCurveLayout`,
-`CompCurveLayout`, y la interacción del timeline: `TimelineViewport`
+`CompCurveLayout`, la interacción del timeline: `TimelineViewport`
 (zoom/scroll), `TimelineHitTest`/`TimelineDragGesture` (agarrar y arrastrar)
-y `TimelineEditing` (qué escribe el soltar). (`EqResponse`, los biquads RBJ
+y `TimelineEditing` (qué escribe el soltar); y `CueChoices` — las opciones de
+los desplegables del inspector y la paleta de colores de etiqueta, con
+pruebas que exigen que cada valor de cada enum tenga su etiqueta (si añades
+un modo a un enum de Core y no lo etiquetas, el CI se pone rojo en vez de
+dejar a un producto sin ofrecerlo). (`EqResponse`, los biquads RBJ
 que alimentan la curva de EQ, vive en `WinCue.Core` — matemática de audio,
 no presentación.)
 
@@ -142,7 +146,11 @@ Todo verificado por Andrés en pantalla, paso a paso:
 - Salida de vídeo a pantalla completa en el monitor elegido, con PANIC y
   blackout. mpv en un HWND hijo (ruta clásica, no compositor)
 - Abrir / Guardar / Guardar como, asterisco de modificado, aviso de cambios
-- Inspector: identidad, tiempos, encadenado, fundidos, reproducción
+- Inspector **completo** (dos pasadas): identidad con color/armado/flag/notas,
+  destino (cue objetivo, modo de grupo, «parar los demás»), tiempos,
+  encadenado, fundidos con el aviso de fundido incoherente, reproducción con
+  velocidad y tono, rack de audio, geometría, y los **disparadores** (hotkey,
+  retrigger, «fundir y parar otros», wall-clock y MIDI)
 - **Los siete controles pintados a mano en Win2D**: VU, timeline
   (interactivo: seleccionar, arrastrar en tiempo/pista/bordes, zoom con
   `Ctrl+rueda` — pendiente de verificación en pantalla), mixer + escala de
@@ -157,6 +165,9 @@ Todo verificado por Andrés en pantalla, paso a paso:
 ## Lo que falta
 
 **Inmediato:**
+- **Hotkeys por cue en Secuence** — el inspector ya guarda el campo `hotkey` y
+  WinCue lo respeta, pero `RebuildHotkeys` de Secuence solo cubre Espacio/Esc:
+  falta construir los atajos por cue. El campo lo avisa en pantalla.
 - **Timeline: lo que queda tras la segunda pasada.** Arrastrar bloques
   (tiempo/pista/bordes con sus topes), zoom con `Ctrl+rueda`, scroll y
   selección bidireccional con la tabla YA están — el cálculo es compartido y
@@ -166,8 +177,6 @@ Todo verificado por Andrés en pantalla, paso a paso:
   agarrar grupos), el cursor de edición con scrub y doble clic, y la casilla
   del crossfade automático (lee `timeline_auto_crossfade` de settings; sin
   interfaz propia todavía) — todo eso va con la pasada del menú contextual.
-- **Inspector, segunda pasada**: rack de audio del cue, geometría, disparadores
-  remotos, color/armado/flag/notas
 - Menú contextual de la tabla, arrastrar y soltar archivos, barra de estado,
   atajos más allá de Espacio/Esc
 

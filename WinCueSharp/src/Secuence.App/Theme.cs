@@ -201,8 +201,14 @@ public static class Theme
 
     // ── Herramientas ────────────────────────────────────────────────────
 
-    /// <summary>0xRRGGBB (de Palette) → Color opaco.</summary>
-    private static Color Hex(uint rgb) => Color.FromArgb(
+    /// <summary>0xRRGGBB (de Palette) → Color opaco.
+    ///
+    /// Pública (no solo de uso interno de este fichero): el inspector la usa
+    /// para las muestras de color de cue, cuyos tokens uint vienen ya
+    /// resueltos de WinCue.Presentation.CueChoices — el cálculo compartido con
+    /// WinCue— sin duplicar aquí la misma cuenta de bits. Mismo motivo por el
+    /// que WinCue.App.Theme.Hex también es pública.</summary>
+    public static Color Hex(uint rgb) => Color.FromArgb(
         0xff, (byte)((rgb >> 16) & 0xff), (byte)((rgb >> 8) & 0xff), (byte)(rgb & 0xff));
 
     /// <summary>"#RRGGBB" (de WinCue.Core.CueConstants) → Color opaco.</summary>

@@ -560,9 +560,7 @@ public sealed class InspectorPanel : ContentControl
 
         Header(cols[1], Loc.T("TEMPORIZACIÓN", "TIMING"));
         Cmb(cols[1], "continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
-            ("None", Loc.T("Nada (GO manual)", "None (manual GO)")),
-            ("AutoContinue", Loc.T("Auto-continue (tras post-wait)", "Auto-continue (after post-wait)")),
-            ("AutoFollow", Loc.T("Auto-follow (al acabar la acción)", "Auto-follow (when the action ends)")));
+            CueChoices.ContinueModes);
         TimeF(cols[1], "pre_wait", "Pre-wait:", c => c.PreWait);
         TimeF(cols[1], "duration", Loc.T("Duración:", "Duration:"), c => c.Duration);
         TimeF(cols[1], "post_wait", "Post-wait:", c => c.PostWait);
@@ -581,10 +579,7 @@ public sealed class InspectorPanel : ContentControl
         // Solo grupos
         var groupRow = Conditional(cols[2], c => c.Type == CueType.Group);
         CmbInline(groupRow, "group_mode", Loc.T("Modo de grupo:", "Group mode:"), c => c.GroupMode.ToString(),
-            ("Enter", Loc.T("ENTER — el playhead entra", "ENTER — the playhead enters")),
-            ("Timeline", Loc.T("TIMELINE — todos a la vez", "TIMELINE — all at once")),
-            ("GoNext", Loc.T("GO NEXT — primer hijo", "GO NEXT — first child")),
-            ("Random", Loc.T("RANDOM — aleatorio round-robin", "RANDOM — round-robin random")));
+            CueChoices.GroupModes);
 
         var stopOthersRow = ChkRow(cols[2]);
         Chk(stopOthersRow, "stop_others", Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
@@ -602,11 +597,7 @@ public sealed class InspectorPanel : ContentControl
         Header(cols[0], Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
         Txt(cols[0], "hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
         Cmb(cols[0], "retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
-            ("None", Loc.T("Ignorar", "Ignore")),
-            ("Panic", Loc.T("Panic (fade y parar)", "Panic (fade and stop)")),
-            ("Stop", Loc.T("Parar", "Stop")),
-            ("HardStop", Loc.T("Parada dura", "Hard stop")),
-            ("HardRestart", Loc.T("Reiniciar", "Restart")));
+            CueChoices.RetriggerModes);
 
         Header(cols[0], Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
         var foRow = ChkRow(cols[0]);
@@ -615,9 +606,7 @@ public sealed class InspectorPanel : ContentControl
             c => c.FadeOthers);
         Num(cols[0], "fade_others_time", Loc.T("Tiempo del fundido (s):", "Fade time (s):"), c => c.FadeOthersTime);
         Cmb(cols[0], "fade_others_scope", Loc.T("Ámbito:", "Scope:"), c => c.FadeOthersScope.ToString(),
-            ("Peers", Loc.T("PEERS — mismo nivel/grupo", "PEERS — same level/group")),
-            ("List", Loc.T("LIST — toda la lista", "LIST — the whole list")),
-            ("All", Loc.T("ALL — todo", "ALL — everything")));
+            CueChoices.FadeScopes);
 
         Header(cols[1], Loc.T("WALL-CLOCK (disparo por hora)", "WALL-CLOCK (time-of-day trigger)"));
         var wcRow = ChkRow(cols[1]);
@@ -629,8 +618,7 @@ public sealed class InspectorPanel : ContentControl
         var midiRow = ChkRow(cols[2]);
         Chk(midiRow, "midi_enabled", Loc.T("Disparo por MIDI", "MIDI trigger"), c => c.MidiEnabled);
         Cmb(cols[2], "midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
-            ("NoteOn", "Note On"), ("NoteOff", "Note Off"),
-            ("ControlChange", "Control Change"), ("ProgramChange", "Program Change"));
+            CueChoices.MidiTypes);
         Int(cols[2], "midi_channel", Loc.T("Canal:", "Channel:"), c => c.MidiChannel);
         Int(cols[2], "midi_note", Loc.T("Nota / CC:", "Note / CC:"), c => c.MidiNote);
         Int(cols[2], "midi_velocity", Loc.T("Velocity (-1 = cualquiera):", "Velocity (-1 = any):"), c => c.MidiVelocity);
@@ -1511,15 +1499,20 @@ public sealed class InspectorPanel : ContentControl
         _loaders[key] = c => tb.Text = read(c).ToString();
     }
 
+    // Las OPCIONES (valor + etiqueta) vienen de WinCue.Presentation.CueChoices:
+    // una sola definición para los dos productos, con pruebas que exigen que
+    // cada valor de cada enum tenga la suya (ver CueChoicesTests). Antes vivían
+    // escritas en línea aquí, y Secuence tenía que repetirlas para ofrecer lo
+    // mismo — o quedarse corta sin que nada avisara.
     private void Cmb(StackPanel panel, string key, string label, Func<Cue, string> read,
-                     params (string Value, string Label)[] items)
+                     IReadOnlyList<CueChoice> items)
     {
         var row = LabeledRow(panel, label);
         CmbInto(row, key, read, items);
     }
 
     private void CmbInline(StackPanel row, string key, string label, Func<Cue, string> read,
-                           params (string Value, string Label)[] items)
+                           IReadOnlyList<CueChoice> items)
     {
         row.Children.Add(new TextBlock
         {
@@ -1531,7 +1524,7 @@ public sealed class InspectorPanel : ContentControl
     }
 
     private void CmbInto(StackPanel row, string key, Func<Cue, string> read,
-                         (string Value, string Label)[] items)
+                         IReadOnlyList<CueChoice> items)
     {
         var combo = new ComboBox { MinWidth = 230 };
         foreach (var (value, text) in items)
@@ -1570,17 +1563,6 @@ public sealed class InspectorPanel : ContentControl
     }
 
     /// <summary>Nombre legible de un color de etiqueta (para el tooltip).</summary>
-    private static string ColorLabel(string key) => key switch
-    {
-        "red" => Loc.T("Rojo", "Red"),
-        "orange" => Loc.T("Naranja", "Orange"),
-        "yellow" => Loc.T("Amarillo", "Yellow"),
-        "green" => Loc.T("Verde", "Green"),
-        "blue" => Loc.T("Azul", "Blue"),
-        "purple" => Loc.T("Morado", "Purple"),
-        _ => Loc.T("Sin color", "No color"),
-    };
-
     /// <summary>Fila de muestras de color. Es también el sitio donde se elige el
     /// COLOR DE UN GRUPO: con él se pinta su recuadro en la lista y en el
     /// timeline, así que la muestra activa tiene que verse — antes no había
@@ -1589,7 +1571,9 @@ public sealed class InspectorPanel : ContentControl
     {
         var row = LabeledRow(panel, Loc.T("Color:", "Color:"));
         var swatches = new List<Button>();
-        foreach (var (name, hex) in CueConstants.CueColors)
+        // Paleta, orden y etiquetas: cálculo compartido (CueChoices.Colors) —
+        // el hex ya viene resuelto a 0xRRGGBB, aquí solo se traduce a Color
+        foreach (var choice in CueChoices.Colors)
         {
             var btn = new Button
             {
@@ -1597,14 +1581,14 @@ public sealed class InspectorPanel : ContentControl
                 // El estilo general deja Padding 10,4: en 26 px de ancho no
                 // cabe el glifo y salía recortado a una esquirla.
                 Padding = new Thickness(0),
-                Background = hex.Length > 0
-                    ? new SolidColorBrush((Color)ColorConverter.ConvertFromString(hex))
+                Background = choice.HasColor
+                    ? new SolidColorBrush(Theme.Hex(choice.Rgb))
                     : Brushes.Transparent,
                 BorderBrush = Theme.TextFaintBrush,
-                Tag = name,
-                ToolTip = ColorLabel(name),
+                Tag = choice.Key,
+                ToolTip = choice.Label,
             };
-            string key = name;
+            string key = choice.Key;
             btn.Click += (_, _) => Commit("color", key);
             row.Children.Add(btn);
             swatches.Add(btn);

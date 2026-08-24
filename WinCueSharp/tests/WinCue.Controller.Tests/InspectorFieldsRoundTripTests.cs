@@ -11,12 +11,18 @@
 //
 // Este archivo carga el show de pruebas REAL (tests/show-prueba/
 // show-prueba.json, el mismo que Andrés abre en pantalla), cambia por ese
-// camino TODOS los campos que entran en la primera pasada del inspector
-// (identidad, temporización, fundidos, reproducción — ver el encargo y
-// Secuence.App/InspectorPanel.cs), guarda, y comprueba que el JSON resultante
-// seguiría abriendo en WinCue: parsea con System.Text.Json (validez de
-// formato) y con CueModel.FromJson (validez semántica), y que los cambios
-// sobreviven a la vuelta completa a disco y otra vez a memoria.
+// camino TODOS los campos del inspector — la primera pasada (identidad,
+// temporización, fundidos, reproducción) y la SEGUNDA (color/armado/flag/
+// notas, destino y grupo, velocidad, y los disparadores: hotkey, retrigger,
+// «fundir y parar otros», wall-clock y MIDI) — guarda, y comprueba que el
+// JSON resultante seguiría abriendo en WinCue: parsea con System.Text.Json
+// (validez de formato) y con CueModel.FromJson (validez semántica), y que los
+// cambios sobreviven a la vuelta completa a disco y otra vez a memoria.
+//
+// Por qué importa especialmente en la segunda pasada: son campos que el
+// operador rellena una vez y no vuelve a mirar hasta la función. Un
+// wallclock_time que no sobrevive al guardado no se nota editando — se nota
+// el día del estreno.
 // =============================================================================
 
 using System.Text.Json;
@@ -131,6 +137,139 @@ public class InspectorFieldsRoundTripTests : ControllerTestBase
         Assert.Equal(untouched.Name, untouchedReloaded.Name);
         Assert.Equal(untouched.Duration, untouchedReloaded.Duration);
         Assert.NotEqual(originalName, back.Name);   // por si el cue 41 no cambió de verdad
+    }
+
+    /// <summary>La SEGUNDA pasada del inspector: color/armado/flag/notas,
+    /// destino y grupo, velocidad y los disparadores remotos. Mismo camino
+    /// real (OnCueEditCommitted → CueFields.Apply → SaveShow) y misma
+    /// exigencia: el JSON tiene que seguir abriendo y traer los valores.
+    ///
+    /// CueFields resuelve los campos por reflexión sobre [JsonPropertyName],
+    /// así que estos campos "ya funcionaban" sin tocar el controlador — esta
+    /// prueba fija justamente eso: que la clave que el inspector comete es la
+    /// del JSON, y que renombrar un JsonPropertyName rompe AQUÍ (en rojo) en
+    /// vez de en un inspector que calla y no guarda nada.</summary>
+    [Fact]
+    public void EditarGuardarYRecargar_ConservaLosCambiosDeLaSegundaPasadaDelInspector()
+    {
+        int row = Model.IndexOfId(41);
+        Assert.True(row >= 0, "el show de pruebas cambió: falta el cue 41");
+
+        var edits = new Dictionary<string, object?>
+        {
+            // Identidad
+            ["color"] = "purple",
+            ["armed"] = false,
+            ["flagged"] = true,
+            ["notes"] = "Ojo: entra con el actor ya en escena.\nSegunda línea.",
+            // Destino y grupo
+            ["stop_others"] = true,
+            // Reproducción
+            ["rate"] = 0.75,
+            ["preserve_pitch"] = false,
+            // Disparadores
+            ["hotkey"] = "q",
+            ["retrigger"] = "HARD_RESTART",
+            ["fade_others"] = true,
+            ["fade_others_time"] = 4.5,
+            ["fade_others_scope"] = "LIST",
+            ["wallclock_enabled"] = true,
+            ["wallclock_time"] = "20:30:00",
+            ["midi_enabled"] = true,
+            ["midi_type"] = "CONTROL_CHANGE",
+            ["midi_channel"] = 3,
+            ["midi_note"] = 64,
+            ["midi_velocity"] = 127,
+        };
+        Controller.OnCueEditCommitted(row, edits);
+
+        string outPath = Path.Combine(TempDir, "editado-2.json");
+        Controller.SaveShow(outPath);
+        string json = File.ReadAllText(outPath);
+
+        using (var doc = JsonDocument.Parse(json))
+            Assert.Equal(JsonValueKind.Object, doc.RootElement.ValueKind);
+
+        var reloaded = CueModel.FromJson(json);
+        Assert.Equal(Model.Count, reloaded.Count);
+
+        var back = reloaded.Single(c => c.Id == 41);
+        Assert.Equal("purple", back.Color);
+        Assert.False(back.Armed);
+        Assert.True(back.Flagged);
+        Assert.Contains("Segunda línea.", back.Notes);
+        Assert.True(back.StopOthers);
+        Assert.Equal(0.75, back.Rate);
+        Assert.False(back.PreservePitch);
+        Assert.Equal("q", back.Hotkey);
+        Assert.Equal(RetriggerMode.HardRestart, back.Retrigger);
+        Assert.True(back.FadeOthers);
+        Assert.Equal(4.5, back.FadeOthersTime);
+        Assert.Equal(FadeScope.List, back.FadeOthersScope);
+        Assert.True(back.WallclockEnabled);
+        Assert.Equal("20:30:00", back.WallclockTime);
+        Assert.True(back.MidiEnabled);
+        Assert.Equal(MidiTriggerType.ControlChange, back.MidiType);
+        Assert.Equal(3, back.MidiChannel);
+        Assert.Equal(64, back.MidiNote);
+        Assert.Equal(127, back.MidiVelocity);
+    }
+
+    /// <summary>El cue OBJETIVO de un START/STOP/FADE: el desplegable del
+    /// inspector comete el id, o null cuando se elige «(sin objetivo)» — y
+    /// CueFields trata null/-1/"" como "quitar el objetivo" (ver su Apply).
+    /// Se prueba sobre un cue que de verdad apunta a otro.</summary>
+    [Fact]
+    public void CommitDeCueObjetivo_PoneYQuitaElDestino()
+    {
+        var targeting = Model.Cues.FirstOrDefault(c => c.TargetsOther());
+        Assert.NotNull(targeting);
+        int row = Model.IndexOfId(targeting!.Id);
+        var otro = Model.Cues.First(c => c.Id != targeting.Id && c.IsMedia());
+
+        Controller.OnCueEditCommitted(row,
+            new Dictionary<string, object?> { ["target_id"] = otro.Id });
+        Assert.Equal(otro.Id, Model.GetCue(row)!.TargetId);
+
+        // «(sin objetivo)» → el inspector comete null
+        Controller.OnCueEditCommitted(row,
+            new Dictionary<string, object?> { ["target_id"] = null });
+        Assert.Null(Model.GetCue(row)!.TargetId);
+
+        string outPath = Path.Combine(TempDir, "sin-objetivo.json");
+        Controller.SaveShow(outPath);
+        Assert.Null(CueModel.FromJson(File.ReadAllText(outPath))
+            .Single(c => c.Id == targeting.Id).TargetId);
+    }
+
+    /// <summary>Cada clave que el inspector comete tiene que existir en
+    /// CueFields: si no, el campo se edita en pantalla y NO PASA NADA (Apply
+    /// devuelve false en silencio). Es la comprobación más barata que protege
+    /// de un renombrado de [JsonPropertyName].</summary>
+    [Fact]
+    public void TodasLasClavesDelInspectorExistenEnCueFields()
+    {
+        string[] claves =
+        {
+            // Primera pasada
+            "number", "name", "file_path", "continue_mode", "pre_wait", "duration",
+            "post_wait", "fade_in", "fade_out", "loop", "play_count",
+            "trim_start", "trim_end", "volume",
+            // Segunda pasada
+            "color", "armed", "flagged", "notes", "target_id", "fade_stop_on_done",
+            "group_mode", "stop_others", "rate", "preserve_pitch",
+            "hotkey", "retrigger", "fade_others", "fade_others_time",
+            "fade_others_scope", "wallclock_enabled", "wallclock_time",
+            "midi_enabled", "midi_type", "midi_channel", "midi_note", "midi_velocity",
+            // Rack de audio y geometría (pasadas anteriores)
+            "gain_db", "eq_enabled", "hpf_on", "hpf_freq", "lpf_on", "lpf_freq",
+            "comp_enabled", "comp_threshold", "comp_ratio", "comp_attack",
+            "comp_release", "comp_makeup",
+            "geo_mode", "preserve_aspect", "scale", "scale_x", "translate_x",
+            "translate_y", "rotate_z",
+        };
+        var faltan = claves.Where(k => !CueFields.Names.Contains(k)).ToList();
+        Assert.Empty(faltan);
     }
 
     /// <summary>El campo "archivo" del inspector es el único con un
