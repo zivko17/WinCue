@@ -773,10 +773,17 @@ public sealed partial class MainWindow : Window, IShowView
     /// accidente durante una función: el MISMO conjunto que WinCue.App.
     /// SetEditingEnabled/ToolbarSetEnabled bloquea (Abrir, Guardar, Añadir,
     /// Importar y Eliminar viven en la MISMA barra en los dos productos —
-    /// ver el comentario del XAML) más la edición de campos del inspector,
-    /// que en Secuence es la ÚNICA otra superficie de edición (no hay grid
-    /// editable ni menú contextual todavía). GO/transport/mezclador siguen
-    /// vivos: SHOW bloquea la LISTA, no el audio.</summary>
+    /// ver el comentario del XAML). GO/transport/mezclador siguen vivos:
+    /// SHOW bloquea la LISTA, no el audio.
+    ///
+    /// EL INSPECTOR NO SE BLOQUEA. Se bloqueaba, y era una diferencia con
+    /// WinCue de las que se pagan caras: allí SetEditingEnabled no toca el
+    /// inspector, y el candado del controlador (CueListEditor.RejectIfLocked)
+    /// solo rechaza AÑADIR / INSERTAR / BORRAR / IMPORTAR — la LISTA. Editar
+    /// los campos de un cue sigue permitido en modo SHOW, a propósito: es lo
+    /// que se hace en un ensayo general, corregir un tiempo o un fundido con
+    /// la función montada. En Secuence el inspector entero se quedaba gris y
+    /// no respondía a nada.</summary>
     private void SetEditingEnabled(bool enabled)
     {
         _controller?.SetEditingLocked(!enabled);
@@ -785,7 +792,6 @@ public sealed partial class MainWindow : Window, IShowView
         AddButton.IsEnabled = enabled;
         ImportButton.IsEnabled = enabled;
         DeleteButton.IsEnabled = enabled;
-        _inspector.EditingAllowed = enabled;
     }
 
     /// <summary>Muestra/oculta la salida de vídeo — a diferencia de
