@@ -264,7 +264,13 @@
              razonable en WinUI 3 sin traer una dependencia nueva — ver el
              informe — así que la columna izquierda queda de ancho FIJO). -->
         <Grid.ColumnDefinitions>
-            <ColumnDefinition Width="380"/>
+            <!-- 455: EL MISMO ancho por defecto que la columna izquierda de
+                 WinCue (MainWindow.xaml, ColumnDefinition Width="455"). Estaba
+                 en 380 y con ello los monitores PGM/PVW salían bastante más
+                 pequeños que los de WinCue. Allí la columna es arrastrable
+                 (MinWidth 200 / MaxWidth 760); aquí sigue siendo fija — ver
+                 más abajo el porqué —, pero al menos arranca igual. -->
+            <ColumnDefinition Width="455"/>
             <ColumnDefinition Width="*"/>
         </Grid.ColumnDefinitions>
 
@@ -276,7 +282,8 @@
         </Grid.RowDefinitions>
 
         <!-- ═══════════ TRANSPORT ═══════════ -->
-        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="10,8">
+        <!-- Padding 8,6: el de WinCue.App/MainWindow.xaml (Border x:Name="TopBar"). -->
+        <Border Grid.Row="0" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,6">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="Auto"/>
@@ -361,14 +368,17 @@
                 <!-- Centro: reloj del show. Mismo token de fondo que WinCue
                      (DeepBg, no WindowBg — ver Theme.cs). El countdown POR CUE
                      vive en las tarjetas de EN REPRODUCCIÓN, no aquí. -->
+                <!-- Padding 18,2 y cuerpo 40: los de WinCue (ShowClockBox /
+                     ShowClockText). El reloj es lo que se mira desde lejos en
+                     una función; con 32 se leía notablemente más pequeño. -->
                 <Border Grid.Column="1" Background="{x:Bind local:Theme.DeepBgBrush}" CornerRadius="4"
-                        Padding="16,2" HorizontalAlignment="Center" VerticalAlignment="Center">
+                        Padding="18,2" HorizontalAlignment="Center" VerticalAlignment="Center">
                     <StackPanel>
                         <TextBlock Text="SHOW · REMAINING" FontSize="10"
                                    Foreground="{x:Bind local:Theme.TextDimBrush}"
                                    HorizontalAlignment="Center"/>
                         <TextBlock x:Name="ShowClockText" Text="0:00:00"
-                                   FontSize="32" FontWeight="Bold" FontFamily="Consolas"
+                                   FontSize="40" FontWeight="Bold" FontFamily="Consolas"
                                    Foreground="{x:Bind local:Theme.StandbyBrush}"
                                    HorizontalAlignment="Center"/>
                     </StackPanel>
@@ -531,9 +541,20 @@
                 </Grid>
 
                 <!-- PVW: borde VERDE (Theme.GoDeep — mismo token que
-                     WinCue.App._pvw = new LiveMonitorControl("PVW", Theme.GoDeep)). -->
-                <Border Grid.Row="1" x:Name="PvwBox" Background="Black"
-                        BorderBrush="{x:Bind local:Theme.GoDeepBrush}" BorderThickness="1" Height="152">
+                     WinCue.App._pvw = new LiveMonitorControl("PVW", Theme.GoDeep)),
+                     con el VU de la AUDICIÓN local a la derecha.
+
+                     La columna del VU no es decoración: sin ella la caja del
+                     PVW era MÁS ANCHA que la del PGM (que sí la tenía) y los
+                     dos monitores no cuadraban. En WinCue los DOS llevan VU
+                     — ver MonitorRow en WinCue.App/MainWindow.xaml.cs. -->
+                <Grid Grid.Row="1">
+                    <Grid.ColumnDefinitions>
+                        <ColumnDefinition Width="*"/>
+                        <ColumnDefinition Width="Auto"/>
+                    </Grid.ColumnDefinitions>
+                    <Border Grid.Column="0" x:Name="PvwBox" Background="Black"
+                            BorderBrush="{x:Bind local:Theme.GoDeepBrush}" BorderThickness="1" Height="152">
                     <Grid x:Name="PvwInner">
                         <Grid.RowDefinitions>
                             <RowDefinition Height="Auto"/>
@@ -552,8 +573,11 @@
                         </Border>
                         <TextBlock Grid.Row="1" x:Name="PvwMessage" Text="—" Foreground="{x:Bind local:Theme.BorderBrush}"
                                    HorizontalAlignment="Center" VerticalAlignment="Center"/>
-                    </Grid>
-                </Border>
+                        </Grid>
+                    </Border>
+                    <StackPanel x:Name="PvwVuHost" Grid.Column="1" Orientation="Horizontal" Spacing="3"
+                                Margin="3,18,0,0" ToolTipService.ToolTip="PVW"/>
+                </Grid>
 
                 <!-- Tira de transporte del PVW (equivalente a
                      MonitorTransportBar de WPF): reproducir/pausar, barra y
@@ -798,7 +822,8 @@
              controlador. A la derecha, el testigo de SALIDA — mismo reparto
              que TallyLabel en WinCue.App (vive en la ventana de CONTROL, no
              en la de salida). -->
-        <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="12,8">
+        <!-- Padding 8,4: el de WinCue.App/MainWindow.xaml (Border x:Name="StatusBar"). -->
+        <Border Grid.Row="3" Grid.ColumnSpan="2" Background="{x:Bind local:Theme.PanelBgBrush}" Padding="8,4">
             <Grid>
                 <Grid.ColumnDefinitions>
                     <ColumnDefinition Width="*"/>

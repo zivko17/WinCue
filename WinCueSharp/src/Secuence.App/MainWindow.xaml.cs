@@ -64,6 +64,10 @@ public sealed partial class MainWindow : Window, IShowView
     // src/WinCue.App/MainWindow.xaml.cs: es el mismo medidor, otro pincel.
     private readonly VuMeterCanvas _pgmVuL = new(vertical: true) { Width = 9 };
     private readonly VuMeterCanvas _pgmVuR = new(vertical: true) { Width = 9 };
+    // VU de la AUDICIÓN local, en el PVW — mismos que _pvwVuL/_pvwVuR de
+    // WinCue.App. Sin ellos la caja del PVW quedaba más ancha que la del PGM.
+    private readonly VuMeterCanvas _pvwVuL = new(vertical: true) { Width = 9 };
+    private readonly VuMeterCanvas _pvwVuR = new(vertical: true) { Width = 9 };
 
     // ── Previos PGM/PVW en vivo (mpv embebido, ver LiveMonitorControl.cs) ──
     // PGM se resincroniza por tic (_pgmTimer, igual que WinCue.App); PVW se
@@ -192,6 +196,17 @@ public sealed partial class MainWindow : Window, IShowView
 
         PgmVuHost.Children.Add(_pgmVuL);
         PgmVuHost.Children.Add(_pgmVuR);
+        PvwVuHost.Children.Add(_pvwVuL);
+        PvwVuHost.Children.Add(_pvwVuR);
+
+        // Monitores ELÁSTICOS en 16:9 — mismo reparto que
+        // WinCue.App.LiveMonitorControl: el alto sale del ancho para que el
+        // HUECO DEL VÍDEO (descontando borde y barra del distintivo) quede en
+        // proporción. Antes las dos cajas llevaban un Height fijo en el XAML y
+        // la imagen no guardaba formato ninguno. El cálculo es el compartido
+        // (WinCue.Presentation.MonitorLayout).
+        KeepAspect(PgmBox, PgmHeader);
+        KeepAspect(PvwBox, PvwHeader);
 
         // Previos PGM/PVW en vivo — ver LiveMonitorControl.cs para el HwndHijo
         // que hospeda a mpv y el porqué de no espejar el compositor.
@@ -1270,10 +1285,36 @@ public sealed partial class MainWindow : Window, IShowView
     {
         if (cueId == MainController.AuditionCueId)
         {
+            // La audición local es el "preview" de audio → VU del PVW, igual
+            // que en WinCue.App.UpdateCueVuMeter.
+            _pvwVuL.SetLevel(left);
+            _pvwVuR.SetLevel(right);
             _mixer.SetAuditionLevel(left, right);
             return;
         }
         _mixer.UpdateCueLevel(cueId, left, right);
+    }
+
+    /// <summary>Mantiene la caja de un monitor en 16:9 al cambiar de ancho.
+    ///
+    /// El guardián de re-entrada es imprescindible: asignar Height vuelve a
+    /// disparar SizeChanged, y sin comprobar que el ANCHO es el que cambió se
+    /// entraría en bucle. WPF trae e.WidthChanged para esto; el
+    /// SizeChangedEventArgs de WinUI 3 solo trae NewSize/PreviousSize, así que
+    /// la comparación se hace a mano — misma intención, distinto framework.</summary>
+    private static void KeepAspect(FrameworkElement box, FrameworkElement badgeBar)
+    {
+        box.SizeChanged += (_, e) =>
+        {
+            if (e.NewSize.Width <= 0 || e.NewSize.Width == e.PreviousSize.Width)
+                return;
+            double barH = badgeBar.ActualHeight > 0
+                ? badgeBar.ActualHeight : MonitorLayout.DefaultBarHeight;
+            double border = box is Border b ? b.BorderThickness.Left + b.BorderThickness.Right : 0;
+            double vertical = box is Border vb ? vb.BorderThickness.Top + vb.BorderThickness.Bottom : 0;
+            box.Height = MonitorLayout.HeightForWidth(
+                e.NewSize.Width, border, vertical + barH);
+        };
     }
 
     // ==================================================================

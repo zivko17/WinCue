@@ -27,6 +27,7 @@ using System.Windows.Controls;
 using System.Windows.Forms.Integration;
 using System.Windows.Media;
 using System.Windows.Media.Imaging;
+using WinCue.Presentation;
 using WinCue.Video;
 
 namespace WinCue.App;
@@ -137,11 +138,15 @@ public sealed class LiveMonitorControl : Border
         {
             if (!e.WidthChanged || e.NewSize.Width <= 0)
                 return;
-            double barH = _bar.ActualHeight > 0 ? _bar.ActualHeight : 18.0;
-            double chromeH = BorderThickness.Top + BorderThickness.Bottom + barH;
-            double innerW = Math.Max(
-                0.0, e.NewSize.Width - BorderThickness.Left - BorderThickness.Right);
-            Height = Math.Max(120, innerW * 9.0 / 16.0 + chromeH);
+            double barH = _bar.ActualHeight > 0
+                ? _bar.ActualHeight : MonitorLayout.DefaultBarHeight;
+            // La FÓRMULA es cálculo compartido (WinCue.Presentation.MonitorLayout):
+            // Secuence la necesitaba igual y repetirla allí habría sido la copia
+            // que la regla 2 prohíbe. Mismos números, mismo resultado.
+            Height = MonitorLayout.HeightForWidth(
+                e.NewSize.Width,
+                BorderThickness.Left + BorderThickness.Right,
+                BorderThickness.Top + BorderThickness.Bottom + barH);
         };
     }
 
