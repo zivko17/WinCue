@@ -288,9 +288,7 @@ public sealed class InspectorPanel : ContentControl
 
         Header(Loc.T("TEMPORIZACIÓN", "TIMING"));
         Cmb("continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
-            ("None", Loc.T("Nada (GO manual)", "None (manual GO)")),
-            ("AutoContinue", Loc.T("Auto-continue (tras post-wait)", "Auto-continue (after post-wait)")),
-            ("AutoFollow", Loc.T("Auto-follow (al acabar la acción)", "Auto-follow (when the action ends)")));
+            CueChoices.ContinueModes);
         TimeF("pre_wait", "Pre-wait:", c => c.PreWait);
         TimeF("duration", Loc.T("Duración:", "Duration:"), c => c.Duration);
         TimeF("post_wait", "Post-wait:", c => c.PostWait);
@@ -825,6 +823,17 @@ public sealed class InspectorPanel : ContentControl
         MaxWidth = 300,
         Margin = new Thickness(10, 0, 10, 6),
     });
+
+    /// <summary>Desplegable con opciones escritas aquí mismo. Reservado a los
+    /// combos que NO son un enum compartido con WinCue — hoy solo «geo_mode»,
+    /// que además usa los valores en UPPER_SNAKE porque WinCue no tiene un
+    /// combo equivalente (allí es una casilla FULL/CUSTOM). Para todo lo
+    /// demás, la lista viene de CueChoices: repetir aquí las opciones de un
+    /// enum es exactamente la copia que la regla 2 prohíbe.</summary>
+    private void Cmb(string key, string label, Func<Cue, string> read,
+                     params (string Value, string Label)[] items) =>
+        Cmb(key, label, read,
+            items.Select(i => new CueChoice(i.Value, i.Label)).ToList());
 
     private void Cmb(string key, string label, Func<Cue, string> read,
                      IReadOnlyList<CueChoice> items)
