@@ -99,8 +99,13 @@ Estas costaron tiempo. **No las redescubras:**
   `$(MSBuildExtensionsPath)`, y con `dotnet` eso apunta al SDK de .NET donde
   no están. Hizo falta instalar la carga
   `Microsoft.VisualStudio.Workload.UniversalBuildTools` en Build Tools 2022.
-  El `.csproj` de Secuence **ya autorresuelve la ruta**. **Sin verificar en el
-  runner de CI** — primer sospechoso si un push sale rojo.
+  El `.csproj` de Secuence autorresuelve la ruta **en un puesto con VS 2022**,
+  pero **en el runner de CI no**: la imagen trae **Visual Studio 18**
+  (`...\Visual Studio\18\Enterprise\...\v18.0\AppxPackage`) y ninguna de
+  las cuatro sondas fijas casa. Verificado el 2026-08-23 (run #5 en rojo). El
+  `ci.yml` lo resuelve con **`vswhere`** y exporta `AppxMSBuildToolsPath` como
+  variable de entorno — MSBuild trata el entorno como propiedad, así que la
+  condición del `.csproj` la deja ganar.
 - **`ms-appx:///` SÍ resuelve en apps desempaquetadas.** `file:///` **no** lo
   admite `FontFamily`, y **falla en silencio** (interfaz llena de cuadritos).
   La fuente de iconos usa `ms-appx:///assets/Phosphor.ttf#Phosphor`.
@@ -114,6 +119,21 @@ Estas costaron tiempo. **No las redescubras:**
 - **No todo lo que WPF pinta a mano hay que pintarlo**: el fader del mixer
   resultó ser un `Slider` nativo. **Mira siempre si hay equivalente nativo
   antes de pintar.**
+- **Un `ContentDialog` se ajusta a su contenido** («is sized to its content by
+  default», doc de `ContentDialog.FullSizeDesired`). Con el alto libre, un
+  diálogo con pestañas **cambia de tamaño al cambiar de pestaña** y los
+  botones se mueven bajo el ratón. Se arregla con un alto **fijo** (no
+  `MaxHeight`), y que el scroll lo ponga cada pestaña. El alto no se clava a
+  un número: se deduce de `XamlRoot.Size.Height` con topes, porque un monitor
+  de 1024×600 no admite lo mismo que uno de 1080 — ver
+  `WinCue.Presentation.SettingsDialogMetrics`, que es donde esa cuenta tiene
+  pruebas.
+- **Un `ContentControl` NO estira su contenido**: en WinUI 3 el valor por
+  defecto de `Control` es `VerticalContentAlignment=Top` y
+  `HorizontalContentAlignment=Left` (no `Stretch`, como es fácil suponer
+  viniendo de WPF). Mientras el contenedor se ajusta al contenido no se nota;
+  en cuanto le das un tamaño fijo, lo de dentro se queda flotando en una
+  esquina. Hay que ponerlos a `Stretch` a mano.
 - **WinUI 3 no trae `TabControl` retemplable ni `GridSplitter`** de serie.
 
 ## Trampas de licencia — el producto se distribuye CERRADO

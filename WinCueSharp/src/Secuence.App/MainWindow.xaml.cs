@@ -811,10 +811,21 @@ public sealed partial class MainWindow : Window, IShowView
         var dialog = new ContentDialog
         {
             Title = $"Secuence — {Loc.T("Configuración", "Settings")}",
+            // Tamaño FIJO del contenido — no MaxHeight. Un ContentDialog de
+            // WinUI 3 se ajusta a su contenido, así que con el alto libre cada
+            // pestaña redimensionaba el cuadro al cambiar de una a otra: el
+            // marco saltaba y los botones Guardar/Cancelar se movían bajo el
+            // ratón. Con un alto fijo el marco no se mueve nunca y es el
+            // ScrollViewer de cada pestaña (SettingsPanel.MakeTab) el que
+            // desplaza lo que no quepa. El número sale de la ventana en vez de
+            // estar clavado, para que el cuadro entero quepa también en el
+            // monitor de 1024x600 — ver SettingsDialogMetrics, que es donde esa
+            // cuenta tiene pruebas.
             Content = new Border
             {
-                Width = 620,
-                MaxHeight = 560,
+                Width = SettingsDialogMetrics.ContentWidth,
+                Height = SettingsDialogMetrics.ContentHeight(
+                    Content.XamlRoot?.Size.Height ?? 0),
                 Child = panel,
             },
             PrimaryButtonText = Loc.T("Guardar", "Save"),

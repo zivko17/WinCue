@@ -97,6 +97,18 @@ public sealed class SettingsPanel : ContentControl
     {
         _sm = settings;
 
+        // ESTIRAR el contenido hasta llenar el hueco que da quien nos aloja.
+        // No es cosmética: en WinUI 3 el valor por defecto de un Control es
+        // VerticalContentAlignment=Top y HorizontalContentAlignment=Left (así
+        // está documentado en Microsoft.UI.Xaml.Controls.Control), de modo que
+        // un ContentControl NO estira su contenido. Mientras el diálogo se
+        // ajustaba al contenido daba igual —el hueco valía exactamente lo que
+        // medía el TabView—, pero desde que el cuadro tiene un alto FIJO (ver
+        // MainWindow.OnSettingsClick y SettingsDialogMetrics) el TabView se
+        // quedaría flotando arriba a la izquierda con el resto en blanco.
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+
         var tabs = new TabView
         {
             IsAddTabButtonVisible = false,
