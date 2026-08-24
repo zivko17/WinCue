@@ -134,7 +134,28 @@ Estas costaron tiempo. **No las redescubras:**
   viniendo de WPF). Mientras el contenedor se ajusta al contenido no se nota;
   en cuanto le das un tamaño fijo, lo de dentro se queda flotando en una
   esquina. Hay que ponerlos a `Stretch` a mano.
-- **WinUI 3 no trae `TabControl` retemplable ni `GridSplitter`** de serie.
+- **WinUI 3 no trae `TabControl` retemplable ni `GridSplitter`** de serie. El
+  `GridSplitter` ya está resuelto: `Secuence.App.PaneSplitter` (control) +
+  `WinCue.Presentation.SplitterDrag` (los topes, con pruebas).
+- **`Border` está SELLADO**, igual que `CanvasControl`. `PaneSplitter` hereda
+  de `Grid`, que sí se puede heredar, pinta su `Background` y con él hace
+  hit-test. Y al no ser un `Control`, los eventos de puntero **se enganchan**
+  en vez de sobrescribirse: `OnPointerPressed` y compañía son virtuales en
+  `Control`, no en `UIElement`. (`ProtectedCursor`, en cambio, sí está en
+  `UIElement` — por eso el separador tiene que ser una clase y no un `Grid`
+  suelto con manejadores puestos desde fuera.)
+- **Los estilos por defecto traen MÍNIMOS que se comen los anchos que pides:**
+  `TextBox` lleva `MinWidth = 64` (`TextControlThemeMinWidth`) y `CheckBox`
+  lleva `MinWidth = 120` (`CheckBoxMinWidth`). Las cajas de banda de la EQ son
+  de 38, 42 y 52 y **las tres se pintaban a 64**, del mismo ancho; y una
+  casilla con la palabra «HPF» reservaba 120 px y abría un hueco enorme antes
+  de su campo. En WPF no existe ninguno de los dos. Es la misma familia que el
+  `MinHeight` de la barra de trim: **si no lo anulas a 0, gana el del
+  control**. Cuando un ancho «no se aplica», sospecha de un mínimo del tema
+  antes que de tu código.
+- **El relleno por defecto también es otro**: `Padding` (6,4) en WinUI contra
+  (4,2) en WPF. Con el de WinUI las filas del inspector salían más altas y el
+  panel entero se leía más suelto que el de WinCue.
 
 ## Trampas de licencia — el producto se distribuye CERRADO
 
