@@ -46,6 +46,7 @@ using Microsoft.UI;
 using Microsoft.UI.Windowing;
 using Microsoft.UI.Xaml;
 using WinRT.Interop;
+using WinCue.Core;
 
 namespace Secuence.App;
 
@@ -195,6 +196,49 @@ public sealed partial class VideoOutputWindow : Window
         {
             LogAviso($"PlaceOnScreen({screenIndex}) falló: {ex.Message} — la salida se queda donde estaba.");
         }
+    }
+
+    /// <summary>Número de esta salida (1..4) para el rótulo de identificar.
+    /// Lo pone MainWindow al crearla.</summary>
+    public int OutputNumber { get; set; } = 1;
+
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _identifyTimer;
+
+    /// <summary>Enseña un rótulo enorme con el número de esta salida, para
+    /// saber CUÁL de los monitores es. Es la respuesta a «¿y esta salida
+    /// dónde cae?» cuando hay más de una.
+    ///
+    /// Oculta el HWND hijo mientras dura: el rótulo es XAML y mpv se pinta
+    /// por encima (airspace, ver HwndHijo.cs). Al terminar se restaura, salvo
+    /// que el blackout lo quiera oculto de todos modos.</summary>
+    public void ShowIdentify(Windows.UI.Color color, double seconds = 2.5)
+    {
+        EnsureVisibleHandle();
+
+        IdentifyText.Text = Loc.T($"SALIDA {OutputNumber}", $"OUTPUT {OutputNumber}");
+        var brush = new Microsoft.UI.Xaml.Media.SolidColorBrush(color);
+        IdentifyText.Foreground = brush;
+        IdentifyOverlay.BorderBrush = brush;
+        IdentifyOverlay.Visibility = Visibility.Visible;
+        if (_hwndHijo != 0)
+            HwndHijo.Ocultar(_hwndHijo);
+
+        _identifyTimer ??= DispatcherQueue.CreateTimer();
+        _identifyTimer.Interval = TimeSpan.FromSeconds(Math.Max(0.5, seconds));
+        _identifyTimer.IsRepeating = false;
+        _identifyTimer.Tick -= OnIdentifyDone;
+        _identifyTimer.Tick += OnIdentifyDone;
+        _identifyTimer.Stop();
+        _identifyTimer.Start();
+    }
+
+    private void OnIdentifyDone(Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        IdentifyOverlay.Visibility = Visibility.Collapsed;
+        // El blackout manda: si estaba puesto, el hijo se queda oculto.
+        if (_hwndHijo != 0 && !_blackout)
+            HwndHijo.Mostrar(_hwndHijo);
     }
 
     /// <summary>Oculta la salida sin destruirla (botón «Salida vídeo» de

@@ -19,9 +19,14 @@
 // la cabecera de VuMeterCanvas.cs para la razón completa.
 //
 // SIMPLIFICACIONES DELIBERADAS DE ESTA PASADA (documentadas, no descuidos):
-//   · La etiqueta del bloque YA lleva sus prefijos ↗/∞/📌: Win2D no resuelve
-//     la fuente de iconos por NOMBRE ni por "ms-appx:///" (eso lanza), pero sí
-//     por un URI de ARCHIVO — IconFont.Win2DFamily, comprobado al arrancar.
+//   · La etiqueta del bloque y el asa del grupo van SIN glifo, y el motivo NO
+//     es el que se creyó al principio. Win2D sí carga la fuente de iconos (por
+//     URI de ARCHIVO, IconFont.Win2DFamily — el marcador GO la usa). Lo que
+//     pasa es que PHOSPHOR NO TRAE MINÚSCULAS: aplicarla a toda la etiqueta
+//     pintaba "1.1 · A colores (10 s)" como "1.1 · A (10 )". Mayúsculas,
+//     cifras y signos sí están, y por eso "▸GO" —que no tiene minúsculas— se
+//     ve bien y despista. Para mezclar glifo y texto corriente haría falta
+//     pintar DOS runs, uno con cada fuente; Win2D no hace ese respaldo solo.
 //     El aviso de solapamiento sigue siendo la marca triangular lisa.
 //   · Los recuadros de grupo (spans) y los marcadores GO YA SE PINTAN, con el
 //     mismo reparto que WinCue (relleno debajo, marco y asa por ENCIMA de los
@@ -238,8 +243,7 @@ public sealed class TimelineCanvas : UserControl
     /// en un campo porque CanvasTextFormat es descartable y este control no
     /// lo es (CA1001); la medida ya aloja un CanvasTextLayout de todas
     /// formas.</summary>
-    private static CanvasTextFormat SpanFormat() =>
-        new() { FontSize = 10, FontFamily = IconFont.Win2DFamily };
+    private static CanvasTextFormat SpanFormat() => new() { FontSize = 10 };
 
     /// <summary>Asa de grupo bajo el punto (la del grupo MÁS INTERNO, que lo
     /// decide el cálculo compartido). El ancho del rótulo lo mide Win2D:
@@ -252,7 +256,7 @@ public sealed class TimelineCanvas : UserControl
         using var format = SpanFormat();
         return TimelineHitTest.SpanChip(_projection.Spans, p.X, p.Y,
             _vp.PxPerSec, _vp.ScrollX, LayerH,
-            span => MeasureText(_canvas, TimelineLayout.SpanLabelText(span), format));
+            span => MeasureText(_canvas, TimelineLayout.SpanLabelText(span, withIcon: false), format));
     }
 
     /// <summary>Cuerpo del recuadro de un grupo bajo el punto.</summary>
@@ -542,8 +546,7 @@ public sealed class TimelineCanvas : UserControl
         // La caja y su etiqueta son cálculo COMPARTIDO (TimelineLayout.
         // SpanBoxRect / SpanLabelText); aquí solo se pinta. El orden es el de
         // WinCue: relleno → marcas GO → bloques → marcos y asas.
-        using var spanFormat = new CanvasTextFormat
-        { FontSize = 10, FontFamily = IconFont.Win2DFamily };
+        using var spanFormat = new CanvasTextFormat { FontSize = 10 };
         foreach (var span in _projection.Spans)
         {
             var box = SpanBox(span, lh);
@@ -599,7 +602,7 @@ public sealed class TimelineCanvas : UserControl
                 selected ? ToColor(Palette.White) : ToColor(color, 200),
                 selected ? 2f : 1.6f);
 
-            string text = TimelineLayout.SpanLabelText(span);
+            string text = TimelineLayout.SpanLabelText(span, withIcon: false);
             var chip = SpanChipBox(ds, span, lh, text, spanFormat);
             ds.FillRoundedRectangle(chip, 3, 3, ToColor(color, 235));
             // Recortado al asa: un nombre largo no puede salirse del grupo.
@@ -685,15 +688,13 @@ public sealed class TimelineCanvas : UserControl
 
         if (rect.Width > 30)
         {
-            // Etiqueta COMPARTIDA (TimelineLayout.BlockLabelText): trae los
-            // prefijos ↗ fantasma, ∞/×N repeticiones y 📌 pista fijada. Antes
-            // se construía a mano y sin ellos porque Win2D no resolvía la
-            // fuente de iconos; con IconFont.Win2DFamily ya se puede.
-            string text = TimelineLayout.BlockLabelText(b);
+            // Texto plano y SIN la fuente de iconos: Phosphor no trae
+            // MINÚSCULAS, así que poniéndola en toda la etiqueta «A colores
+            // (10 s)» se pintaba «A (10 )». Ver la cabecera del archivo.
+            string text = $"{b.Cue.DisplayNumber} · {b.Cue.Name}";
             using var format = new CanvasTextFormat
             {
                 FontSize = 11,
-                FontFamily = IconFont.Win2DFamily,
                 WordWrapping = CanvasWordWrapping.NoWrap,
                 TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
                 TrimmingSign = CanvasTrimmingSign.Ellipsis,

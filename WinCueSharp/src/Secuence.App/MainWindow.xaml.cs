@@ -58,7 +58,6 @@ public sealed partial class MainWindow : Window, IShowView
     private bool _closeConfirmed;   // true tras confirmar cierre con cambios sin guardar
 
     // ── Salida de vídeo (ver el bloque IShowView de más abajo) ──────────
-    private VideoOutputWindow? _videoOutput;
     private bool _blackout;
 
     // ── VU de programa (piloto Win2D, ver IShowView.UpdateVuMeter) ──────
@@ -766,7 +765,8 @@ public sealed partial class MainWindow : Window, IShowView
     private void ToggleBlackout()
     {
         _blackout = !_blackout;
-        _videoOutput?.SetBlackout(_blackout);
+        foreach (var w in _videoOutputs)
+            w?.SetBlackout(_blackout);
         BlackoutButton.Background = _blackout ? Theme.WarnBrush : Theme.ControlBgBrush;
         FlashStatus(_blackout
             ? $"{Icons.BlackFrame} Blackout activado."
@@ -1283,12 +1283,119 @@ public sealed partial class MainWindow : Window, IShowView
     /// este botón es el equivalente reducido a lo que ya existe —
     /// GetVideoOutputHandle crea/coloca/muestra por el MISMO camino que un
     /// cue de vídeo, así que no hay lógica de colocación nueva aquí.</summary>
+    /// <summary>Menú de salidas, equivalente del de WinCue.App.
+    /// OnVideoOutputClick: un submenú por salida HABILITADA en Ajustes, con
+    /// mostrar/ocultar e identificar, y debajo las acciones globales.
+    ///
+    /// Antes esto era un interruptor de una sola salida, y por eso «no se
+    /// podía elegir la salida»: no había dónde.
+    ///
+    /// Una salida deshabilitada (monitor −1) NO aparece: así no se lanza sin
+    /// querer sobre el monitor de control.</summary>
     private void OnVideoOutButtonClick(object sender, RoutedEventArgs e)
     {
-        if (_videoOutput is { IsVisible: true })
-            _videoOutput.Hide();
-        else
-            GetVideoOutputHandle();
+        var menu = new MenuFlyout();
+
+        for (int s = 0; s < MaxVideoOutputs; s++)
+        {
+            if (ConfiguredScreen(s) < 0)
+                continue;
+            int idx = s;
+            var sub = new MenuFlyoutSubItem
+            {
+                Text = Loc.T($"Salida {idx + 1}", $"Output {idx + 1}"),
+            };
+
+            bool visible = _videoOutputs[idx] is { IsVisible: true };
+            var mostrar = new MenuFlyoutItem
+            {
+                Text = visible ? Loc.T("Ocultar", "Hide") : Loc.T("Mostrar", "Show"),
+            };
+            mostrar.Click += (_, _) =>
+            {
+                if (_videoOutputs[idx] is { IsVisible: true } abierta)
+                {
+                    abierta.Hide();
+                }
+                else
+                {
+                    var w = EnsureVideoOutputWindow(idx);
+                    w.EnsureVisibleHandle();
+                    PlaceVideoOutput(idx);
+                }
+                UpdateVideoOutButton();
+            };
+            sub.Items.Add(mostrar);
+
+            var identificar = new MenuFlyoutItem
+            {
+                Text = Loc.T("Identificar", "Identify"),
+            };
+            identificar.Click += (_, _) => IdentifyOutput(idx);
+            sub.Items.Add(identificar);
+
+            menu.Items.Add(sub);
+        }
+
+        if (menu.Items.Count == 0)
+        {
+            // Todas deshabilitadas: decirlo, en vez de abrir un menú vacío.
+            var aviso = new MenuFlyoutItem
+            {
+                Text = Loc.T("Sin salidas habilitadas — ver Ajustes → Vídeo",
+                             "No outputs enabled — see Settings → Video"),
+                IsEnabled = false,
+            };
+            menu.Items.Add(aviso);
+        }
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        var identVisibles = new MenuFlyoutItem
+        {
+            Text = Loc.T("Identificar salidas visibles", "Identify visible outputs"),
+        };
+        identVisibles.Click += (_, _) =>
+        {
+            for (int s = 0; s < MaxVideoOutputs; s++)
+                if (_videoOutputs[s] is { IsVisible: true })
+                    IdentifyOutput(s);
+        };
+        menu.Items.Add(identVisibles);
+
+        var black = new ToggleMenuFlyoutItem
+        {
+            Text = Loc.T("Blackout (B)", "Blackout (B)"),
+            IsChecked = _blackout,
+        };
+        black.Click += (_, _) => ToggleBlackout();
+        menu.Items.Add(black);
+
+        menu.Items.Add(new MenuFlyoutSeparator());
+
+        var ocultarTodas = new MenuFlyoutItem
+        {
+            Text = Loc.T("Ocultar todas las salidas", "Hide all outputs"),
+        };
+        ocultarTodas.Click += (_, _) =>
+        {
+            foreach (var w in _videoOutputs)
+                w?.Hide();
+            UpdateVideoOutButton();
+        };
+        menu.Items.Add(ocultarTodas);
+
+        menu.ShowAt(VideoOutButton);
+    }
+
+    /// <summary>Enseña el rótulo con el número de la salida en su monitor —
+    /// la respuesta a «¿cuál de mis pantallas es esta?».</summary>
+    private void IdentifyOutput(int output)
+    {
+        var w = EnsureVideoOutputWindow(output);
+        w.EnsureVisibleHandle();
+        PlaceVideoOutput(output);
+        w.ShowIdentify(OutColors[output]);
         UpdateVideoOutButton();
     }
 
@@ -1301,7 +1408,7 @@ public sealed partial class MainWindow : Window, IShowView
     /// del título.</summary>
     private void UpdateVideoOutButton()
     {
-        bool active = _videoOutput is { IsVisible: true };
+        bool active = _videoOutputs.Any(w => w is { IsVisible: true });
         VideoOutButton.Background = active ? Theme.GoButtonBrush : Theme.PanicButtonBrush;
     }
 
@@ -1402,8 +1509,12 @@ public sealed partial class MainWindow : Window, IShowView
         ApplyEngineSettings?.Invoke();
         _controller?.OnMasterVolume(_settings.Get("master_volume", 100));
         _mixer.SetMasterFader(_settings.Get("master_volume", 100));
-        if (_videoOutput is { IsVisible: true })
-            _videoOutput.PlaceOnScreen(_settings.Get("video_output_screen", 0));
+        // Recolocar TODAS las salidas ya abiertas en el monitor recién
+        // elegido, sin esperar al siguiente GO.
+        for (int s = 0; s < MaxVideoOutputs; s++)
+            if (_videoOutputs[s] is { IsVisible: true })
+                PlaceVideoOutput(s);
+        UpdateVideoOutButton();
         FlashStatus(Loc.T("Configuración guardada y aplicada.", "Settings saved and applied."));
     }
 
@@ -1974,36 +2085,94 @@ public sealed partial class MainWindow : Window, IShowView
     /// <summary>HWND de la ventana hija donde mpv pinta. La crea y la coloca
     /// en su monitor la PRIMERA vez que se pide (los Play siguientes solo
     /// reciben el mismo handle, ya visible).</summary>
-    public nint GetVideoOutputHandle()
+    // ── SALIDAS DE VÍDEO ───────────────────────────────────────────────
+    // CUATRO, como WinCue, y no una: cada cue de vídeo elige la suya en el
+    // inspector (Geometría → Salida) y el campo ya viajaba en el JSON
+    // (Cue.VideoOutput). Lo que faltaba era que alguien lo mirara: el
+    // IShowView por defecto devuelve SIEMPRE la misma ventana, así que
+    // elegir salida no hacía nada. Al implementar GetVideoOutputLayerHandle
+    // por pantalla, ese campo pasa a significar algo.
+    //
+    // Las ventanas se crean PEREZOSAMENTE: una salida que ningún cue usa no
+    // materializa nada, y una «Deshabilitada» en Ajustes (monitor −1) ni
+    // siquiera aparece en el botón.
+    private const int MaxVideoOutputs = 4;
+    private readonly VideoOutputWindow?[] _videoOutputs = new VideoOutputWindow?[MaxVideoOutputs];
+
+    /// <summary>Colores por salida, para identificar y para el rótulo. Los
+    /// mismos cuatro que WinCue usa en su editor de canvas.</summary>
+    private static readonly Windows.UI.Color[] OutColors =
     {
-        bool firstOpen = _videoOutput is null || !_videoOutput.IsVisible;
-        _videoOutput ??= new VideoOutputWindow();
-        nint handle = _videoOutput.EnsureVisibleHandle();
+        Microsoft.UI.Colors.DeepSkyBlue, Microsoft.UI.Colors.Orange,
+        Microsoft.UI.Colors.LimeGreen, Microsoft.UI.Colors.Violet,
+    };
+
+    /// <summary>Clave de settings del monitor de cada salida. La 1 conserva
+    /// el nombre histórico para no romper shows/ajustes ya guardados — mismo
+    /// esquema que WinCue.App.ScreenSettingKey.</summary>
+    private static string ScreenSettingKey(int screen) =>
+        screen == 0 ? "video_output_screen" : $"video_output_screen{screen + 1}";
+
+    /// <summary>Monitor configurado para una salida, o −1 si está
+    /// deshabilitada. La 1 vale 0 por defecto; las demás nacen apagadas, para
+    /// que nadie lance vídeo sobre el monitor de control sin pedirlo.</summary>
+    private int ConfiguredScreen(int output) =>
+        _settings.Get(ScreenSettingKey(output), output == 0 ? 0 : -1);
+
+    private VideoOutputWindow EnsureVideoOutputWindow(int output)
+    {
+        if (_videoOutputs[output] is { } existente)
+            return existente;
+        var w = new VideoOutputWindow { OutputNumber = output + 1 };
+        _videoOutputs[output] = w;
+        return w;
+    }
+
+    /// <summary>Coloca una salida en su monitor. Una salida deshabilitada
+    /// (−1) cae a la principal en vez de reventar: si un cue apunta a ella,
+    /// más vale verlo en algún sitio que no verlo — mismo criterio que
+    /// WinCue.App.PlaceVideoOutput.</summary>
+    private void PlaceVideoOutput(int output)
+    {
+        int mon = ConfiguredScreen(output);
+        _videoOutputs[output]?.PlaceOnScreen(mon < 0 ? 0 : mon);
+        if (_blackout)
+            _videoOutputs[output]?.SetBlackout(true);
+    }
+
+    public nint GetVideoOutputHandle() => GetVideoOutputLayerHandle(0, 0);
+
+    /// <summary>El HWND donde tiene que pintar un cue, SEGÚN SU SALIDA. Es la
+    /// pieza que hacía falta: sin esto, el IShowView por defecto mandaba todo
+    /// a la misma ventana y el campo «Salida» del inspector era decorativo.
+    ///
+    /// La capa se ignora — Secuence no tiene compositor GPU (fase 2b), así que
+    /// cada salida es UNA superficie, la clásica de mpv.</summary>
+    public nint GetVideoOutputLayerHandle(int screen, int layer)
+    {
+        int output = Math.Clamp(screen, 0, MaxVideoOutputs - 1);
+        var w = EnsureVideoOutputWindow(output);
+        bool firstOpen = !w.IsVisible;
+        nint handle = w.EnsureVisibleHandle();
         if (firstOpen)
         {
-            _videoOutput.PlaceOnScreen(_settings.Get("video_output_screen", 0));
-            _videoOutput.SetBlackout(_blackout);   // una salida que nace durante un blackout, nace en negro
+            PlaceVideoOutput(output);
+            w.SetBlackout(_blackout);   // la que nace durante un blackout, nace en negro
+            UpdateVideoOutButton();
         }
         return handle;
     }
 
-    /// <summary>true si la salida ya está mostrada — mismo contrato que
-    /// WinCue.App.IsVideoOutputVisible(screen), pero Secuence solo tiene UNA
-    /// salida (sin el array _videoOutputs por pantalla de WinCue): el
-    /// parámetro screen se ignora a propósito, mismo criterio que
-    /// SurfaceDimensions. MainController.PrepareVideoStandby ya lo consulta
-    /// para decidir si prepara el standby GPU o solo precarga clásico — antes
-    /// de esto siempre devolvía false (la implementación por defecto de
-    /// IShowView), así que la ruta híbrida de vídeo nunca llegaba a
-    /// standby en Secuence.</summary>
-    public bool IsVideoOutputVisible(int screen) => _videoOutput is { IsVisible: true };
+    /// <summary>true si ESA salida está mostrada. MainController.
+    /// PrepareVideoStandby lo consulta para decidir si prepara standby.</summary>
+    public bool IsVideoOutputVisible(int screen) =>
+        screen >= 0 && screen < MaxVideoOutputs && _videoOutputs[screen] is { IsVisible: true };
 
-    /// <summary>Dimensiones reales de la salida ya abierta; 1920×1080 (mismo
-    /// valor por defecto que FakeView en los tests del controlador) mientras
-    /// no exista ventana — la geometría CUSTOM de un cue no depende de esto
-    /// hasta que Secuence tenga esa UI.</summary>
+    /// <summary>Dimensiones de la salida 1 ya abierta; 1920×1080 (mismo valor
+    /// por defecto que FakeView en los tests del controlador) mientras no
+    /// exista ventana.</summary>
     public (double Width, double Height) SurfaceDimensions() =>
-        _videoOutput is { IsVisible: true } w ? w.ClientSize : (1920.0, 1080.0);
+        _videoOutputs[0] is { IsVisible: true } w ? w.ClientSize : (1920.0, 1080.0);
 
     /// <summary>Testigo: nombre del vídeo en pantalla, o null = NEGRO. Vive
     /// en la barra de estado de ESTA ventana (el operador), no en la salida
@@ -2013,9 +2182,12 @@ public sealed partial class MainWindow : Window, IShowView
             ? $"{Icons.BlackFrame} SALIDA: NEGRO"
             : $"{Icons.Video} SALIDA: {videoName}";
 
-    /// <summary>Cierre real de la ventana de salida (llamado por
-    /// App.xaml.cs.OnLaunched, window.Closed — mismo momento que
-    /// audio.Dispose()). Antes de esto, VideoOutputWindow.Closing la oculta
-    /// en vez de destruirla: mpv puede seguir apuntando a su HWND hijo.</summary>
-    public void CloseVideoOutput() => _videoOutput?.CloseForShutdown();
+    /// <summary>Cierre real de TODAS las salidas (App.xaml.cs, window.Closed).
+    /// Antes de esto, VideoOutputWindow.Closing las oculta en vez de
+    /// destruirlas: mpv puede seguir apuntando a su HWND hijo.</summary>
+    public void CloseVideoOutput()
+    {
+        foreach (var w in _videoOutputs)
+            w?.CloseForShutdown();
+    }
 }

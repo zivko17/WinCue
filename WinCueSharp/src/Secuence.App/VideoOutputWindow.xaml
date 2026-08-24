@@ -13,5 +13,19 @@
          tenga wid, y lo que reaparece cuando el blackout oculta el HWND hijo.
          ========================================================================== -->
 
-    <Grid x:Name="FondoNegro" Background="Black"/>
+    <Grid Background="Black">
+        <Grid x:Name="FondoNegro" Background="Black"/>
+
+        <!-- Rótulo de IDENTIFICAR: «¿cuál de mis monitores es la salida 2?».
+             Vive en el árbol XAML, así que el HWND hijo de mpv lo taparía por
+             airspace — por eso ShowIdentify OCULTA el hijo mientras dura, con
+             el mismo mecanismo que el blackout. Mientras se identifica no se
+             ve el vídeo, igual que en WinCue con sus patrones de prueba. -->
+        <Border x:Name="IdentifyOverlay" Visibility="Collapsed"
+                BorderThickness="14" Margin="28">
+            <TextBlock x:Name="IdentifyText"
+                       FontSize="140" FontWeight="Bold"
+                       HorizontalAlignment="Center" VerticalAlignment="Center"/>
+        </Border>
+    </Grid>
 </Window>

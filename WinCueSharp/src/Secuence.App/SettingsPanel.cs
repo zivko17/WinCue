@@ -154,12 +154,24 @@ public sealed class SettingsPanel : ContentControl
     {
         var root = new StackPanel();
 
-        var scr = Group(root, Loc.T("SALIDA DE VÍDEO", "VIDEO OUTPUT"));
-        Combo("video_output_screen", scr, Loc.T("Monitor de salida:", "Output monitor:"),
-            BuildScreenItems());
+        var scr = Group(root, Loc.T("SALIDAS DE VÍDEO (monitor por salida)",
+                                    "VIDEO OUTPUTS (monitor per output)"));
+        var pantallas = BuildScreenItems();
+        // Salidas 2-4: «Deshabilitada» (−1) la primera y por defecto — no
+        // aparecen en el botón de salidas hasta que se les asigna monitor, así
+        // que nadie lanza vídeo sobre el monitor de control sin pedirlo. Mismo
+        // esquema que WinCue.App.SettingsWindow.BuildVideo.
+        var conApagada = new[]
+            { ((object)(-1), Loc.T("Deshabilitada", "Disabled")) }
+            .Concat(pantallas).ToArray();
+        Combo("video_output_screen", scr,
+            Loc.T("Salida 1 (principal):", "Output 1 (main):"), pantallas);
+        Combo("video_output_screen2", scr, Loc.T("Salida 2:", "Output 2:"), conApagada);
+        Combo("video_output_screen3", scr, Loc.T("Salida 3:", "Output 3:"), conApagada);
+        Combo("video_output_screen4", scr, Loc.T("Salida 4:", "Output 4:"), conApagada);
         Note(scr, Loc.T(
-            "La salida se abre a pantalla completa en este monitor la primera vez que un cue de vídeo la necesita.",
-            "The output opens full-screen on this monitor the first time a video cue needs it."));
+            "Cada cue de vídeo elige su salida en el inspector (Geometría). Las ventanas se abren solas a pantalla completa cuando un cue las usa. Una salida «Deshabilitada» no aparece en el botón de salidas.",
+            "Each video cue picks its output in the inspector (Geometry). Output windows open full-screen on their own when a cue uses them. A «Disabled» output doesn't appear in the outputs button."));
 
         var pr = Group(root, Loc.T("MOTOR ProRes", "ProRes ENGINE"));
         Check("video_prores_engine", pr,
@@ -169,6 +181,10 @@ public sealed class SettingsPanel : ContentControl
             "Uncheck it if this machine misbehaves: ProRes goes back through mpv, same as in WinCue."));
 
         var pb = Group(root, Loc.T("REPRODUCCIÓN", "PLAYBACK"));
+        SpinDouble("video_default_volume", pb,
+            Loc.T("Volumen por defecto (%):", "Default volume (%):"), 0, 100, 1);
+        Check("video_loop_default", pb,
+            Loc.T("Loop por defecto en cues nuevos", "Loop by default on new cues"));
         SpinDouble("video_audio_max_minutes", pb,
             Loc.T("Audio de vídeo por el rack nativo hasta (min, 0 = sin límite):",
                   "Video audio through the native rack up to (min, 0 = no limit):"), 0, 240, 1);
