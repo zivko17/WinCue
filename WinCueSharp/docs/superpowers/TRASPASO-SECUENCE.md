@@ -251,6 +251,10 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Agrupar con `Ctrl+G`.** Antes de esto, en Secuence no había forma de meter
   un cue dentro de un grupo: se podía crear el GROUP y nada más.
 - **Menú contextual de la tabla** con las acciones de WinCue.
+- **Selección múltiple** en la tabla (`Extended`: Ctrl suma, Mayús extiende),
+  con agrupar / copiar / duplicar / borrar operando sobre el bloque entero.
+  El inspector enseña la fila que se ACABA de tocar, no la primera: al
+  extender con Mayús hacia arriba, saltaría a un cue que nadie ha señalado.
 - **Hotkeys por cue**: el campo ya dispara, y se calla mientras se escribe.
 - **Barra de trim también en cues de VÍDEO** (sin onda, como WinCue).
 - Las dos columnas que faltaban en la tabla: banderín y ✕ (desarmado).
@@ -269,11 +273,6 @@ ha movido a la lista de arriba):
 - **Timeline: el cursor de edición** con scrub y doble clic (clic en la regla
   lo coloca, doble clic reproduce desde ahí). Es lo único que queda de la
   interacción del timeline.
-- **Selección múltiple en la tabla.** Es de selección ÚNICA, así que todo lo
-  que en WinCue opera sobre un bloque —agrupar, copiar, duplicar, borrar—
-  aquí opera sobre una fila. El menú contextual y `Ctrl+G` ya le pasan una
-  lista al controlador, o sea que el día que la tabla lo admita no hay que
-  tocar nada más.
 - **«Normalizar sonoridad»** en el menú contextual. En WinCue es un método
   PRIVADO de su ventana, no del controlador: copiarlo es justo lo que prohíbe
   la regla 2, así que primero hay que subirlo a compartido.

@@ -713,7 +713,11 @@
             </Grid>
 
             <!-- Tabla -->
-            <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Single"
+            <!-- Extended = clic simple selecciona, Ctrl suma, Mayús extiende:
+                 lo mismo que el DataGrid de WinCue. Las acciones que operan
+                 sobre varias filas (agrupar, copiar, duplicar, borrar) leen
+                 SelectedRows() en MainWindow.xaml.cs. -->
+            <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Extended"
                       SelectionChanged="OnCueSelectionChanged"
                       RightTapped="OnCueListRightTapped"
                       Background="{x:Bind local:Theme.WindowBgBrush}">

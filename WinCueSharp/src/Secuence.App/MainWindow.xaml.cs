@@ -340,10 +340,10 @@ public sealed partial class MainWindow : Window, IShowView
         args.Handled = true;
         if (_controller is null || ModeToggle.IsChecked == true)
             return;
-        int row = CueList.SelectedIndex;
-        if (row < 0)
+        var rows = SelectedRows();
+        if (rows.Count == 0)
             return;
-        _controller.OnGroupSelected(new[] { row });
+        _controller.OnGroupSelected(rows);
     }
 
     private void OnTimelineTabClick(object sender, RoutedEventArgs e) => SelectTab(0);
@@ -448,11 +448,19 @@ public sealed partial class MainWindow : Window, IShowView
     {
         if (_suppressSelectionSync)
             return;
-        if (CueList.SelectedItem is CueRow row)
+
+        // Con selección múltiple, el inspector enseña la fila que se ACABA de
+        // tocar, no la primera de la lista: al extender con Mayús hacia
+        // arriba, SelectedItem sería la de más arriba y el inspector saltaría
+        // a un cue que el operador no ha señalado.
+        var focus = e.AddedItems.OfType<CueRow>().LastOrDefault()
+            ?? CueList.SelectedItems.OfType<CueRow>().LastOrDefault();
+
+        if (focus is not null)
         {
-            _selectedCueId = row.CueId;
-            _inspector.SetCue(_model.GetById(row.CueId));
-            _timeline.SetSelected(row.CueId);   // resalta (y trae a la vista)
+            _selectedCueId = focus.CueId;
+            _inspector.SetCue(_model.GetById(focus.CueId));
+            _timeline.SetSelected(focus.CueId);   // resalta (y trae a la vista)
         }
         else
         {
@@ -460,6 +468,29 @@ public sealed partial class MainWindow : Window, IShowView
             _inspector.SetCue(null);
             _timeline.SetSelected(-1);
         }
+    }
+
+    /// <summary>Las filas seleccionadas como ÍNDICES del modelo, ordenadas.
+    /// Es lo que esperan las acciones del controlador que trabajan sobre
+    /// varias (agrupar, copiar, duplicar, borrar) — mismo contrato que la
+    /// proyección que hace WinCue sobre CueGrid.SelectedItems.</summary>
+    private List<int> SelectedRows() =>
+        CueList.SelectedItems.OfType<CueRow>()
+            .Select(r => _model.IndexOfId(r.CueId))
+            .Where(i => i >= 0)
+            .Distinct()
+            .OrderBy(i => i)
+            .ToList();
+
+    /// <summary>La fila «de referencia» para las acciones de una sola: la del
+    /// cue que el inspector está enseñando, o la primera seleccionada.</summary>
+    private int PrimaryRow()
+    {
+        int row = _selectedCueId >= 0 ? _model.IndexOfId(_selectedCueId) : -1;
+        if (row >= 0)
+            return row;
+        var rows = SelectedRows();
+        return rows.Count > 0 ? rows[0] : -1;
     }
 
     private void AddAccelerator(Windows.System.VirtualKey key, Windows.System.VirtualKeyModifiers modifiers,
@@ -795,13 +826,15 @@ public sealed partial class MainWindow : Window, IShowView
     {
         if (_controller is null)
             return;
-        // Seleccionar la fila bajo el puntero antes de abrir: el menú actúa
-        // sobre la selección, así que lo que se ve marcado y lo que se toca
-        // tienen que ser lo mismo.
-        if ((e.OriginalSource as FrameworkElement)?.DataContext is CueRow row)
+        // Si la fila bajo el puntero NO está en la selección, seleccionarla.
+        // Si SÍ lo está, no se toca: el menú actúa sobre la selección, y un
+        // clic derecho sobre un bloque ya elegido no puede deshacerlo (mismo
+        // criterio que WinCue.App.OnGridRightClick).
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is CueRow row
+            && !CueList.SelectedItems.Contains(row))
             CueList.SelectedItem = row;
 
-        BuildCueMenu(CueList.SelectedIndex)
+        BuildCueMenu(PrimaryRow())
             .ShowAt(CueList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
             { Position = e.GetPosition(CueList) });
         e.Handled = true;
@@ -840,17 +873,27 @@ public sealed partial class MainWindow : Window, IShowView
                 () => _controller.OnStopSelected(row), running);
             Sep();
 
-            Item(Loc.T("Copiar", "Copy"), "Ctrl+C", () => _controller.CopyCues(new[] { row }));
+            // Copiar / duplicar / borrar / agrupar operan sobre TODA la
+            // selección, como en WinCue. Se toma aquí y no dentro del lambda
+            // porque el menú puede seguir abierto cuando se pulsa y la
+            // selección ya no tiene por qué ser la misma.
+            var selRows = SelectedRows();
+            Item(Loc.T("Copiar", "Copy"), "Ctrl+C", () => _controller.CopyCues(selRows));
             Item(Loc.T("Pegar debajo", "Paste below"), "Ctrl+V",
                 () => _controller.PasteCues(row), edit);
             Item(Loc.T("Duplicar", "Duplicate"), "Ctrl+D",
-                () => _controller.DuplicateCues(new[] { row }), edit);
-            Item(Loc.T("Eliminar", "Delete"), "Supr",
-                () => _controller.OnDeleteCue(row), edit);
+                () => _controller.DuplicateCues(selRows), edit);
+            Item(Loc.T("Eliminar", "Delete"), "Supr", () =>
+            {
+                // De abajo arriba: borrar la de arriba primero correría los
+                // índices de las de abajo y se borraría lo que no toca.
+                foreach (int r in selRows.OrderByDescending(i => i))
+                    _controller.OnDeleteCue(r);
+            }, edit);
             Sep();
 
             Item(Loc.T("Agrupar selección", "Group selection"), "Ctrl+G",
-                () => _controller.OnGroupSelected(new[] { row }), edit);
+                () => _controller.OnGroupSelected(selRows), edit);
             if (cue.Type == CueType.Group)
             {
                 Item(Loc.T("Desagrupar", "Ungroup"), "", () => _controller.OnUngroup(row), edit);
@@ -943,7 +986,7 @@ public sealed partial class MainWindow : Window, IShowView
     private void OnAddCue(object sender, RoutedEventArgs e)
     {
         if (sender is MenuFlyoutItem { Tag: string tag } && Enum.TryParse<CueType>(tag, out var type))
-            _controller?.OnInsertCue(type, CueList.SelectedIndex);
+            _controller?.OnInsertCue(type, PrimaryRow());
     }
 
     /// <summary>Importar archivos: selector múltiple + un cue por archivo —
@@ -968,7 +1011,7 @@ public sealed partial class MainWindow : Window, IShowView
         var files = await picker.PickMultipleFilesAsync();
         if (files.Count == 0)
             return;
-        _controller?.AddCuesFromFiles(CueList.SelectedIndex, files.Select(f => f.Path).ToList());
+        _controller?.AddCuesFromFiles(PrimaryRow(), files.Select(f => f.Path).ToList());
     }
 
     /// <summary>Elimina el cue seleccionado — mismo contrato que
@@ -976,8 +1019,9 @@ public sealed partial class MainWindow : Window, IShowView
     /// estaba sonando antes de borrarlo).</summary>
     private void OnDeleteCueClick(object sender, RoutedEventArgs e)
     {
-        int row = CueList.SelectedIndex;
-        if (row >= 0)
+        // De abajo arriba, por lo mismo que en el menú contextual: borrar la
+        // de arriba primero correría los índices de las de abajo.
+        foreach (int row in SelectedRows().OrderByDescending(i => i))
             _controller?.OnDeleteCue(row);
     }
 
@@ -1458,18 +1502,19 @@ public sealed partial class MainWindow : Window, IShowView
         // MISMO; con el guardián puesto después, ese disparo entraba y dejaba
         // _selectedCueId en -1, así que la comparación de abajo ya no casaba
         // nunca y la selección se perdía en CADA edición de CADA campo.
-        int selectedBefore = _selectedCueId;
-        bool wasSelected = _rows[index].CueId == selectedBefore;
+        // Se AÑADE el reemplazo a SelectedItems en vez de asignar
+        // SelectedItem: con selección múltiple, asignar la colapsaría a una
+        // sola fila y editar un campo desharía el bloque que el operador
+        // acababa de marcar.
+        var old = _rows[index];
+        bool wasSelected = CueList.SelectedItems.Contains(old);
 
         _suppressSelectionSync = true;
         try
         {
             _rows[index] = refreshed;
-            if (wasSelected)
-            {
-                CueList.SelectedItem = refreshed;
-                _selectedCueId = selectedBefore;
-            }
+            if (wasSelected && !CueList.SelectedItems.Contains(refreshed))
+                CueList.SelectedItems.Add(refreshed);
         }
         finally { _suppressSelectionSync = false; }
 
