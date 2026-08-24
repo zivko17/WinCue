@@ -83,7 +83,7 @@ public sealed partial class MainWindow : Window, IShowView
     // TimelineCanvas.cs, en Win2D: mismo cálculo compartido que
     // src/WinCue.App/TimelinePanel.cs (WinCue.Presentation.TimelineLayout) —
     // ver la cabecera de ese archivo para el alcance exacto de esta pasada.
-    private readonly TimelineCanvas _timeline = new();
+    private readonly TimelinePanel _timeline = new();
 
     // ── Inspector de cues (primera pasada, hitos-0-1) ───────────────────
     // InspectorPanel.cs: identidad/temporización/fundidos/reproducción del
@@ -462,7 +462,12 @@ public sealed partial class MainWindow : Window, IShowView
         };
         _timeline.MoveCueRequested = (from, to) => controller.OnMoveCue(from, to);
         _timeline.IsEditAllowed = () => ModeToggle.IsChecked != true;
-        _timeline.AutoCrossfade = _settings.Get("timeline_auto_crossfade", true);
+        // La casilla de la cabecera arranca con lo que diga settings y, cuando
+        // la toca el operador, lo persiste — igual que WinCue. SetAutoCrossfade
+        // no cuenta como tocarla: si contara, cargar el ajuste lo reescribiría.
+        _timeline.SetAutoCrossfade(_settings.Get("timeline_auto_crossfade", true));
+        _timeline.AutoCrossfadeToggled = enabled =>
+            _settings.Set("timeline_auto_crossfade", enabled);
         _timeline.CueSelected += cueId =>
         {
             var row = _rows.FirstOrDefault(r => r.CueId == cueId);

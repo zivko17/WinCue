@@ -141,6 +141,22 @@ public sealed class TimelineCanvas : UserControl
     /// (no hay cruce) o el saliente no acaba nunca (loop). Es el dato que
     /// convierte "fade_in de 8 s" en "el cruce no cabe" — lo consume el aviso
     /// de fundido del inspector, igual que en WinCue.</summary>
+    /// <summary>Zoom desde los botones de la cabecera: ancla en el CENTRO,
+    /// no bajo el puntero (ahí no hay puntero). Mismo factor y mismo ancla
+    /// que WinCue.App.TimelineCanvas.ZoomStep.</summary>
+    public void ZoomStep(double factor)
+    {
+        _vp.ZoomAt(factor, _canvas.ActualWidth / 2);
+        _canvas.Invalidate();
+    }
+
+    /// <summary>Que quepa el show entero, como el botón «Ajustar» de WinCue.</summary>
+    public void ZoomToFit()
+    {
+        _vp.ZoomToFit(TimelineLayout.TotalSeconds(_projection.Blocks), _canvas.ActualWidth);
+        _canvas.Invalidate();
+    }
+
     public double? OutgoingRemaining(int cueId) =>
         TimelineLayout.OutgoingRemaining(_projection.Blocks, cueId);
 
@@ -328,12 +344,15 @@ public sealed class TimelineCanvas : UserControl
         int layers = TimelineLayout.VisibleLayers(blocks);
         double lh = TimelineLayout.LayerHeight(h, layers);
 
-        // Fondo de pistas alternado
+        // Fondo de pistas alternado + NÚMERO de pista, como WinCue: sin el
+        // número, «vertical: pista» no dice a qué pista has llevado el bloque.
+        using var layerFormat = new CanvasTextFormat { FontSize = 9 };
         for (int l = 0; l < layers; l++)
         {
             double y = TimelineLayout.RulerH + l * lh;
             var brush = l % 2 == 0 ? ToColor(Palette.TimelineLayerA) : ToColor(Palette.TimelineLayerB);
             ds.FillRectangle(new Rect(0, y, w, lh), brush);
+            ds.DrawText($"{l + 1}", 4, (float)(y + 2), ToColor(Palette.TextFaint), layerFormat);
         }
 
         // Regla de tiempo

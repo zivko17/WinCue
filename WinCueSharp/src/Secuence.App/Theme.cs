@@ -33,6 +33,9 @@ public static class Theme
     // pestaña NO seleccionada de Timeline/Inspector/Mixer (DeeperBg) y
     // tarjeta de «en reproducción» (CardBg) — mismos tokens que WinCue.App
     // para los mismos elementos.
+    /// <summary>Fondo de la barra del timeline y del mezclador — el mismo que
+    /// usa WinCue.App.TimelinePanel para su cabecera.</summary>
+    public static readonly Color MeterBgAlt = Hex(Palette.MeterBgAlt);
     public static readonly Color DeepBg = Hex(Palette.DeepBg);
     public static readonly Color DeeperBg = Hex(Palette.DeeperBg);
     public static readonly Color CardBg = Hex(Palette.CardBg);
@@ -146,6 +149,7 @@ public static class Theme
     public static readonly SolidColorBrush PanelBgBrush = Solid(PanelBg);
     public static readonly SolidColorBrush HeaderBgBrush = Solid(HeaderBg);
     public static readonly SolidColorBrush ControlBgBrush = Solid(ControlBg);
+    public static readonly SolidColorBrush MeterBgAltBrush = Solid(MeterBgAlt);
     public static readonly SolidColorBrush DeepBgBrush = Solid(DeepBg);
     public static readonly SolidColorBrush DeeperBgBrush = Solid(DeeperBg);
     public static readonly SolidColorBrush CardBgBrush = Solid(CardBg);
