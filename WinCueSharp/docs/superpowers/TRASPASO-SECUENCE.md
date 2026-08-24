@@ -258,6 +258,8 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Barra de estado con historial**: el mensaje se borra solo a los 4 s y
   queda apuntado; el boton lo abre y se enciende en ambar si el mensaje era
   un aviso (WinCue.Presentation.StatusLog decide que cuenta como tal).
+- **Normalizar sonoridad** en el menu contextual (-16 LUFS), con la medida
+  y la ganancia que implica compartidas.
 - **Reordenar filas arrastrandolas** en la tabla, con su formato propio para
   no confundirlo con soltar archivos. La lista NO reordena sola
   (`CanReorderItems=False`): mutaria la coleccion a espaldas del modelo, y
@@ -284,9 +286,6 @@ ha movido a la lista de arriba):
   `EditScrubbed`, pero no lo escucha nadie: Secuence no tiene visor de
   EDICIÓN separado del de salida (`LiveMonitorControl` no trae `ShowPaused`
   — ver su cabecera). Cuando llegue, es UNA línea en MainWindow.
-- **«Normalizar sonoridad»** en el menú contextual. En WinCue es un método
-  PRIVADO de su ventana, no del controlador: copiarlo es justo lo que prohíbe
-  la regla 2, así que primero hay que subirlo a compartido.
 - **Etiquetas de bloque sin sus prefijos** ↗ / ∞ / 📌, y el marcador GO sin su
   ▸. No es descuido: Win2D/DirectWrite no resuelve la fuente de iconos, ni
   por nombre ni con la cadena `ms-appx://…#Phosphor` que sí vale en XAML.

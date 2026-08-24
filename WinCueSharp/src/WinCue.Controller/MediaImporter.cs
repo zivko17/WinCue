@@ -320,6 +320,25 @@ public static class MediaImporter
         }
     }
 
+    /// <summary>Sonoridad objetivo al normalizar: −16 LUFS, el valor de
+    /// referencia para material de reproducción.</summary>
+    public const double TargetLufs = -16.0;
+
+    /// <summary>Ganancia que hay que ponerle a un clip medido en
+    /// <paramref name="measuredLufs"/> para dejarlo en la sonoridad objetivo.
+    ///
+    /// Vive JUNTO a MeasureLufs y no en cada interfaz porque los dos
+    /// productos normalizan igual: separar «cuánto suena» de «cuánta ganancia
+    /// implica» en dos sitios distintos es pedir que un día dejen de
+    /// coincidir.
+    ///
+    /// Se redondea a un decimal —el campo de ganancia del inspector no
+    /// muestra más— y se acota a [−24, +12], que es EXACTAMENTE el rango de
+    /// ese campo: proponer un valor que el inspector no admite sería
+    /// escribirle al cue algo que él mismo rechazaría al reeditarlo.</summary>
+    public static double GainForTarget(double measuredLufs) =>
+        Math.Clamp(Math.Round(TargetLufs - measuredLufs, 1), -24.0, 12.0);
+
     /// <summary>Sonoridad integrada (LUFS) del archivo vía ffmpeg loudnorm.
     /// LENTO (decodifica el archivo entero): llamar en segundo plano.
     /// null si ffmpeg no está disponible o el archivo no tiene audio.</summary>

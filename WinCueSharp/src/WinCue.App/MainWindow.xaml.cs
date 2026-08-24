@@ -1993,7 +1993,6 @@ public partial class MainWindow : Window, IShowView
     /// en segundo plano y fija su gain_db para dejarlos a −16 LUFS.</summary>
     private async void NormalizeLoudness(IReadOnlyList<int> rows)
     {
-        const double target = -16.0;
         var cues = rows.Select(r => _model.GetCue(r))
             .Where(c => c is { Type: CueType.Audio, FilePath.Length: > 0 })
             .Cast<Cue>().ToList();
@@ -2010,7 +2009,10 @@ public partial class MainWindow : Window, IShowView
                 FlashStatus($"{Icons.Clef} «{cue.Name}»: no se pudo medir (¿ffmpeg en PATH?)");
                 continue;
             }
-            double gain = Math.Clamp(Math.Round(target - lufs.Value, 1), -24.0, 12.0);
+            // Cuánta ganancia implica la medida es cálculo COMPARTIDO
+            // (MediaImporter.GainForTarget, junto a MeasureLufs): Secuence
+            // normaliza con el mismo número.
+            double gain = MediaImporter.GainForTarget(lufs.Value);
             int row = _model.IndexOfId(cue.Id);
             if (row >= 0)
                 CommitRowField(row, "gain_db", gain);

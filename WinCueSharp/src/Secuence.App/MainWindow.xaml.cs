@@ -993,8 +993,13 @@ public sealed partial class MainWindow : Window, IShowView
             Item(Loc.T("Disparar (sin mover playhead)", "Trigger (without moving playhead)"), "",
                 () => _controller.TriggerCueId(cue.Id));
             if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
+            {
                 Item(Loc.T("Preview (cascos)", "Preview (headphones)"), "",
                     () => _controller.AuditionToggle(row));
+                Item(Loc.T($"Normalizar sonoridad ({MediaImporter.TargetLufs:0} LUFS)",
+                           $"Normalise loudness ({MediaImporter.TargetLufs:0} LUFS)"), "",
+                    () => NormalizeLoudness(SelectedRows()), edit);
+            }
             if (MainController.IsHapConvertible(cue))
                 Item(Loc.T("Convertir a HAP (motor propio)", "Convert to HAP (native engine)"), "",
                     () => _controller.ConvertCueToHap(row), edit);
@@ -1060,6 +1065,49 @@ public sealed partial class MainWindow : Window, IShowView
             Item(Loc.T("Convertir todos los vídeos a HAP", "Convert all videos to HAP"), "",
                 () => _controller!.ConvertAllVideosToHap(), edit);
         return menu;
+    }
+
+    /// <summary>Normalizar sonoridad: mide cada cue de audio y le pone la
+    /// ganancia que lo deja en el objetivo. Mismo contrato que
+    /// WinCue.App.NormalizeLoudness.
+    ///
+    /// La MEDIDA y la ganancia que implica son compartidas
+    /// (MediaImporter.MeasureLufs / GainForTarget). Lo que queda aquí es el
+    /// bucle: medir es LENTO —decodifica el archivo entero— así que va en
+    /// segundo plano y va contando por la barra de estado, o parecería que la
+    /// aplicación se ha colgado.</summary>
+    private async void NormalizeLoudness(IReadOnlyList<int> rows)
+    {
+        if (_controller is null)
+            return;
+        var cues = rows.Select(r => _model.GetCue(r))
+            .Where(c => c is { Type: CueType.Audio, FilePath.Length: > 0 })
+            .Cast<Cue>().ToList();
+        if (cues.Count == 0)
+            return;
+
+        int done = 0;
+        foreach (var cue in cues)
+        {
+            FlashStatus(Loc.T(
+                $"Midiendo sonoridad de «{cue.Name}»… ({++done}/{cues.Count})",
+                $"Measuring loudness of “{cue.Name}”… ({done}/{cues.Count})"));
+            double? lufs = await Task.Run(() => MediaImporter.MeasureLufs(cue.FilePath));
+            if (lufs is null)
+            {
+                FlashStatus(Loc.T(
+                    $"«{cue.Name}»: no se pudo medir (¿ffmpeg en PATH?)",
+                    $"“{cue.Name}”: could not measure (is ffmpeg on PATH?)"));
+                continue;
+            }
+            double gain = MediaImporter.GainForTarget(lufs.Value);
+            // El cue puede haberse movido mientras se medía: se vuelve a
+            // buscar su fila por id en vez de fiarse de la de antes.
+            int row = _model.IndexOfId(cue.Id);
+            if (row >= 0)
+                CommitRowField(row, "gain_db", gain);
+            FlashStatus($"«{cue.Name}»: {lufs:0.0} LUFS → {gain:+0.0;-0.0} dB");
+        }
     }
 
     /// <summary>Submenú de color. La paleta, su orden y sus etiquetas son
