@@ -215,6 +215,31 @@ public sealed class TimelineCanvas : UserControl
     private double LayerH => TimelineLayout.LayerHeight(
         _canvas.ActualHeight, TimelineLayout.VisibleLayers(_projection.Blocks));
 
+    /// <summary>Formato del rótulo del asa. Se crea al vuelo en vez de vivir
+    /// en un campo porque CanvasTextFormat es descartable y este control no
+    /// lo es (CA1001); la medida ya aloja un CanvasTextLayout de todas
+    /// formas.</summary>
+    private static CanvasTextFormat SpanFormat() => new() { FontSize = 10 };
+
+    /// <summary>Asa de grupo bajo el punto (la del grupo MÁS INTERNO, que lo
+    /// decide el cálculo compartido). El ancho del rótulo lo mide Win2D:
+    /// CanvasControl es un ICanvasResourceCreator, así que se puede medir
+    /// fuera de una sesión de dibujo.</summary>
+    private TimelineSpan? HitSpanChip(Point p)
+    {
+        if (_projection.Spans.Count == 0)
+            return null;
+        using var format = SpanFormat();
+        return TimelineHitTest.SpanChip(_projection.Spans, p.X, p.Y,
+            _vp.PxPerSec, _vp.ScrollX, LayerH,
+            span => MeasureText(_canvas, TimelineLayout.SpanLabelText(span, withIcon: false), format));
+    }
+
+    /// <summary>Cuerpo del recuadro de un grupo bajo el punto.</summary>
+    private TimelineSpan? HitSpan(Point p) =>
+        TimelineHitTest.Span(_projection.Spans, p.X, p.Y,
+            _vp.PxPerSec, _vp.ScrollX, LayerH);
+
     private void OnPointerPressed(object sender, PointerRoutedEventArgs e)
     {
         if (_model is null)
@@ -224,15 +249,38 @@ public sealed class TimelineCanvas : UserControl
             return;
         var p = pt.Position;
 
-        // Solo bloques: los recuadros de grupo no se pintan todavía en
-        // Secuence, así que tampoco se agarran (ver la cabecera).
-        var block = TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
-            _vp.PxPerSec, _vp.ScrollX, LayerH);
-        if (block is null)
+        // Prioridad: ASA del grupo → bloque → CUERPO del recuadro. La misma
+        // que WinCue.App.TimelinePanel.OnMouseDown, y en ese orden por algo:
+        // el asa está por encima de los bloques justo para poder agarrar un
+        // grupo de un solo hijo, y el cuerpo va el último para que agarrar
+        // dentro del recuadro no le gane a los bloques que contiene.
+        TimelineBlock? block = null;
+        Cue cue;
+        bool isGroup;
+        if (HitSpanChip(p) is TimelineSpan chipSpan)
+        {
+            cue = chipSpan.Group;
+            isGroup = true;
+        }
+        else if (TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
+                     _vp.PxPerSec, _vp.ScrollX, LayerH) is TimelineBlock hit)
+        {
+            cue = hit.Cue;
+            isGroup = false;
+            block = hit;
+        }
+        else if (HitSpan(p) is TimelineSpan bodySpan)
+        {
+            cue = bodySpan.Group;
+            isGroup = true;
+        }
+        else
+        {
             return;
+        }
 
-        _selectedId = block.Cue.Id;
-        CueSelected?.Invoke(block.Cue.Id);
+        _selectedId = cue.Id;
+        CueSelected?.Invoke(cue.Id);
 
         // En modo SHOW se selecciona pero no se edita (igual que la tabla)
         if (!(IsEditAllowed?.Invoke() ?? true))
@@ -244,7 +292,7 @@ public sealed class TimelineCanvas : UserControl
         // El gesto (umbral, snap, topes, anclas) es cálculo compartido:
         // ¿agarró un borde? → redimensionar en vez de mover
         var mode = TimelineHitTest.EdgeMode(block, p.X, _vp.PxPerSec, _vp.ScrollX);
-        _drag = new TimelineDragGesture(block.Cue, isGroup: false, mode,
+        _drag = new TimelineDragGesture(cue, isGroup, mode,
             block, p.X, p.Y, _projection.StartById);
 
         _canvas.CapturePointer(e.Pointer);
@@ -258,15 +306,23 @@ public sealed class TimelineCanvas : UserControl
         if (_drag is null)
         {
             // Cursor según lo que hay debajo, como WPF: ↔ en un borde
-            // redimensionable, ✥ sobre un bloque, flecha en el vacío
-            var over = TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
-                _vp.PxPerSec, _vp.ScrollX, LayerH);
-            var shape = over is null
-                ? InputSystemCursorShape.Arrow
-                : TimelineHitTest.EdgeMode(over, p.X, _vp.PxPerSec, _vp.ScrollX)
-                    != TimelineDragMode.Move
-                    ? InputSystemCursorShape.SizeWestEast
-                    : InputSystemCursorShape.SizeAll;
+            // redimensionable, ✥ sobre algo agarrable, flecha en el vacío.
+            // Sobre el ASA de un grupo NO se mira el borde: un asa no se
+            // redimensiona, se arrastra entera (mismo criterio que WinCue).
+            bool onChip = HitSpanChip(p) is not null;
+            var over = onChip
+                ? null
+                : TimelineHitTest.Block(_projection.Blocks, p.X, p.Y,
+                    _vp.PxPerSec, _vp.ScrollX, LayerH);
+            InputSystemCursorShape shape;
+            if (over is not null
+                && TimelineHitTest.EdgeMode(over, p.X, _vp.PxPerSec, _vp.ScrollX)
+                    != TimelineDragMode.Move)
+                shape = InputSystemCursorShape.SizeWestEast;
+            else if (onChip || over is not null || HitSpan(p) is not null)
+                shape = InputSystemCursorShape.SizeAll;
+            else
+                shape = InputSystemCursorShape.Arrow;
             ProtectedCursor = InputSystemCursor.Create(shape);
             return;
         }
@@ -337,17 +393,20 @@ public sealed class TimelineCanvas : UserControl
     /// <summary>Caja del asa. También es cálculo compartido
     /// (TimelineHitTest.SpanChipRect) salvo el ANCHO DEL TEXTO, que solo lo
     /// sabe medir el framework de quien pinta — aquí, Win2D.</summary>
-    private Rect SpanChipBox(CanvasDrawingSession ds, TimelineSpan span,
+    private Rect SpanChipBox(ICanvasResourceCreator rc, TimelineSpan span,
                              double layerHeight, string text, CanvasTextFormat format)
     {
         var r = TimelineHitTest.SpanChipRect(span, _vp.PxPerSec, _vp.ScrollX,
-            layerHeight, MeasureText(ds, text, format));
+            layerHeight, MeasureText(rc, text, format));
         return new Rect(r.X, r.Y, r.Width, r.Height);
     }
 
-    private static double MeasureText(CanvasDrawingSession ds, string text, CanvasTextFormat format)
+    /// <summary>Ancho del texto. Toma un ICanvasResourceCreator y no la sesión
+    /// de dibujo para que valga TAMBIÉN desde el hit-test, que corre fuera de
+    /// OnDraw — el propio CanvasControl lo es.</summary>
+    private static double MeasureText(ICanvasResourceCreator rc, string text, CanvasTextFormat format)
     {
-        using var layout = new CanvasTextLayout(ds, text, format, float.MaxValue, float.MaxValue);
+        using var layout = new CanvasTextLayout(rc, text, format, float.MaxValue, float.MaxValue);
         return layout.LayoutBounds.Width;
     }
 
@@ -459,7 +518,7 @@ public sealed class TimelineCanvas : UserControl
                 selected ? ToColor(Palette.White) : ToColor(color, 200),
                 selected ? 2f : 1.6f);
 
-            string text = TimelineLayout.SpanLabelText(span);
+            string text = TimelineLayout.SpanLabelText(span, withIcon: false);
             var chip = SpanChipBox(ds, span, lh, text, spanFormat);
             ds.FillRoundedRectangle(chip, 3, 3, ToColor(color, 235));
             // Recortado al asa: un nombre largo no puede salirse del grupo.

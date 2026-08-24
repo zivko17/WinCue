@@ -565,10 +565,17 @@ public static class TimelineLayout
         return new TimelineRect(x0, y, Math.Max(12, x1 - x0), bh);
     }
 
-    /// <summary>Etiqueta del recuadro de grupo: icono + número · nombre · modo.</summary>
-    public static string SpanLabelText(TimelineSpan span) =>
-        $"{Icons.Group} {span.Group.DisplayNumber} · {span.Group.Name} · " +
-        span.Group.GroupMode.ToString().ToUpperInvariant();
+    /// <summary>Etiqueta del recuadro de grupo: icono + número · nombre · modo.
+    ///
+    /// <paramref name="withIcon"/> = false la devuelve SIN el glifo. No es un
+    /// capricho de estilo: quien pinta con Win2D (Secuence) no puede
+    /// resolverlo —DirectWrite no ve la fuente de iconos, que se carga solo
+    /// para XAML— y el glifo saldría como un cuadradito. Es la misma razón
+    /// por la que allí el marcador GO va sin su ▸.</summary>
+    public static string SpanLabelText(TimelineSpan span, bool withIcon = true) =>
+        (withIcon ? $"{Icons.Group} " : "")
+        + $"{span.Group.DisplayNumber} · {span.Group.Name} · "
+        + span.Group.GroupMode.ToString().ToUpperInvariant();
 
     /// <summary>Etiqueta de un bloque: número · nombre, con los prefijos/sufijos
     /// de hoy (↗ fantasma, ∞/×N repeticiones, 📌 pista fijada a mano).</summary>

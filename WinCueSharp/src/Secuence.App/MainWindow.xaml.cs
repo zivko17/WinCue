@@ -210,6 +210,8 @@ public sealed partial class MainWindow : Window, IShowView
         AddAccelerator(Windows.System.VirtualKey.S, Windows.System.VirtualKeyModifiers.Control, OnSaveAccelerator);
         AddAccelerator(Windows.System.VirtualKey.S,
             Windows.System.VirtualKeyModifiers.Control | Windows.System.VirtualKeyModifiers.Shift, OnSaveAsAccelerator);
+        AddAccelerator(Windows.System.VirtualKey.G,
+            Windows.System.VirtualKeyModifiers.Control, OnGroupAccelerator);
 
         CueList.ItemsSource = _rows;
         ActiveCuesList.ItemsSource = Array.Empty<ActiveCueRow>();
@@ -319,6 +321,29 @@ public sealed partial class MainWindow : Window, IShowView
         int panelH = _settings.Get("bottom_pane_height", 330);
         BottomPaneRow.Height =
             new GridLength(Math.Clamp(panelH, 140, 900), GridUnitType.Pixel);
+    }
+
+    /// <summary>Ctrl+G — «Agrupar selección», el mismo atajo que WinCue. La
+    /// lógica es COMPARTIDA (MainController.OnGroupSelected → CueListEditor),
+    /// aquí solo se le pasa la fila.
+    ///
+    /// Hasta ahora Secuence podía AÑADIR un cue de tipo GROUP pero no meter
+    /// nada dentro: agrupar vive en el menú contextual de WinCue, que aquí
+    /// todavía no existe. Los recuadros de grupo del timeline, por tanto, no
+    /// podían llegar a verse nunca. Con esto ya se pueden crear.
+    ///
+    /// La tabla de Secuence es de selección ÚNICA, así que se agrupa un cue
+    /// cada vez; WinCue agrupa el bloque seleccionado entero. Cuando la tabla
+    /// admita selección múltiple, esto ya le pasa la lista.</summary>
+    private void OnGroupAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
+    {
+        args.Handled = true;
+        if (_controller is null || ModeToggle.IsChecked == true)
+            return;
+        int row = CueList.SelectedIndex;
+        if (row < 0)
+            return;
+        _controller.OnGroupSelected(new[] { row });
     }
 
     private void OnTimelineTabClick(object sender, RoutedEventArgs e) => SelectTab(0);
