@@ -468,21 +468,32 @@ public sealed class InspectorPanel : ContentControl
         if (_loading || _cue is null)
             return;
         CommitField?.Invoke(_cue.Id, key, value);
+
         // El commit pudo cambiar nombre/número/tipo (file_path autodetecta
-        // tipo por extensión, ver MainController.OnCueEditCommitted): _cue es
-        // el MISMO objeto que el modelo acaba de mutar, así que basta con
-        // releerlo — no hace falta repoblar el resto del formulario.
-        _header.Text = HeaderText(_cue);
+        // tipo por extensión, ver MainController.OnCueEditCommitted), así que
+        // se vuelve a leer _cue: es el MISMO objeto que el modelo acaba de
+        // mutar y basta con releerlo, no hace falta repoblar el formulario.
+        //
+        // Pero pudo TAMBIÉN dejar al inspector sin cue: un commit que hace
+        // recargar la tabla se lleva por delante la selección, y entonces
+        // _cue vale null cuando se vuelve de aquí. Sin esta comprobación, la
+        // línea siguiente lo desreferenciaba y se caía la ventana entera —
+        // que es exactamente lo que pasó al cambiar el modo en Geometría.
+        // A partir de aquí se trabaja sobre la COPIA local, no sobre el
+        // campo, para que no pueda volver a cambiar a media función.
+        if (_cue is not { } cue)
+            return;
+        _header.Text = HeaderText(cue);
 
         if (FadeWarnKeys.Contains(key))
-            UpdateFadeWarning(_cue);
+            UpdateFadeWarning(cue);
 
         // Sincronía barra de trim ↔ campos numéricos / archivo (mismo reparto
         // que WinCue.App.InspectorPanel.Commit).
         if (key is "trim_start" or "trim_end")
-            _wave.SetMarkers(_cue.TrimStart, _cue.TrimEnd);
+            _wave.SetMarkers(cue.TrimStart, cue.TrimEnd);
         else if (key == "file_path")
-            UpdateWave(_cue, force: true);
+            UpdateWave(cue, force: true);
         else if (GeoPreviewKeys.Contains(key))
         {
             // Reflejar en lienzo + paneles + controles (sin re-commitear) —
@@ -492,8 +503,8 @@ public sealed class InspectorPanel : ContentControl
             try
             {
                 if (_loaders.TryGetValue(key, out var loader))
-                    loader(_cue);
-                SyncGeometryUi(_cue);
+                    loader(cue);
+                SyncGeometryUi(cue);
             }
             finally { _loading = was; }
         }
@@ -1657,6 +1668,15 @@ public sealed class InspectorPanel : ContentControl
     private void OnGeoModeChanged(bool custom)
     {
         if (_loading || _cue is null)
+            return;
+        // Y aunque _loading esté quitado, solo se commitea un cambio REAL de
+        // modo. WinUI vuelve a disparar Checked por su cuenta —al realizar la
+        // pestaña por primera vez y al reagrupar los radios por GroupName—, y
+        // ese eco llegaba aquí como si el operador hubiera pulsado: escribía
+        // en el show un valor que ya tenía y arrastraba con él todo el
+        // refresco del commit. El guardián de _loading no lo tapa porque el
+        // eco no ocurre durante la carga.
+        if ((_cue.GeoMode == GeoMode.Custom) == custom)
             return;
         Commit("geo_mode", custom ? "CUSTOM" : "FULL");
     }
