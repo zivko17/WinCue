@@ -149,6 +149,11 @@ public sealed partial class MainWindow : Window, IShowView
         // Close() se llama una segunda vez desde dentro del propio handler).
         WireSplitters();
 
+        // handledEventsToo: true — si no, la tabla se come las letras con su
+        // type-ahead y los hotkeys por cue no llegarían nunca.
+        RootGrid.AddHandler(UIElement.KeyDownEvent,
+            new KeyEventHandler(OnKeyDownGlobal), handledEventsToo: true);
+
         _appWindow.Closing += async (_, args) =>
         {
             // El alto del panel de pestañas se GUARDA, y se guarda ANTES de
@@ -1252,21 +1257,36 @@ public sealed partial class MainWindow : Window, IShowView
         // marca — reemplazarla EN SITIO en la ObservableCollection para que
         // la ListView repinte solo esa fila, no la tabla entera.
         var refreshed = new CueRow(cue, _model) { IsPlayhead = wasPlayhead };
-        _rows[index] = refreshed;
 
         // El commit del inspector llega justo por aquí (MainController.
-        // OnCueEditCommitted → _view.RefreshRow): la fila reemplazada deja
-        // de ser el objeto que la ListView tenía seleccionado. Reasignar la
+        // OnCueEditCommitted → _view.RefreshRow): la fila reemplazada deja de
+        // ser el objeto que la ListView tenía seleccionado. Reasignar la
         // selección al reemplazo conserva el resaltado SIN pasar por
-        // OnCueSelectionChanged (_suppressSelectionSync), que si no
-        // repoblaría el inspector con sus propios valores recién guardados
-        // en mitad de la edición.
-        if (refreshed.CueId == _selectedCueId)
+        // OnCueSelectionChanged, que si no repoblaría el inspector con sus
+        // propios valores recién guardados en mitad de la edición.
+        //
+        // OJO CON EL ORDEN, que es donde estaba el fallo: hay que apuntar a
+        // quién estaba seleccionado ANTES de tocar la colección, y el
+        // guardián tiene que cubrir el REEMPLAZO, no solo la reasignación.
+        // Quitar de la colección el objeto seleccionado hace que la ListView
+        // ponga SelectedItem en null y dispare OnCueSelectionChanged AHÍ
+        // MISMO; con el guardián puesto después, ese disparo entraba y dejaba
+        // _selectedCueId en -1, así que la comparación de abajo ya no casaba
+        // nunca y la selección se perdía en CADA edición de CADA campo.
+        int selectedBefore = _selectedCueId;
+        bool wasSelected = _rows[index].CueId == selectedBefore;
+
+        _suppressSelectionSync = true;
+        try
         {
-            _suppressSelectionSync = true;
-            try { CueList.SelectedItem = refreshed; }
-            finally { _suppressSelectionSync = false; }
+            _rows[index] = refreshed;
+            if (wasSelected)
+            {
+                CueList.SelectedItem = refreshed;
+                _selectedCueId = selectedBefore;
+            }
         }
+        finally { _suppressSelectionSync = false; }
 
         // El timeline proyecta el MISMO modelo: un campo comprometido (desde
         // el inspector o desde el propio timeline) lo repinta — igual que
@@ -1312,7 +1332,65 @@ public sealed partial class MainWindow : Window, IShowView
     /// tarea ("los demás luego", dice el encargo). Cuando existan, este
     /// método reconstruirá aquí el mapa tecla→cue recorriendo _model.Cues,
     /// igual que RebuildHotkeys en WPF.</summary>
-    public void RebuildHotkeys() { }
+    /// <summary>Mapa tecla → cue de «Disparadores → Hotkey». Lo mismo que
+    /// WinCue.App.MainWindow._cueHotkeys, con VirtualKey en vez de Key.</summary>
+    private readonly Dictionary<Windows.System.VirtualKey, int> _cueHotkeys = new();
+
+    /// <summary>Reconstruye el mapa. Lo llama el controlador cada vez que la
+    /// lista cambia (es parte de IShowView).</summary>
+    public void RebuildHotkeys()
+    {
+        _cueHotkeys.Clear();
+        foreach (var cue in _model.Cues)
+        {
+            if (cue.Hotkey.Length == 0)
+                continue;
+            // El alias («Esc», «Return») lo traduce el cálculo COMPARTIDO;
+            // pasar de nombre a tecla es de framework y va aquí, contra
+            // VirtualKey, porque WPF y WinUI 3 no usan la misma enumeración.
+            if (Enum.TryParse<Windows.System.VirtualKey>(
+                    HotkeyName.Normalize(cue.Hotkey), ignoreCase: true, out var key))
+                _cueHotkeys[key] = cue.Id;
+        }
+    }
+
+    /// <summary>Los hotkeys por cue. Va por AddHandler con
+    /// handledEventsToo, y NO como KeyboardAccelerator, por dos motivos:
+    /// hay que ver la tecla aunque la haya consumido quien tenga el foco (la
+    /// tabla se come las letras haciendo type-ahead), y hace falta poder
+    /// CALLARSE mientras se escribe.
+    ///
+    /// Ese silencio es la parte importante: sin él, teclear el nombre de un
+    /// cue en el inspector dispararía los cues cuyas teclas coincidan con las
+    /// letras que escribes. WinCue se planta igual (OnKeyDownGlobal sale
+    /// entero si el foco está en un TextBox o un ComboBox).</summary>
+    private void OnKeyDownGlobal(object sender, KeyRoutedEventArgs e)
+    {
+        if (_controller is null || e.Handled)
+            return;
+
+        var focused = FocusManager.GetFocusedElement(Content.XamlRoot);
+        if (focused is TextBox or ComboBox or ComboBoxItem)
+            return;
+
+        // Sin modificadores: un Ctrl+S no puede disparar el cue de la «S».
+        if (IsDown(Windows.System.VirtualKey.Control)
+            || IsDown(Windows.System.VirtualKey.Menu)
+            || IsDown(Windows.System.VirtualKey.Shift))
+            return;
+
+        if (_cueHotkeys.TryGetValue(e.Key, out int cueId))
+        {
+            // Dispara SIN mover el playhead, igual que en WinCue.
+            _controller.TriggerCueId(cueId);
+            e.Handled = true;
+        }
+    }
+
+    private static bool IsDown(Windows.System.VirtualKey key) =>
+        Microsoft.UI.Input.InputKeyboardSource
+            .GetKeyStateForCurrentThread(key)
+            .HasFlag(Windows.UI.Core.CoreVirtualKeyStates.Down);
 
     // ==================================================================
     // IShowView — Transport / paneles en vivo

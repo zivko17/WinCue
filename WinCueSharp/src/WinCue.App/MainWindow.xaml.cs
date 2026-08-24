@@ -388,13 +388,11 @@ public partial class MainWindow : Window, IShowView
 
     private static Key ParseKey(string name, Key fallback)
     {
-        // Aceptar nombres Qt heredados del settings.json de Python
-        name = name switch
-        {
-            "Esc" => "Escape",
-            "Return" => "Enter",
-            _ => name,
-        };
+        // Los alias de Qt heredados del settings.json de Python los traduce
+        // WinCue.Presentation.HotkeyName, que es de donde los lee TAMBIÉN
+        // Secuence: son la misma decisión de producto y no pueden divergir.
+        // Convertir el nombre en tecla sigue aquí porque Key es de WPF.
+        name = HotkeyName.Normalize(name);
         return Enum.TryParse<Key>(name, ignoreCase: true, out var k) ? k : fallback;
     }
 

@@ -1008,12 +1008,9 @@ public sealed class InspectorPanel : ContentControl
         Txt("hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
         Cmb("retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
             CueChoices.RetriggerModes);
-        // La advertencia va DEBAJO de los dos campos, no en medio: entre
-        // «Hotkey» y «Segundo disparo» rompía el orden que tiene WinCue y
-        // separaba dos campos que se leen juntos.
-        Note(Loc.T(
-            "Los hotkeys por cue todavía no se atienden en Secuence:\nel campo se guarda y WinCue lo respeta.",
-            "Per-cue hotkeys are not handled in Secuence yet:\nthe field is saved and WinCue honours it."));
+        // (Aquí había un aviso de que Secuence no atendía los hotkeys por cue.
+        // Ya los atiende — MainWindow.RebuildHotkeys/OnKeyDownGlobal — y
+        // WinCue tampoco pone nada, así que la fila se va.)
 
         Header(Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
         Chk("fade_others",
