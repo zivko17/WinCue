@@ -715,6 +715,7 @@
             <!-- Tabla -->
             <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Single"
                       SelectionChanged="OnCueSelectionChanged"
+                      RightTapped="OnCueListRightTapped"
                       Background="{x:Bind local:Theme.WindowBgBrush}">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">

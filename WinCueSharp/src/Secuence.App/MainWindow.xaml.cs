@@ -776,6 +776,166 @@ public sealed partial class MainWindow : Window, IShowView
         AddButton.Flyout = flyout;
     }
 
+    // ── Menú contextual de la tabla (botón derecho) ────────────────────
+    // Equivalente de WinCue.App.MainWindow.BuildGridMenu, con MenuFlyout en
+    // vez de ContextMenu. Todas las acciones son llamadas al MISMO controlador
+    // compartido: aquí no hay lógica de edición, solo el menú.
+    //
+    // DIFERENCIAS CON EL DE WINCUE, ninguna por descuido:
+    //   · La tabla de Secuence es de selección ÚNICA, así que donde WinCue
+    //     opera sobre el bloque seleccionado, aquí se opera sobre la fila.
+    //   · No está «Normalizar sonoridad»: en WinCue es un método privado de su
+    //     ventana, no del controlador. Copiarlo sería exactamente lo que
+    //     prohíbe la regla 2; subirlo a compartido es una tarea aparte.
+    //   · Los colores salen de CueChoices.Colors (compartido, el mismo que
+    //     usan las muestras del inspector). WinCue los tiene escritos a mano
+    //     en su submenú — esa lista es la que sobra, no esta.
+
+    private void OnCueListRightTapped(object sender, RightTappedRoutedEventArgs e)
+    {
+        if (_controller is null)
+            return;
+        // Seleccionar la fila bajo el puntero antes de abrir: el menú actúa
+        // sobre la selección, así que lo que se ve marcado y lo que se toca
+        // tienen que ser lo mismo.
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is CueRow row)
+            CueList.SelectedItem = row;
+
+        BuildCueMenu(CueList.SelectedIndex)
+            .ShowAt(CueList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
+            { Position = e.GetPosition(CueList) });
+        e.Handled = true;
+    }
+
+    private MenuFlyout BuildCueMenu(int row)
+    {
+        var menu = new MenuFlyout();
+        bool edit = ModeToggle.IsChecked != true;
+        var cue = row >= 0 ? _model.GetCue(row) : null;
+
+        void Item(string text, string accel, Action onClick, bool enabled = true)
+        {
+            var mi = new MenuFlyoutItem { Text = text, IsEnabled = enabled };
+            if (accel.Length > 0)
+                ToolTipService.SetToolTip(mi, accel);
+            mi.Click += (_, _) => onClick();
+            menu.Items.Add(mi);
+        }
+        void Sep() => menu.Items.Add(new MenuFlyoutSeparator());
+
+        if (cue is not null)
+        {
+            bool running = _controller!.RunningCueIds.Contains(cue.Id);
+            Item(Loc.T("Disparar (sin mover playhead)", "Trigger (without moving playhead)"), "",
+                () => _controller.TriggerCueId(cue.Id));
+            if (cue.Type == CueType.Audio && cue.FilePath.Length > 0)
+                Item(Loc.T("Preview (cascos)", "Preview (headphones)"), "",
+                    () => _controller.AuditionToggle(row));
+            if (MainController.IsHapConvertible(cue))
+                Item(Loc.T("Convertir a HAP (motor propio)", "Convert to HAP (native engine)"), "",
+                    () => _controller.ConvertCueToHap(row), edit);
+            Item(Loc.T("Pausar / reanudar", "Pause / resume"), "Ctrl+P",
+                () => _controller.OnPauseCueToggle(row), running && cue.IsMedia());
+            Item(Loc.T("Detener", "Stop"), "S",
+                () => _controller.OnStopSelected(row), running);
+            Sep();
+
+            Item(Loc.T("Copiar", "Copy"), "Ctrl+C", () => _controller.CopyCues(new[] { row }));
+            Item(Loc.T("Pegar debajo", "Paste below"), "Ctrl+V",
+                () => _controller.PasteCues(row), edit);
+            Item(Loc.T("Duplicar", "Duplicate"), "Ctrl+D",
+                () => _controller.DuplicateCues(new[] { row }), edit);
+            Item(Loc.T("Eliminar", "Delete"), "Supr",
+                () => _controller.OnDeleteCue(row), edit);
+            Sep();
+
+            Item(Loc.T("Agrupar selección", "Group selection"), "Ctrl+G",
+                () => _controller.OnGroupSelected(new[] { row }), edit);
+            if (cue.Type == CueType.Group)
+            {
+                Item(Loc.T("Desagrupar", "Ungroup"), "", () => _controller.OnUngroup(row), edit);
+                Item(cue.Collapsed ? Loc.T("Expandir", "Expand") : Loc.T("Colapsar", "Collapse"),
+                    "", () => _controller.OnToggleCollapse(row));
+            }
+            Sep();
+
+            Item(Loc.T("Renombrar", "Rename"), "F2", () =>
+            {
+                SelectTab(1);              // pestaña del inspector
+                _inspector.FocusName();
+            }, edit);
+            menu.Items.Add(ColorSubmenu(color => CommitRowField(row, "color", color), edit));
+            Item(cue.Armed ? Loc.T("Desarmar", "Disarm") : Loc.T("Armar", "Arm"), "",
+                () => CommitRowField(row, "armed", !cue.Armed), edit);
+            Item(cue.Flagged ? Loc.T("Quitar flag", "Clear flag") : Loc.T("Poner flag", "Set flag"),
+                "", () => CommitRowField(row, "flagged", !cue.Flagged), edit);
+            Item(Loc.T("Renumerar todos (1..n)", "Renumber all (1..n)"), "",
+                () => _controller.RenumberCues(), edit);
+            Sep();
+        }
+        else
+        {
+            Item(Loc.T("Pegar al final", "Paste at end"), "Ctrl+V",
+                () => _controller!.PasteCues(_model.Count - 1), edit);
+        }
+
+        menu.Items.Add(InsertSubmenu(row, edit));
+        Item(Loc.T("Importar archivos…", "Import files…"), "",
+            () => OnImportFilesClick(this, new RoutedEventArgs()), edit);
+        if (_model.Cues.Any(MainController.IsHapConvertible))
+            Item(Loc.T("Convertir todos los vídeos a HAP", "Convert all videos to HAP"), "",
+                () => _controller!.ConvertAllVideosToHap(), edit);
+        return menu;
+    }
+
+    /// <summary>Submenú de color. La paleta, su orden y sus etiquetas son
+    /// cálculo COMPARTIDO (CueChoices.Colors) — el mismo que pinta las
+    /// muestras del inspector.</summary>
+    private static MenuFlyoutSubItem ColorSubmenu(Action<string> apply, bool enabled)
+    {
+        var sub = new MenuFlyoutSubItem { Text = Loc.T("Color", "Colour"), IsEnabled = enabled };
+        foreach (var choice in CueChoices.Colors)
+        {
+            string key = choice.Key;
+            var mi = new MenuFlyoutItem { Text = choice.Label };
+            mi.Click += (_, _) => apply(key);
+            sub.Items.Add(mi);
+        }
+        return sub;
+    }
+
+    private MenuFlyoutSubItem InsertSubmenu(int row, bool enabled)
+    {
+        var sub = new MenuFlyoutSubItem
+        { Text = Loc.T("Insertar cue", "Insert cue"), IsEnabled = enabled };
+        foreach (var (label, type) in new (string, CueType)[]
+        {
+            (Loc.T("Audio", "Audio"), CueType.Audio), (Loc.T("Vídeo", "Video"), CueType.Video),
+            (Loc.T("Espera", "Wait"), CueType.Wait), (Loc.T("Fundido", "Fade"), CueType.Fade),
+            (Loc.T("Iniciar", "Start"), CueType.Start), (Loc.T("Parar", "Stop"), CueType.Stop),
+            ("Script", CueType.Script), (Loc.T("Nota", "Memo"), CueType.Memo),
+            (Loc.T("Grupo", "Group"), CueType.Group),
+        })
+        {
+            var t = type;
+            var mi = new MenuFlyoutItem { Text = label };
+            mi.Click += (_, _) => _controller?.OnInsertCue(t, row);
+            sub.Items.Add(mi);
+        }
+        return sub;
+    }
+
+    /// <summary>Commit de un campo que NO viene del inspector (menú
+    /// contextual). Reapunta el inspector después, porque el valor que el
+    /// operador acaba de cambiar tiene que verse allí — igual que
+    /// WinCue.App.CommitRowField.</summary>
+    private void CommitRowField(int row, string key, object? value)
+    {
+        _controller?.OnCueEditCommitted(row,
+            new Dictionary<string, object?> { [key] = value });
+        _inspector.SetCue(_model.GetCue(row));
+    }
+
     /// <summary>Inserta el tipo de cue elegido bajo la fila seleccionada —
     /// mismo contrato que WinCue.App.MainWindow.xaml.cs.OnAddCue: pasa por
     /// OnInsertCue, no AddNewCue (WinCue.App tampoco llama a AddNewCue desde

@@ -786,6 +786,21 @@ public sealed class InspectorPanel : ContentControl
         WireTextCommit(tb, key, () => tb.Text);
         row.Children.Add(tb);
         _loaders[key] = c => tb.Text = read(c);
+        if (key == "name")
+            _nameBox = tb;
+    }
+
+    private TextBox? _nameBox;
+
+    /// <summary>F2 / «Renombrar» del menú contextual: abre la pestaña de
+    /// básicos y deja el cursor en Nombre con el texto seleccionado — mismo
+    /// contrato que WinCue.App.InspectorPanel.FocusName.</summary>
+    public void FocusName()
+    {
+        if (_tabs.TabItems.Count > 0)
+            _tabs.SelectedIndex = 0;
+        _nameBox?.Focus(FocusState.Programmatic);
+        _nameBox?.SelectAll();
     }
 
     /// <summary>Campo de tiempo (pre-wait, duración, fundidos, trim…): mismo
