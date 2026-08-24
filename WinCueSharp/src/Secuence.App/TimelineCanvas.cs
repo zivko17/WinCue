@@ -105,10 +105,8 @@ public sealed class TimelineCanvas : UserControl
 
     /// <summary>Scrub: el cue de vídeo bajo el cursor (o null) y su posición
     /// DENTRO del archivo. Mismo contrato que WinCue.App.TimelinePanel.
-    /// EditScrubbed, que lo enseña pausado en el PVW; en Secuence todavía no
-    /// hay a quién dárselo (LiveMonitorControl no tiene ShowPaused — ver su
-    /// cabecera), así que se emite y nadie escucha. Cuando llegue, es una
-    /// línea en MainWindow.</summary>
+    /// EditScrubbed: MainWindow lo enseña pausado en el PVW, que es el visor
+    /// de preparación — mirar ahí no toca la sala.</summary>
     public event Action<Cue?, double>? EditScrubbed;
 
     /// <summary>Reproducir desde el cursor: la lista de cues del segmento con

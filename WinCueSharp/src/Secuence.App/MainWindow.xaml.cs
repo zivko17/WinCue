@@ -536,9 +536,14 @@ public sealed partial class MainWindow : Window, IShowView
         // Qué arranca y con cuánto retraso lo decide el cálculo compartido
         // (TimelineCursor.PlayItems); aquí solo se entrega al controlador.
         _timeline.PlayFromRequested = items => controller.PlayFromTimeline(items);
-        // (EditScrubbed se emite pero no se escucha: Secuence no tiene visor
-        // de EDICIÓN separado del de salida — ver LiveMonitorControl.cs. En
-        // WinCue esto enseña el fotograma pausado en el PVW.)
+        // Cursor de edición del timeline -> scrub en el monitor PVW, igual que
+        // WinCue. El PVW es el de PREPARACIÓN: mirar un fotograma ahí no toca
+        // la sala.
+        _timeline.EditScrubbed += (videoCue, mediaSeconds) =>
+        {
+            if (videoCue is { FilePath.Length: > 0 })
+                _pvw.ShowPaused(videoCue.FilePath, mediaSeconds);
+        };
         _timeline.IsEditAllowed = () => ModeToggle.IsChecked != true;
         // La casilla de la cabecera arranca con lo que diga settings y, cuando
         // la toca el operador, lo persiste — igual que WinCue. SetAutoCrossfade

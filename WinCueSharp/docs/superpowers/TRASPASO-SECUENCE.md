@@ -258,6 +258,12 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Barra de estado con historial**: el mensaje se borra solo a los 4 s y
   queda apuntado; el boton lo abre y se enciende en ambar si el mensaje era
   un aviso (WinCue.Presentation.StatusLog decide que cuenta como tal).
+- **Scrub del cursor de edicion**: el fotograma bajo el cursor sale pausado
+  en el PVW (visor de PREPARACION: no toca la sala).
+- **Glifos en el timeline**: marcador GO, asa de grupo y etiquetas de
+  bloque con sus prefijos. Win2D no resuelve la fuente por nombre ni por
+  `ms-appx:///`, pero SI por un URI de ARCHIVO (IconFont.Win2DFamily), con
+  guardian al arrancar.
 - **Normalizar sonoridad** en el menu contextual (-16 LUFS), con la medida
   y la ganancia que implica compartidas.
 - **Reordenar filas arrastrandolas** en la tabla, con su formato propio para
@@ -279,19 +285,14 @@ pantalla por la propia sesión, que sí podía mirar — ver
 
 ## Lo que falta
 
-**Inmediato** (revisado el 2026-08-24; lo que estaba aquí y ya está hecho se
-ha movido a la lista de arriba):
+**Inmediato: nada.** La lista de paridad con WinCue quedó CERRADA el
+2026-08-24 — inspector, tabla, timeline, barra de estado y menú contextual.
+Todo lo que había aquí está en la lista de arriba, verificado en pantalla.
 
-- **El SCRUB del cursor de edición no se ve.** El cursor ya está y emite
-  `EditScrubbed`, pero no lo escucha nadie: Secuence no tiene visor de
-  EDICIÓN separado del de salida (`LiveMonitorControl` no trae `ShowPaused`
-  — ver su cabecera). Cuando llegue, es UNA línea en MainWindow.
-- **Etiquetas de bloque sin sus prefijos** ↗ / ∞ / 📌, y el marcador GO sin su
-  ▸. No es descuido: Win2D/DirectWrite no resuelve la fuente de iconos, ni
-  por nombre ni con la cadena `ms-appx://…#Phosphor` que sí vale en XAML.
-  Probado: `DrawText` lanza `ArgumentException`. Si algún día hace falta,
-  la salida es cargar la fuente como recurso de Win2D, no insistir por
-  nombre.
+Lo que sigue NO es paridad, sino producto nuevo: es lo de «anotado y sin
+hacer». Antes de abrir cualquiera de esos frentes conviene que Andrés repase
+Secuence entera en pantalla, porque la paridad se ha comprobado control a
+control pero no de un tirón como show completo.
 
 **Anotado y sin hacer:**
 - **`<AssemblyName>WinCue</AssemblyName>`** — el ejecutable se llama

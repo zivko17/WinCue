@@ -28,10 +28,12 @@
 // toma todavía — si el compositor llega a Secuence, esa rama sube entonces
 // (mismo aviso que GeometryCanvas.cs deja sobre TryGrabStillAsync/ShowPaused).
 //
-// FUERA DE ESTA PASADA (igual que GeometryCanvas.cs, mismo motivo — Secuence
-// no tiene todavía un visor de EDICIÓN separado del de SALIDA): ShowPaused,
-// Scrub, SetGeometry, TryGrabStillAsync. Solo lo que hace falta para los dos
-// previos: reproducir en vivo (PGM/PVW) y el transporte de preparación (PVW).
+// ShowPaused y Scrub YA ESTÁN: los pide el cursor de edición del timeline,
+// que enseña en el PVW el fotograma bajo el cursor. El PVW es el visor de
+// PREPARACIÓN, así que mirar ahí no toca la sala.
+//
+// FUERA DE ESTA PASADA todavía: SetGeometry y TryGrabStillAsync (ver el mismo
+// aviso en GeometryCanvas.cs).
 // =============================================================================
 
 using System.Globalization;
@@ -149,6 +151,63 @@ internal sealed class LiveMonitorControl : IDisposable
         {
             SyncClock(startAt);
         }
+    }
+
+    /// <summary>Enseña un fotograma PARADO del archivo, para el scrub del
+    /// cursor de edición del timeline. Mismo contrato que
+    /// WinCue.App.LiveMonitorControl.ShowPaused.
+    ///
+    /// La diferencia con ShowVideo no es cosmética: aquí se carga con
+    /// <c>pause</c> puesto ANTES del loadfile, así que el archivo nunca llega
+    /// a sonar. Cargar y pausar después dejaría escapar unas décimas de audio
+    /// y vídeo cada vez que el operador mueve el cursor.</summary>
+    public void ShowPaused(string path, double at)
+    {
+        if (!VideoEngine.MpvAvailable || !EnsurePlayer())
+            return;
+
+        if (path != _currentPath)
+        {
+            _currentPath = path;
+            _lastElapsed = -1;
+            _cachedDuration = 0.0;
+            _durationAsked = false;
+            // Este camino carga PAUSADO, así que el estado se conoce.
+            _pauseState = true;
+            try
+            {
+                _player!.SetProperty("loop-file", "no");
+                _player.SetProperty("pause", true);
+                _player.SetProperty("start", at > 0.05
+                    ? at.ToString("F3", CultureInfo.InvariantCulture) : "none");
+                _player.Command("loadfile", path);
+            }
+            catch (Exception) { return; }
+            HwndHijo.Mostrar(_hijo);
+            _message.Visibility = Visibility.Collapsed;
+            _status.Text = System.IO.Path.GetFileName(path);
+        }
+        else
+        {
+            Scrub(at);
+        }
+    }
+
+    /// <summary>Salta (pausado) al segundo dado — fotograma de referencia.
+    /// Mismo contrato que WinCue.App.LiveMonitorControl.Scrub.</summary>
+    public void Scrub(double seconds)
+    {
+        if (_player is null || _currentPath.Length == 0)
+            return;
+        try
+        {
+            _player.SetProperty("pause", true);
+            _pauseState = true;
+            _player.Command("seek",
+                Math.Max(0.0, seconds).ToString("F3", CultureInfo.InvariantCulture),
+                "absolute");
+        }
+        catch (Exception) { }
     }
 
     // ── Transporte del PVW (no toca la sala) ───────────────────────────
