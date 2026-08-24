@@ -41,6 +41,12 @@
 // en vez de iconos es un fallo que hay que ver como excepción con nombre, no
 // como una captura de pantalla que alguien tiene que interpretar. Se vuelca
 // además a logs/crash-*.log por si esto pasa fuera de una sesión de consola.
+//
+// Y ese volcado cuelga de LOS DOS enganches: el de AppDomain y el de
+// Application.UnhandledException (WinUI 3). El segundo es el que ve las
+// excepciones del hilo de interfaz —construir un control, un Draw de Win2D,
+// un manejador de evento—, que son justo las que tira esta app; con solo el
+// primero, un fallo al abrir una pestaña podía no dejar ni una línea escrita.
 // =============================================================================
 
 using Microsoft.UI.Dispatching;
@@ -90,6 +96,17 @@ public partial class App : Application
     {
         AppDomain.CurrentDomain.UnhandledException += (_, e) =>
             DumpCrash("AppDomain.UnhandledException", e.ExceptionObject);
+
+        // Y el enganche de WinUI 3, que es por donde salen DE VERDAD las
+        // excepciones del hilo de interfaz (construir un control, un
+        // Draw de Win2D, un manejador de evento). El de AppDomain de arriba
+        // no las ve siempre, así que un fallo al abrir una pestaña se podía
+        // quedar sin una sola línea en disco — que es como estar a ciegas
+        // cuando el que lo sufre está delante de la máquina y yo no.
+        // No se marca Handled: el proceso debe caer igual, pero dejando el
+        // rastro escrito.
+        UnhandledException += (_, e) =>
+            DumpCrash("Application.UnhandledException", e.Exception);
 
         // Antes de construir ninguna ventana: si la fuente de iconos no se
         // aplicó de verdad, mejor una excepción con nombre aquí que una tabla
