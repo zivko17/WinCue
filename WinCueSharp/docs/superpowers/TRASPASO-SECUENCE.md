@@ -4,6 +4,12 @@
 trabajo. Sirve para continuar en una sesión nueva sin haber estado en la
 anterior.*
 
+*Puesto al día el 2026-08-24 por la primera sesión LOCAL, que sí podía
+ejecutar y MIRAR los dos productos. Cambian el estado, la lista de lo hecho,
+la de lo que falta y la de trampas de WinUI 3. Para arrancar una sesión en la
+máquina de Andrés, empieza por `ARRANQUE-SESION-LOCAL.md`, que trae además
+cómo capturar la pantalla y cómo pilotar la interfaz sin manos.*
+
 ---
 
 ## Qué es esto en una frase
@@ -20,15 +26,24 @@ futuro.
 
 ## Estado a día de hoy
 
-Rama **`secuence/hitos-0-1`**, salida de `pruebas-v2` @ `6caa1580`.
-**56 commits**, árbol limpio, todo commiteado. Sin push (nadie lo ha pedido).
+*(Puesto al día el 2026-08-24 al final de la primera sesión LOCAL. Los
+números de antes —56 commits, 1.057 pruebas— eran los del día anterior.)*
+
+Rama **`claude/secuence-hitos-0-1-1occ8p`**, salida de `pruebas-v2` @
+`6caa1580`. **86 commits**, árbol limpio y **subida a `origin`**, con el CI en
+verde sobre `windows-latest`.
+
+**Ojo con el nombre de la rama:** `secuence/hitos-0-1` se quedó atrás. La
+buena es la de `claude/…`, que es la que escucha el CI (`claude/**`).
 
 | | |
 |---|---|
-| Pruebas | **1.057** (se partió de 752) |
+| Pruebas | **1.160** (se partió de 752) |
 | Build | 0 avisos, 0 errores con `TreatWarningsAsErrors=true` |
-| `WinCue.App` | 14.073 líneas (eran 15.191) — **−1.126 en toda la rama** |
-| `Secuence.App` | ~5.800 líneas |
+| Guardián de paleta | OK — 74 asignaciones, 94 constantes, 20 alias |
+| `WinCue.App` | 12.312 líneas de C# + 1.338 de XAML |
+| `Secuence.App` | 9.639 líneas de C# + 917 de XAML |
+| `WinCue.Presentation` | 3.643 líneas · **366 pruebas propias** |
 
 ---
 
@@ -49,7 +64,7 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
         └── Secuence.App/          ← Producto 2: Secuence (WinUI 3)
 ```
 
-**`WinCue.Presentation`** (~2.700 líneas, 215 pruebas propias) contiene:
+**`WinCue.Presentation`** (3.643 líneas, 366 pruebas propias) contiene:
 `Palette` (94 colores), `Icons` (59 glifos), `UiMetrics` (16 medidas),
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
@@ -63,6 +78,23 @@ un modo a un enum de Core y no lo etiquetas, el CI se pone rojo en vez de
 dejar a un producto sin ofrecerlo). (`EqResponse`, los biquads RBJ
 que alimentan la curva de EQ, vive en `WinCue.Core` — matemática de audio,
 no presentación.)
+
+Añadido el 2026-08-24, todo con pruebas y con **WinCue pasando a usarlo**:
+
+- **`SplitterDrag`** — hasta dónde llega el arrastre de un separador. WPF trae
+  `GridSplitter` y WinUI 3 no, así que Secuence arrastra a mano, pero **dónde
+  para** no puede ser a mano en cada sitio.
+- **`HotkeyName`** — los alias de tecla heredados de Qt (`Esc`, `Return`) que
+  traen los shows guardados por la versión Python. Convertir el nombre en
+  tecla NO se comparte: WPF usa `Key` y WinUI 3 `VirtualKey`.
+- **`TimelineLayout.SpanLabelText(span, withIcon)`** — el rótulo del asa de un
+  grupo, con o sin su glifo (ver abajo por qué Secuence lo pide sin él).
+
+Y en **`WinCue.Audio`**, que no es presentación pero también se comparte:
+**`MediaProbe`** — la duración por `ffprobe`, que era una copia privada e
+idéntica en cada producto. Partida en dos: `ParseDuration` es pura y tiene
+pruebas, `DurationSeconds` lanza el proceso y no se puede probar sin ffprobe
+instalado.
 
 ---
 
@@ -203,23 +235,54 @@ Todo verificado por Andrés en pantalla, paso a paso:
 - Ajustes: **las cinco pestañas** — Vídeo, Audio, Red/Control, Interfaz, Rutas
 - **Disparo remoto por OSC y MIDI**, con ping de prueba y MIDI Learn
 
+Y lo añadido el **2026-08-24**, en la primera sesión LOCAL (verificado en
+pantalla por la propia sesión, que sí podía mirar — ver
+`ARRANQUE-SESION-LOCAL.md`):
+
+- **Los dos separadores arrastrables**: columna izquierda (455 / 200 / 760) y
+  panel de pestañas (330 / 140 / 900). El alto del panel se guarda
+  (`bottom_pane_height`) y el ancho de la columna no — copiado de WinCue,
+  incluida esa asimetría.
+- **Cabecera del timeline**: rótulo, pista de uso, casilla del crossfade
+  automático (que ya persiste) y los tres botones de zoom. Más los números de
+  pista al margen.
+- **Recuadros de grupo y marcadores GO** en el timeline, y los grupos ya se
+  **agarran por su asa** (asa → bloque → cuerpo, la prioridad de WinCue).
+- **Agrupar con `Ctrl+G`.** Antes de esto, en Secuence no había forma de meter
+  un cue dentro de un grupo: se podía crear el GROUP y nada más.
+- **Menú contextual de la tabla** con las acciones de WinCue.
+- **Hotkeys por cue**: el campo ya dispara, y se calla mientras se escribe.
+- **Barra de trim también en cues de VÍDEO** (sin onda, como WinCue).
+- Las dos columnas que faltaban en la tabla: banderín y ✕ (desarmado).
+- El inspector cuadrado con el de WinCue en anchos, altos y disposición del
+  rack de audio.
+
 ## Lo que falta
 
-**Inmediato:**
-- **Hotkeys por cue en Secuence** — el inspector ya guarda el campo `hotkey` y
-  WinCue lo respeta, pero `RebuildHotkeys` de Secuence solo cubre Espacio/Esc:
-  falta construir los atajos por cue. El campo lo avisa en pantalla.
-- **Timeline: lo que queda tras la segunda pasada.** Arrastrar bloques
-  (tiempo/pista/bordes con sus topes), zoom con `Ctrl+rueda`, scroll y
-  selección bidireccional con la tabla YA están — el cálculo es compartido y
-  probado (`TimelineViewport`/`TimelineHitTest`/`TimelineDragGesture`/
-  `TimelineEditing` en WinCue.Presentation; WinCue.App pasó a usarlo). Falta:
-  pintar los recuadros de grupo y los marcadores GO en Secuence (y con ello
-  agarrar grupos), el cursor de edición con scrub y doble clic, y la casilla
-  del crossfade automático (lee `timeline_auto_crossfade` de settings; sin
-  interfaz propia todavía) — todo eso va con la pasada del menú contextual.
-- Menú contextual de la tabla, arrastrar y soltar archivos, barra de estado,
-  atajos más allá de Espacio/Esc
+**Inmediato** (revisado el 2026-08-24; lo que estaba aquí y ya está hecho se
+ha movido a la lista de arriba):
+
+- **Arrastrar y soltar archivos** sobre la tabla. WinCue lo tiene
+  (`AddCuesFromFiles` desde el `DragDrop`); en Secuence solo se importa por
+  el botón.
+- **Barra de estado.**
+- **Timeline: el cursor de edición** con scrub y doble clic (clic en la regla
+  lo coloca, doble clic reproduce desde ahí). Es lo único que queda de la
+  interacción del timeline.
+- **Selección múltiple en la tabla.** Es de selección ÚNICA, así que todo lo
+  que en WinCue opera sobre un bloque —agrupar, copiar, duplicar, borrar—
+  aquí opera sobre una fila. El menú contextual y `Ctrl+G` ya le pasan una
+  lista al controlador, o sea que el día que la tabla lo admita no hay que
+  tocar nada más.
+- **«Normalizar sonoridad»** en el menú contextual. En WinCue es un método
+  PRIVADO de su ventana, no del controlador: copiarlo es justo lo que prohíbe
+  la regla 2, así que primero hay que subirlo a compartido.
+- **Etiquetas de bloque sin sus prefijos** ↗ / ∞ / 📌, y el marcador GO sin su
+  ▸. No es descuido: Win2D/DirectWrite no resuelve la fuente de iconos, ni
+  por nombre ni con la cadena `ms-appx://…#Phosphor` que sí vale en XAML.
+  Probado: `DrawText` lanza `ArgumentException`. Si algún día hace falta,
+  la salida es cargar la fuente como recurso de Win2D, no insistir por
+  nombre.
 
 **Anotado y sin hacer:**
 - **`<AssemblyName>WinCue</AssemblyName>`** — el ejecutable se llama
@@ -273,6 +336,7 @@ rota. Cualquier OTRA en rojo sí es señal.
 
 | Documento | Para qué |
 |---|---|
+| `docs/superpowers/ARRANQUE-SESION-LOCAL.md` | **Empieza por aquí si la sesión corre en la máquina de Andrés**: compilar, lanzar, capturar la pantalla, pilotar la interfaz y las trampas ya pagadas |
 | `docs/superpowers/specs/2026-08-22-secuence-winui3-design.md` | El diseño aprobado. Las reglas salen de aquí |
 | `docs/superpowers/plans/2026-08-22-secuence-hitos-0-y-1.md` | El plan de los hitos 0 y 1 |
 | `tools/winui3-lab/INFORME.md` | El hito 0: por qué WinUI 3 es viable |
@@ -300,3 +364,25 @@ planificaba —`mpv.exe` en el PATH, el Windows App SDK siendo MIT, el producto
 arrastrando ventanas entre monitores, una prueba del guardián que no probaba
 nada, un script con un error de sintaxis de PowerShell— y ninguno puesto por
 un agente. **Desconfía del plan antes que del ejecutor.**
+
+### Lo que añadió la sesión LOCAL del 2026-08-24
+
+**Mirar encuentra lo que auditar no.** La auditoría remota había dado los 55
+campos del inspector por equivalentes, y lo eran uno a uno. Lo que no se ve
+leyendo dos ficheros en paralelo es que los `MinWidth` por defecto del tema de
+WinUI descuadraban TODOS los anchos, que el rack de audio dejaba mil píxeles
+en negro, o que la cabecera de la barra de trim se pintaba dos veces.
+
+**Y arreglar una cosa destapa la siguiente.** Hacer arrastrable el separador
+sacó a la luz la cabecera duplicada, que llevaba ahí desde siempre y no se
+veía porque el panel se quedaba corto. Ir a verificar los recuadros de grupo
+destapó que no había forma de crear un grupo con hijos. Verificar los hotkeys
+destapó que la tabla perdía la selección en cada edición. **Cuando algo deja
+de estar tapado, vuelve a mirarlo entero.**
+
+**Cuidado con culpar al código de los fallos de tu automatización.** Tres
+veces di por roto algo que funcionaba: un botón `Ajustar` que no respondía a
+un clic mal puesto, un separador que no se arrastraba porque `SetCursorPos`
+no inyecta eventos de puntero, y un manejador de trim al que apunté 17 px por
+debajo. **Repite la prueba antes de tocar nada** — y si sospechas de un
+cambio tuyo, busca una prueba de control que NO pase por él.
