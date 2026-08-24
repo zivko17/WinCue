@@ -23,11 +23,11 @@
 //     prefijos ↗/∞/📌 son glifos de Icons (Phosphor) y Win2D/DirectWrite no
 //     resuelve por NOMBRE una fuente cargada solo para XAML (ver IconFont.cs).
 //     El aviso de solapamiento sigue siendo la marca triangular lisa.
-//   · Los recuadros de grupo (spans) y los marcadores GO siguen sin pintarse;
-//     por coherencia, aquí tampoco se AGARRAN los grupos (no se puede
-//     arrastrar lo que no se ve — en WinCue sí: asa → bloque → marco). El día
-//     que se pinten, el hit-test compartido (TimelineHitTest.SpanChip/Span)
-//     ya está listo y probado.
+//   · Los recuadros de grupo (spans) y los marcadores GO YA SE PINTAN, con el
+//     mismo reparto que WinCue (relleno debajo, marco y asa por ENCIMA de los
+//     bloques, para que con un solo hijo el bloque no tape el recuadro).
+//     AGARRAR el grupo por su asa sigue pendiente: el hit-test compartido
+//     (TimelineHitTest.SpanChip) ya está listo y probado, falta el gesto.
 //   · Sin cursor de edición, scrub, doble clic ni menú contextual: el menú
 //     contextual de Secuence es un pendiente aparte del encargo, y el doble
 //     clic (inspector / reproducir desde la regla) irá con él.
@@ -136,11 +136,6 @@ public sealed class TimelineCanvas : UserControl
         _canvas.Invalidate();
     }
 
-    /// <summary>Segundos que le QUEDAN al vídeo SALIENTE de la misma pista
-    /// cuando este cue entra, según la proyección. null = no hay saliente vivo
-    /// (no hay cruce) o el saliente no acaba nunca (loop). Es el dato que
-    /// convierte "fade_in de 8 s" en "el cruce no cabe" — lo consume el aviso
-    /// de fundido del inspector, igual que en WinCue.</summary>
     /// <summary>Zoom desde los botones de la cabecera: ancla en el CENTRO,
     /// no bajo el puntero (ahí no hay puntero). Mismo factor y mismo ancla
     /// que WinCue.App.TimelineCanvas.ZoomStep.</summary>
@@ -157,6 +152,11 @@ public sealed class TimelineCanvas : UserControl
         _canvas.Invalidate();
     }
 
+    /// <summary>Segundos que le QUEDAN al vídeo SALIENTE de la misma pista
+    /// cuando este cue entra, según la proyección. null = no hay saliente vivo
+    /// (no hay cruce) o el saliente no acaba nunca (loop). Es el dato que
+    /// convierte "fade_in de 8 s" en "el cruce no cabe" — lo consume el aviso
+    /// de fundido del inspector, igual que en WinCue.</summary>
     public double? OutgoingRemaining(int cueId) =>
         TimelineLayout.OutgoingRemaining(_projection.Blocks, cueId);
 
@@ -325,6 +325,32 @@ public sealed class TimelineCanvas : UserControl
     // Pintado
     // ------------------------------------------------------------------
 
+    /// <summary>Caja del recuadro de un grupo, en píxeles. El cálculo es
+    /// compartido (TimelineLayout.SpanBoxRect); esto solo lo pasa al Rect de
+    /// WinUI.</summary>
+    private Rect SpanBox(TimelineSpan span, double layerHeight)
+    {
+        var r = TimelineLayout.SpanBoxRect(span, _vp.PxPerSec, _vp.ScrollX, layerHeight);
+        return new Rect(r.X, r.Y, r.Width, r.Height);
+    }
+
+    /// <summary>Caja del asa. También es cálculo compartido
+    /// (TimelineHitTest.SpanChipRect) salvo el ANCHO DEL TEXTO, que solo lo
+    /// sabe medir el framework de quien pinta — aquí, Win2D.</summary>
+    private Rect SpanChipBox(CanvasDrawingSession ds, TimelineSpan span,
+                             double layerHeight, string text, CanvasTextFormat format)
+    {
+        var r = TimelineHitTest.SpanChipRect(span, _vp.PxPerSec, _vp.ScrollX,
+            layerHeight, MeasureText(ds, text, format));
+        return new Rect(r.X, r.Y, r.Width, r.Height);
+    }
+
+    private static double MeasureText(CanvasDrawingSession ds, string text, CanvasTextFormat format)
+    {
+        using var layout = new CanvasTextLayout(ds, text, format, float.MaxValue, float.MaxValue);
+        return layout.LayoutBounds.Width;
+    }
+
     private void OnDraw(CanvasControl sender, CanvasDrawEventArgs args)
     {
         var ds = args.DrawingSession;
@@ -371,6 +397,43 @@ public sealed class TimelineCanvas : UserControl
         if (blocks.Count == 0)
             return;
 
+        // ── Recuadros de grupo: RELLENO, debajo de los bloques ──
+        // La caja y su etiqueta son cálculo COMPARTIDO (TimelineLayout.
+        // SpanBoxRect / SpanLabelText); aquí solo se pinta. El orden es el de
+        // WinCue: relleno → marcas GO → bloques → marcos y asas.
+        using var spanFormat = new CanvasTextFormat { FontSize = 10 };
+        foreach (var span in _projection.Spans)
+        {
+            var box = SpanBox(span, lh);
+            if (box.Right < 0 || box.Left > w)
+                continue;
+            uint color = TimelinePalette.ResolveCueColor(span.Group);
+            ds.FillRoundedRectangle(box, 4, 4, ToColor(color, 30));
+        }
+
+        // ── Marcadores GO: a partir de ahí el tiempo es ESTIMADO ──
+        // WinCue rotula "▸GO" con el glifo de Phosphor delante; aquí va solo
+        // "GO". No es un descuido: Win2D/DirectWrite NO resuelve la fuente de
+        // iconos, ni por nombre ni por la cadena "ms-appx://…#Phosphor" que sí
+        // vale en XAML — se probó y DrawText lanza ArgumentException. Es la
+        // misma limitación por la que las etiquetas de bloque se quedan sin
+        // sus prefijos ↗/∞/📌 (ver la cabecera de este archivo).
+        using var goFormat = new CanvasTextFormat { FontSize = 9 };
+        foreach (double t in _projection.GoMarks)
+        {
+            float x = (float)_vp.SecToX(t);
+            if (x < -20 || x > w)
+                continue;
+            ds.DrawLine(new Vector2(x, (float)TimelineLayout.RulerH), new Vector2(x, (float)h),
+                ToColor(Palette.Go), 1.4f);
+            // El glifo y la palabra van JUNTOS en el mismo texto porque aquí
+            // se pinta con Win2D contra la fuente de iconos, no con un
+            // TextBlock: la trampa del cuadradito es de los controles de
+            // XAML, no de esto.
+            ds.DrawText("GO", x + 2, (float)(h - 15),
+                ToColor(Palette.Go), goFormat);
+        }
+
         // Bloques (el arrastrado, encima — como WPF)
         foreach (var b in blocks)
             if (_drag is null || b.Cue.Id != _drag.Cue.Id)
@@ -380,6 +443,34 @@ public sealed class TimelineCanvas : UserControl
             var dragBlock = blocks.FirstOrDefault(b => !b.Ghost && b.Cue.Id == _drag.Cue.Id);
             if (dragBlock is not null)
                 DrawBlock(ds, dragBlock, lh, w);
+        }
+
+        // ── Recuadros de grupo: MARCO + ASA, POR ENCIMA de los bloques ──
+        // Encima a propósito: con un solo hijo, el bloque taparía el recuadro
+        // y no quedaría de dónde agarrar el grupo (misma razón que en WinCue).
+        foreach (var span in _projection.Spans)
+        {
+            var box = SpanBox(span, lh);
+            if (box.Right < 0 || box.Left > w)
+                continue;
+            uint color = TimelinePalette.ResolveCueColor(span.Group);
+            bool selected = span.Group.Id == _selectedId;
+            ds.DrawRoundedRectangle(box, 4, 4,
+                selected ? ToColor(Palette.White) : ToColor(color, 200),
+                selected ? 2f : 1.6f);
+
+            string text = TimelineLayout.SpanLabelText(span);
+            var chip = SpanChipBox(ds, span, lh, text, spanFormat);
+            ds.FillRoundedRectangle(chip, 3, 3, ToColor(color, 235));
+            // Recortado al asa: un nombre largo no puede salirse del grupo.
+            using var layout = new CanvasTextLayout(ds, text, spanFormat,
+                (float)Math.Max(1, chip.Width - 10), (float)chip.Height)
+            {
+                TrimmingGranularity = CanvasTextTrimmingGranularity.Character,
+                TrimmingSign = CanvasTrimmingSign.Ellipsis,
+            };
+            ds.DrawTextLayout(layout, (float)(chip.X + 5), (float)(chip.Y + 1),
+                ToColor(Palette.White));
         }
 
         // Playhead: cálculo compartido (WinCue.Presentation.TimelinePlayhead)
