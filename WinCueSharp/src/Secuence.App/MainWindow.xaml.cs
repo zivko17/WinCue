@@ -831,11 +831,48 @@ public sealed partial class MainWindow : Window, IShowView
     // rechaza ya en el DragOver para que el cursor lo diga antes de soltar,
     // en vez de tragarse el gesto y no hacer nada.
 
+    /// <summary>Formato propio del arrastre INTERNO de filas. Equivale al
+    /// "WinCueRow" de WinCue: distingue reordenar de soltar archivos, para que
+    /// un arrastre venido de fuera no pueda acabar moviendo un cue.</summary>
+    private const string RowDragFormat = "SecuenceRow";
+
+    /// <summary>Arrastrar una fila = REORDENAR. La lista NO reordena sola
+    /// (CanReorderItems=False) a propósito: mutaría la colección a espaldas
+    /// del modelo, y quien mueve un cue —con su deshacer— es el controlador.
+    /// Aquí solo se marca de dónde sale.</summary>
+    private void OnCueListDragStarting(object sender, DragItemsStartingEventArgs e)
+    {
+        if (_controller is null || ModeToggle.IsChecked == true
+            || e.Items.FirstOrDefault() is not CueRow row)
+        {
+            e.Cancel = true;   // en modo SHOW no se reordena
+            return;
+        }
+        int from = _model.IndexOfId(row.CueId);
+        if (from < 0)
+        {
+            e.Cancel = true;
+            return;
+        }
+        e.Data.SetData(RowDragFormat, from);
+        e.Data.RequestedOperation = DataPackageOperation.Move;
+    }
+
     private void OnCueListDragOver(object sender, DragEventArgs e)
     {
-        if (_controller is null
-            || ModeToggle.IsChecked == true
-            || !e.DataView.Contains(StandardDataFormats.StorageItems))
+        if (_controller is null || ModeToggle.IsChecked == true)
+            return;
+
+        if (e.DataView.Contains(RowDragFormat))
+        {
+            e.AcceptedOperation = DataPackageOperation.Move;
+            if (e.DragUIOverride is not null)
+                e.DragUIOverride.Caption = Loc.T("Mover cue", "Move cue");
+            e.Handled = true;
+            return;
+        }
+
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
             return;
 
         e.AcceptedOperation = DataPackageOperation.Copy;
@@ -847,11 +884,41 @@ public sealed partial class MainWindow : Window, IShowView
         e.Handled = true;
     }
 
+    /// <summary>Fila bajo un punto de la lista, o -1. Equivalente de
+    /// WinCue.App.RowIndexAt: se recorren los contenedores REALIZADOS, que
+    /// son los únicos que tienen sitio en pantalla.</summary>
+    private int RowIndexAt(Point p)
+    {
+        for (int i = 0; i < _rows.Count; i++)
+        {
+            if (CueList.ContainerFromIndex(i) is not FrameworkElement c)
+                continue;
+            var top = c.TransformToVisual(CueList).TransformPoint(new Point(0, 0));
+            if (p.Y >= top.Y && p.Y <= top.Y + c.ActualHeight)
+                return i;
+        }
+        return -1;
+    }
+
     private async void OnCueListDrop(object sender, DragEventArgs e)
     {
-        if (_controller is null
-            || ModeToggle.IsChecked == true
-            || !e.DataView.Contains(StandardDataFormats.StorageItems))
+        if (_controller is null || ModeToggle.IsChecked == true)
+            return;
+
+        // Reordenación interna primero, como en WinCue.App.OnGridDrop.
+        if (e.DataView.Contains(RowDragFormat))
+        {
+            e.Handled = true;
+            object raw = await e.DataView.GetDataAsync(RowDragFormat);
+            if (raw is not int from)
+                return;
+            int to = RowIndexAt(e.GetPosition(CueList));
+            if (to >= 0 && from != to)
+                _controller.OnMoveCue(from, to);
+            return;
+        }
+
+        if (!e.DataView.Contains(StandardDataFormats.StorageItems))
             return;
 
         // Deferral: GetStorageItemsAsync es asíncrono y sin esto el sistema da

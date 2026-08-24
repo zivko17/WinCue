@@ -258,6 +258,10 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Barra de estado con historial**: el mensaje se borra solo a los 4 s y
   queda apuntado; el boton lo abre y se enciende en ambar si el mensaje era
   un aviso (WinCue.Presentation.StatusLog decide que cuenta como tal).
+- **Reordenar filas arrastrandolas** en la tabla, con su formato propio para
+  no confundirlo con soltar archivos. La lista NO reordena sola
+  (`CanReorderItems=False`): mutaria la coleccion a espaldas del modelo, y
+  quien mueve un cue —con su deshacer— es el controlador.
 - **Soltar archivos del Explorador sobre la tabla** — alta por el mismo
   camino que el botón IMPORTAR. En modo SHOW se rechaza ya en el `DragOver`,
   para que el cursor lo diga antes de soltar.
@@ -276,9 +280,6 @@ pantalla por la propia sesión, que sí podía mirar — ver
 **Inmediato** (revisado el 2026-08-24; lo que estaba aquí y ya está hecho se
 ha movido a la lista de arriba):
 
-- **Reordenar filas arrastrándolas** dentro de la tabla. Es la OTRA mitad del
-  `Drop` de WinCue (formato `"WinCueRow"` → `OnMoveCue`); soltar archivos ya
-  está. En Secuence se reordena desde el timeline, no desde la tabla.
 - **El SCRUB del cursor de edición no se ve.** El cursor ya está y emite
   `EditScrubbed`, pero no lo escucha nadie: Secuence no tiene visor de
   EDICIÓN separado del de salida (`LiveMonitorControl` no trae `ShowPaused`

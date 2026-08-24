@@ -722,6 +722,8 @@
                       RightTapped="OnCueListRightTapped"
                       AllowDrop="True"
                       DragOver="OnCueListDragOver" Drop="OnCueListDrop"
+                      CanDragItems="True" DragItemsStarting="OnCueListDragStarting"
+                      CanReorderItems="False"
                       Background="{x:Bind local:Theme.WindowBgBrush}">
                 <ListView.ItemContainerStyle>
                     <Style TargetType="ListViewItem">
