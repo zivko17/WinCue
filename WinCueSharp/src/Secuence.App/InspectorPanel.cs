@@ -26,6 +26,19 @@
 //   - Disparadores: hotkey, segundo disparo (retrigger), «fundir y parar
 //     otros» (con tiempo y ámbito), wall-clock y MIDI.
 //
+// DISPOSICIÓN — las CINCO pestañas de WinCue, en su orden y con su reparto en
+// columnas (Básicos: identidad │ temporización │ destino · Disparadores: local
+// │ wall-clock │ MIDI · Tiempo y bucles: reproducción │ fundidos y recorte, con
+// la barra de onda a lo ancho debajo · Geometría · Audio). Hasta esta pasada
+// era UNA sola columna que scrolleaba, y con ello el inspector se leía como
+// una lista plana muy larga en vez de como el de WinCue. Las medidas también
+// son las suyas: páginas con margen (10,6,10,10), columnas separadas 30 px,
+// etiquetas de 185 px y cabeceras a (0,12,0,4).
+//
+// El truco que permitió el cambio sin tocar los ~25 sitios que ya escribían
+// campos: _root dejó de ser un panel fijo y pasó a ser un PUNTERO al
+// contenedor actual, que Tab()/Columns() van moviendo. Ver su declaración.
+//
 // LAS OPCIONES de cada desplegable (continue_mode, group_mode, retrigger,
 // fade_others_scope, midi_type) y la paleta de colores de etiqueta vienen de
 // WinCue.Presentation.CueChoices — una sola definición para los dos
