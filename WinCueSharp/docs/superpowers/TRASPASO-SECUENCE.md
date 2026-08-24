@@ -251,6 +251,10 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Agrupar con `Ctrl+G`.** Antes de esto, en Secuence no había forma de meter
   un cue dentro de un grupo: se podía crear el GROUP y nada más.
 - **Menú contextual de la tabla** con las acciones de WinCue.
+- **Cursor de edición del timeline**: se coloca pinchando en la regla, se
+  arrastra, y con doble clic reproduce el show desde ahí — lo que cruza el
+  cursor arranca a mitad y lo posterior se programa con su retraso, hasta el
+  próximo GO manual.
 - **Barra de estado con historial**: el mensaje se borra solo a los 4 s y
   queda apuntado; el boton lo abre y se enciende en ambar si el mensaje era
   un aviso (WinCue.Presentation.StatusLog decide que cuenta como tal).
@@ -275,9 +279,10 @@ ha movido a la lista de arriba):
 - **Reordenar filas arrastrándolas** dentro de la tabla. Es la OTRA mitad del
   `Drop` de WinCue (formato `"WinCueRow"` → `OnMoveCue`); soltar archivos ya
   está. En Secuence se reordena desde el timeline, no desde la tabla.
-- **Timeline: el cursor de edición** con scrub y doble clic (clic en la regla
-  lo coloca, doble clic reproduce desde ahí). Es lo único que queda de la
-  interacción del timeline.
+- **El SCRUB del cursor de edición no se ve.** El cursor ya está y emite
+  `EditScrubbed`, pero no lo escucha nadie: Secuence no tiene visor de
+  EDICIÓN separado del de salida (`LiveMonitorControl` no trae `ShowPaused`
+  — ver su cabecera). Cuando llegue, es UNA línea en MainWindow.
 - **«Normalizar sonoridad»** en el menú contextual. En WinCue es un método
   PRIVADO de su ventana, no del controlador: copiarlo es justo lo que prohíbe
   la regla 2, así que primero hay que subirlo a compartido.

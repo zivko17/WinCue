@@ -1049,19 +1049,9 @@ public sealed class TimelineCanvas : FrameworkElement
         double t = Math.Max(0, XToSec(px));
         _editCursor = t;
 
-        Cue? video = null;
-        int bestLayer = int.MaxValue;
-        double mediaPos = 0;
-        foreach (var b in _blocks)
-        {
-            if (b.Cue.Type != CueType.Video || b.Dur <= 0 || b.Ghost)
-                continue;
-            if (t < b.Start || t > b.Start + b.Dur || b.Layer >= bestLayer)
-                continue;
-            bestLayer = b.Layer;
-            video = b.Cue;
-            mediaPos = b.Cue.TrimStart + (t - b.Start);
-        }
+        // A qué fotograma mirar es cálculo COMPARTIDO
+        // (WinCue.Presentation.TimelineCursor), el mismo que usa Secuence.
+        var (video, mediaPos) = TimelineCursor.ScrubTarget(_blocks, t);
         EditScrubbed?.Invoke(video, mediaPos);
         InvalidateVisual();
     }
@@ -1075,39 +1065,11 @@ public sealed class TimelineCanvas : FrameworkElement
     {
         if (_editCursor is not double t || _model is null)
             return;
-
-        // Frontera del segmento: el primer salto manual posterior al cursor
-        double limit = double.PositiveInfinity;
-        foreach (double g in _goMarks)
-            if (g > t + 1e-6)
-                limit = Math.Min(limit, g);
-
-        var items = new List<MainController.TimelinePlayItem>();
-        foreach (var b in _blocks)
-        {
-            // Ghost: lo dispara su cue START (incluirlo duplicaría)
-            if (b.Dimmed || b.Ghost || b.Cue.Type == CueType.Group)
-                continue;
-            double end = b.Start + Math.Max(b.Dur, 0.0);
-            if (end <= t + 1e-6 || b.Start >= limit - 1e-6)
-                continue;   // ya pasó · pertenece al siguiente segmento manual
-            if (b.Start <= t)
-            {
-                // Cruza el cursor: solo media arranca a mitad (un WAIT/FADE a
-                // medias no aporta — la cadena ya viene resuelta)
-                if (b.Cue.Type is CueType.Audio or CueType.Video && b.Dur > 0)
-                    items.Add(new MainController.TimelinePlayItem(
-                        b.Cue.Id, t - b.Start, 0.0));
-            }
-            else if (b.Cue.Type is CueType.Audio or CueType.Video
-                     or CueType.Fade or CueType.Start or CueType.Stop
-                     or CueType.Script)
-            {
-                items.Add(new MainController.TimelinePlayItem(
-                    b.Cue.Id, 0.0, b.Start - t));
-            }
-        }
-        PlayFromRequested?.Invoke(items);
+        // QUÉ arranca y con cuánto retraso es cálculo COMPARTIDO
+        // (WinCue.Presentation.TimelineCursor): el segmento hasta el próximo
+        // GO manual, lo que cruza el cursor arrancando a mitad y lo posterior
+        // programado a su hora. Secuence lo usa igual.
+        PlayFromRequested?.Invoke(TimelineCursor.PlayItems(_blocks, _goMarks, t));
     }
 
     /// <summary>Crossfade EXPLÍCITO entre capas (menú contextual): el que

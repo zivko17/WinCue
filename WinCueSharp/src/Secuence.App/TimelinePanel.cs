@@ -226,6 +226,21 @@ public sealed class TimelinePanel : UserControl
         remove => _canvas.CueSelected -= value;
     }
 
+    /// <summary>Scrub del cursor de edición. Ver TimelineCanvas.EditScrubbed:
+    /// hoy no lo escucha nadie porque Secuence no tiene visor de edición.</summary>
+    public event Action<Cue?, double>? EditScrubbed
+    {
+        add => _canvas.EditScrubbed += value;
+        remove => _canvas.EditScrubbed -= value;
+    }
+
+    /// <summary>Doble clic en la regla: reproducir el show desde ahí.</summary>
+    public Action<IReadOnlyList<MainController.TimelinePlayItem>>? PlayFromRequested
+    {
+        get => _canvas.PlayFromRequested;
+        set => _canvas.PlayFromRequested = value;
+    }
+
     public void SetModel(CueModel model) => _canvas.SetModel(model);
     public void RefreshFromModel() => _canvas.RefreshFromModel();
     public void SetSelected(int cueId) => _canvas.SetSelected(cueId);

@@ -532,6 +532,13 @@ public sealed partial class MainWindow : Window, IShowView
                     new Dictionary<string, object?> { [key] = value });
         };
         _timeline.MoveCueRequested = (from, to) => controller.OnMoveCue(from, to);
+        // Doble clic en la regla del timeline: reproducir desde el cursor.
+        // Qué arranca y con cuánto retraso lo decide el cálculo compartido
+        // (TimelineCursor.PlayItems); aquí solo se entrega al controlador.
+        _timeline.PlayFromRequested = items => controller.PlayFromTimeline(items);
+        // (EditScrubbed se emite pero no se escucha: Secuence no tiene visor
+        // de EDICIÓN separado del de salida — ver LiveMonitorControl.cs. En
+        // WinCue esto enseña el fotograma pausado en el PVW.)
         _timeline.IsEditAllowed = () => ModeToggle.IsChecked != true;
         // La casilla de la cabecera arranca con lo que diga settings y, cuando
         // la toca el operador, lo persiste — igual que WinCue. SetAutoCrossfade

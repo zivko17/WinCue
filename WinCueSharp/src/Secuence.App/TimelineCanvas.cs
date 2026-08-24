@@ -95,6 +95,26 @@ public sealed class TimelineCanvas : UserControl
     /// ver SetSelected).</summary>
     public event Action<int>? CueSelected;
 
+    // ── Cursor de EDICIÓN ──────────────────────────────────────────────
+    // Ámbar y arrastrable: se coloca pinchando en la regla, se agarra cerca de
+    // su línea, y con doble clic reproduce el show desde ahí. Las dos cuentas
+    // que hay detrás —a qué fotograma mirar y qué arranca— son compartidas
+    // (WinCue.Presentation.TimelineCursor).
+    private double? _editCursor;
+    private bool _dragCursor;
+
+    /// <summary>Scrub: el cue de vídeo bajo el cursor (o null) y su posición
+    /// DENTRO del archivo. Mismo contrato que WinCue.App.TimelinePanel.
+    /// EditScrubbed, que lo enseña pausado en el PVW; en Secuence todavía no
+    /// hay a quién dárselo (LiveMonitorControl no tiene ShowPaused — ver su
+    /// cabecera), así que se emite y nadie escucha. Cuando llegue, es una
+    /// línea en MainWindow.</summary>
+    public event Action<Cue?, double>? EditScrubbed;
+
+    /// <summary>Reproducir desde el cursor: la lista de cues del segmento con
+    /// su offset o su espera.</summary>
+    public Action<IReadOnlyList<MainController.TimelinePlayItem>>? PlayFromRequested;
+
     public TimelineCanvas()
     {
         MinHeight = 90;
@@ -111,6 +131,7 @@ public sealed class TimelineCanvas : UserControl
         _canvas.PointerCaptureLost += (_, _) => CancelDrag();
         _canvas.PointerCanceled += (_, _) => CancelDrag();
         _canvas.PointerWheelChanged += OnPointerWheel;
+        _canvas.DoubleTapped += OnDoubleTapped;
         Unloaded += (_, _) => _frameTimer?.Stop();
     }
 
@@ -249,6 +270,23 @@ public sealed class TimelineCanvas : UserControl
             return;
         var p = pt.Position;
 
+        // Cursor de EDICIÓN, ANTES que nada: pinchar en la regla lo coloca, y
+        // cerca de su línea lo agarra. Solo en modo EDIT, igual que WinCue —
+        // en SHOW el timeline es de solo lectura.
+        if (IsEditAllowed?.Invoke() ?? true)
+        {
+            bool onRuler = p.Y < TimelineLayout.RulerH;
+            bool nearCursor = _editCursor is double c
+                && Math.Abs(_vp.SecToX(c) - p.X) <= 6;
+            if (onRuler || nearCursor)
+            {
+                _dragCursor = true;
+                _canvas.CapturePointer(e.Pointer);
+                UpdateEditCursor(p.X);
+                return;
+            }
+        }
+
         // Prioridad: ASA del grupo → bloque → CUERPO del recuadro. La misma
         // que WinCue.App.TimelinePanel.OnMouseDown, y en ese orden por algo:
         // el asa está por encima de los bloques justo para poder agarrar un
@@ -303,6 +341,12 @@ public sealed class TimelineCanvas : UserControl
     {
         var p = e.GetCurrentPoint(_canvas).Position;
 
+        if (_dragCursor)
+        {
+            UpdateEditCursor(p.X);
+            return;
+        }
+
         if (_drag is null)
         {
             // Cursor según lo que hay debajo, como WPF: ↔ en un borde
@@ -338,6 +382,12 @@ public sealed class TimelineCanvas : UserControl
 
     private void OnPointerReleased(object sender, PointerRoutedEventArgs e)
     {
+        if (_dragCursor)
+        {
+            _dragCursor = false;
+            _canvas.ReleasePointerCaptures();
+            return;
+        }
         if (_drag is null)
             return;
         var g = _drag;
@@ -360,10 +410,43 @@ public sealed class TimelineCanvas : UserControl
     /// táctil…): descartar la vista previa sin escribir nada.</summary>
     private void CancelDrag()
     {
+        _dragCursor = false;
         if (_drag is null)
             return;
         _drag = null;
         RefreshFromModel();
+    }
+
+    /// <summary>Mueve el cursor de edición y emite el SCRUB. A qué fotograma
+    /// mirar lo decide el cálculo compartido (TimelineCursor.ScrubTarget).</summary>
+    private void UpdateEditCursor(double px)
+    {
+        double t = Math.Max(0, _vp.XToSec(px));
+        _editCursor = t;
+        var (video, mediaPos) = TimelineCursor.ScrubTarget(_projection.Blocks, t);
+        EditScrubbed?.Invoke(video, mediaPos);
+        _canvas.Invalidate();
+    }
+
+    /// <summary>Doble clic en la regla (o sobre el cursor): reproducir el show
+    /// desde ahí. Va por DoubleTapped y no contando pulsaciones a mano porque
+    /// WinUI 3 no da ClickCount en los eventos de puntero como WPF.</summary>
+    private void OnDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (_model is null || !(IsEditAllowed?.Invoke() ?? true))
+            return;
+        var p = e.GetPosition(_canvas);
+        bool onRuler = p.Y < TimelineLayout.RulerH;
+        bool nearCursor = _editCursor is double c
+            && Math.Abs(_vp.SecToX(c) - p.X) <= 6;
+        if (!onRuler && !nearCursor)
+            return;
+
+        UpdateEditCursor(p.X);
+        if (_editCursor is double t)
+            PlayFromRequested?.Invoke(
+                TimelineCursor.PlayItems(_projection.Blocks, _projection.GoMarks, t));
+        e.Handled = true;
     }
 
     private void OnPointerWheel(object sender, PointerRoutedEventArgs e)
@@ -530,6 +613,25 @@ public sealed class TimelineCanvas : UserControl
             };
             ds.DrawTextLayout(layout, (float)(chip.X + 5), (float)(chip.Y + 1),
                 ToColor(Palette.White));
+        }
+
+        // ── Cursor de EDICIÓN: línea ámbar, asa triangular en la regla y la
+        //    hora al lado. Mismo aspecto que el de WinCue. ──
+        if (_editCursor is double ec)
+        {
+            float x = (float)_vp.SecToX(ec);
+            if (x >= -10 && x <= w + 10)
+            {
+                var amber = ToColor(Palette.Standby);
+                ds.DrawLine(new Vector2(x, 0), new Vector2(x, (float)h), amber, 2f);
+                using var handle = CanvasGeometry.CreatePolygon(ds, new[]
+                {
+                    new Vector2(x - 6, 0), new Vector2(x + 6, 0), new Vector2(x, 12),
+                });
+                ds.FillGeometry(handle, amber);
+                using var timeFormat = new CanvasTextFormat { FontSize = 10 };
+                ds.DrawText(TimelineLayout.FormatTime(ec), x + 5, 2, amber, timeFormat);
+            }
         }
 
         // Playhead: cálculo compartido (WinCue.Presentation.TimelinePlayhead)
