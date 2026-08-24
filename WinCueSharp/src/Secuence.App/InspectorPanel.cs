@@ -1162,10 +1162,16 @@ public sealed class InspectorPanel : ContentControl
 
         bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
         bool soloed = _cue is not null && AuditionSourceId?.Invoke() == _cue.Id;
+        // Microsoft.UI.Colors, CUALIFICADO: el «Colors» que trae el using
+        // Windows.UI de este archivo es otro tipo y no tiene estas paradas.
+        // MixerPanel lo resuelve con un using Microsoft.UI; aquí se cualifica
+        // para no meter un using entero por dos usos.
         _muteBtn.Background = muted ? Theme.PgmBrush : Theme.ButtonBgBrush;
-        _muteBtn.Foreground = muted ? Theme.Solid(Colors.Black) : Theme.TextPrimaryBrush;
+        _muteBtn.Foreground = muted
+            ? Theme.Solid(Microsoft.UI.Colors.Black) : Theme.TextPrimaryBrush;
         _soloBtn.Background = soloed ? Theme.StandbyBrush : Theme.ButtonBgBrush;
-        _soloBtn.Foreground = soloed ? Theme.Solid(Colors.Black) : Theme.TextPrimaryBrush;
+        _soloBtn.Foreground = soloed
+            ? Theme.Solid(Microsoft.UI.Colors.Black) : Theme.TextPrimaryBrush;
     }
 
     /// <summary>La mesa cambió de estado (o entró/salió un cue): repintar.</summary>
