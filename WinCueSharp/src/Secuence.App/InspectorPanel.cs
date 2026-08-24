@@ -558,7 +558,11 @@ public sealed class InspectorPanel : ContentControl
     /// WaveformCanvas.cs.</summary>
     private void UpdateWave(Cue cue, bool force = false)
     {
-        if (cue.Type != CueType.Audio || cue.FilePath.Length == 0)
+        // IsMedia() y no "== Audio": el VÍDEO también se recorta, y su barra
+        // ya funciona (sin onda, ver WaveformCanvas.LoadVideo). El criterio de
+        // qué cuenta como media es del motor, compartido, y es el mismo que
+        // usa WinCue.App.InspectorPanel.UpdateWave.
+        if (!cue.IsMedia() || cue.FilePath.Length == 0)
         {
             _wave.Clear();
             _waveLoadedPath = "";
@@ -570,7 +574,10 @@ public sealed class InspectorPanel : ContentControl
             return;
         }
         _waveLoadedPath = cue.FilePath;
-        _wave.LoadAudio(cue.FilePath, cue.TrimStart, cue.TrimEnd);
+        if (cue.Type == CueType.Audio)
+            _wave.LoadAudio(cue.FilePath, cue.TrimStart, cue.TrimEnd);
+        else
+            _wave.LoadVideo(cue.FilePath, cue.TrimStart, cue.TrimEnd);
     }
 
     /// <summary>Barra de trim con onda: arrastrar sus manejadores comete

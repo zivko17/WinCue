@@ -153,25 +153,12 @@ public sealed class WaveformControl : FrameworkElement
         return (peaks.Mins, peaks.Maxs, buf.DurationSeconds);
     }
 
-    private static double ProbeDuration(string path)
-    {
-        var psi = new ProcessStartInfo("ffprobe")
-        {
-            UseShellExecute = false,
-            RedirectStandardOutput = true,
-            RedirectStandardError = true,
-            CreateNoWindow = true,
-        };
-        psi.ArgumentList.Add("-v"); psi.ArgumentList.Add("error");
-        psi.ArgumentList.Add("-show_entries"); psi.ArgumentList.Add("format=duration");
-        psi.ArgumentList.Add("-of"); psi.ArgumentList.Add("default=nw=1:nk=1");
-        psi.ArgumentList.Add(path);
-        using var proc = Process.Start(psi)
-            ?? throw new InvalidOperationException("ffprobe no disponible");
-        string output = proc.StandardOutput.ReadToEnd().Trim();
-        proc.WaitForExit(8_000);
-        return double.Parse(output, CultureInfo.InvariantCulture);
-    }
+    /// <summary>La duración la sondea WinCue.Audio.MediaProbe, que es de donde
+    /// la lee TAMBIÉN Secuence para su barra de trim de vídeo: mismo ffprobe,
+    /// mismos argumentos y mismo parseo, sin dos copias que puedan divergir.
+    /// Sigue lanzando igual, y quien llama lo traduce a «no disponible».</summary>
+    private static double ProbeDuration(string path) =>
+        WinCue.Audio.MediaProbe.DurationSeconds(path);
 
     // ------------------------------------------------------------------
     // Geometría interna

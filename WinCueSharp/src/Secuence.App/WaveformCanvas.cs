@@ -116,7 +116,42 @@ public sealed class WaveformCanvas : UserControl
         _canvas.Invalidate();
     }
 
-    /// <summary>Sin onda cargada: cue de vídeo, sin archivo, o error. Mismo
+    /// <summary>Barra de trim de un cue de VÍDEO: se sondea la duración y se
+    /// dibuja la barra con sus manejadores, pero SIN onda. No es una carencia:
+    /// WinCue hace lo mismo (WaveformControl.LoadVideo). Decodificar el audio
+    /// de un vídeo entero solo para pintar un dibujito costaría segundos cada
+    /// vez que se selecciona un cue, y lo que se recorta es TIEMPO, que los
+    /// manejadores y las cifras ya dan.
+    ///
+    /// El sondeo es COMPARTIDO (WinCue.Audio.MediaProbe): mismo ffprobe y
+    /// mismo parseo que WinCue, que pasó a usarlo también.</summary>
+    public async void LoadVideo(string path, double trimStart, double trimEnd)
+    {
+        _mins = _maxs = null;
+        _duration = 0.0;
+        _start = Math.Max(0.0, trimStart);
+        _end = Math.Max(0.0, trimEnd);
+        _msg = Loc.T("leyendo duración…", "reading duration…");
+        _canvas.Invalidate();
+
+        int gen = ++_generation;
+        try
+        {
+            double dur = await Task.Run(() => MediaProbe.DurationSeconds(path));
+            if (gen != _generation) return;
+            _duration = dur;
+            if (_end <= 0.0) _end = dur;
+            _msg = "";
+        }
+        catch (Exception)
+        {
+            if (gen != _generation) return;
+            _msg = Loc.T("no disponible", "not available");
+        }
+        _canvas.Invalidate();
+    }
+
+    /// <summary>Sin onda cargada: sin archivo, tipo sin media, o error. Mismo
     /// contrato que WaveformControl.Clear.</summary>
     public void Clear(string? msg = null)
     {
