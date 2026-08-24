@@ -680,6 +680,9 @@
                     <ColumnDefinition Width="64"/>
                     <ColumnDefinition Width="56"/>
                     <ColumnDefinition Width="72"/>
+                    <!-- Banderín y ✕ (desarmado), las dos ultimas de WinCue -->
+                    <ColumnDefinition Width="28"/>
+                    <ColumnDefinition Width="28"/>
                 </Grid.ColumnDefinitions>
                 <TextBlock Grid.Column="1" Text="Nº" Margin="8,0,0,0" VerticalAlignment="Center"
                            Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
@@ -695,6 +698,18 @@
                            Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
                 <TextBlock Grid.Column="7" Text="Sigue" Margin="8,0,0,0" VerticalAlignment="Center"
                            Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontWeight="SemiBold" FontSize="12"/>
+                <!-- Los dos rótulos son GLIFOS, así que llevan la fuente de
+                     iconos: en WinUI 3 la fuente es del control entero y un
+                     glifo dentro de un TextBlock de texto plano sale como un
+                     cuadradito (ver IconFont.cs). -->
+                <TextBlock Grid.Column="8" x:Name="FlagColumnIcon"
+                           FontFamily="{x:Bind local:IconFont.Font}"
+                           Margin="5,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontSize="12"/>
+                <TextBlock Grid.Column="9" x:Name="ArmedColumnIcon"
+                           FontFamily="{x:Bind local:IconFont.Font}"
+                           Margin="5,0,0,0" VerticalAlignment="Center"
+                           Foreground="{x:Bind local:Theme.TextTertiaryBrush}" FontSize="12"/>
             </Grid>
 
             <!-- Tabla -->
@@ -723,6 +738,8 @@
                                 <ColumnDefinition Width="64"/>
                                 <ColumnDefinition Width="56"/>
                                 <ColumnDefinition Width="72"/>
+                                <ColumnDefinition Width="28"/>
+                                <ColumnDefinition Width="28"/>
                             </Grid.ColumnDefinitions>
 
                             <!-- Punto de estado -->
@@ -771,6 +788,20 @@
                                 <TextBlock Text="{x:Bind ContinueText}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
                                            VerticalAlignment="Center"/>
                             </StackPanel>
+
+                            <!-- Banderín y ✕ (desarmado). Van con la fuente de
+                                 iconos y en su color propio: el banderín en
+                                 ámbar, como el del inspector, y la ✕ atenuada
+                                 — marca lo que NO va a sonar, que es lo que
+                                 hay que ver de un vistazo. -->
+                            <TextBlock Grid.Column="8" Text="{x:Bind FlagText}"
+                                       FontFamily="{x:Bind local:IconFont.Font}"
+                                       Foreground="{x:Bind local:Theme.StandbyBrush}"
+                                       FontSize="12" Margin="5,0,0,0" VerticalAlignment="Center"/>
+                            <TextBlock Grid.Column="9" Text="{x:Bind ArmedText}"
+                                       FontFamily="{x:Bind local:IconFont.Font}"
+                                       Foreground="{x:Bind local:Theme.TextDimBrush}"
+                                       FontSize="12" Margin="5,0,0,0" VerticalAlignment="Center"/>
                         </Grid>
                     </DataTemplate>
                 </ListView.ItemTemplate>

@@ -68,6 +68,9 @@ public sealed class CueRow : INotifyPropertyChanged
             ContinueMode.AutoFollow => "follow",
             _ => "",
         };
+
+        FlagText = cue.Flagged ? Icons.Flag : "";
+        ArmedText = cue.Armed ? "" : Icons.Cross;
     }
 
     public string Number { get; }
@@ -87,6 +90,17 @@ public sealed class CueRow : INotifyPropertyChanged
     public string PostWaitText { get; }
     public string ContinueIcon { get; }
     public string ContinueText { get; }
+
+    /// <summary>Banderín del cue, o nada. Mismo criterio que
+    /// WinCue.App.CueRowViewModel.FlagText.</summary>
+    public string FlagText { get; }
+
+    /// <summary>La ✕ marca los cues DESARMADOS, no los armados: en una lista
+    /// donde casi todo está armado, lo que hay que ver de un vistazo es lo
+    /// que NO va a sonar. Mismo criterio que
+    /// WinCue.App.CueRowViewModel.ArmedText — ojo, el nombre engaña en los
+    /// dos sitios.</summary>
+    public string ArmedText { get; }
 
     // ── Playhead (SetPlayhead/RefreshRow/ReloadTable de IShowView) ────────
     private bool _isPlayhead;

@@ -184,6 +184,10 @@ public sealed partial class MainWindow : Window, IShowView
         // de tipos de cue de AddButton.
         VideoOutIcon.Text = Icons.VideoOutput;
         SettingsIcon.Text = Icons.Settings;
+        // Los dos rótulos de las últimas columnas de la tabla son glifos, y se
+        // ponen desde aquí como el resto (el XAML no conoce Icons).
+        FlagColumnIcon.Text = Icons.Flag;
+        ArmedColumnIcon.Text = Icons.Cross;
         AddIcon.Text = Icons.Add;
         AddExpandedIcon.Text = Icons.Expanded;
         ImportIcon.Text = Icons.Import;
