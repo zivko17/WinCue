@@ -191,6 +191,10 @@ public sealed partial class MainWindow : Window, IShowView
         // de tipos de cue de AddButton.
         VideoOutIcon.Text = Icons.VideoOutput;
         SettingsIcon.Text = Icons.Settings;
+        LogButtonIcon.Text = Icons.Log;
+        ToolTipService.SetToolTip(LogButton, Loc.T(
+            "Historial de avisos y mensajes de estado",
+            "History of warnings and status messages"));
         // Los dos rótulos de las últimas columnas de la tabla son glifos, y se
         // ponen desde aquí como el resto (el XAML no conoce Icons).
         FlagColumnIcon.Text = Icons.Flag;
@@ -1486,7 +1490,67 @@ public sealed partial class MainWindow : Window, IShowView
     // IShowView — Feedback de estado
     // ==================================================================
 
-    public void FlashStatus(string message) => EstadoTexto.Text = message;
+    /// <summary>Historial de la barra de estado. El tope, el sello de hora y
+    /// qué cuenta como aviso son cálculo COMPARTIDO
+    /// (WinCue.Presentation.StatusLog), el mismo que usa WinCue.</summary>
+    private readonly StatusLog _statusHistory = new();
+    private DispatcherQueueTimer? _statusTimer;
+
+    /// <summary>Mensaje en la barra. Se borra solo a los 4 segundos —los
+    /// mismos que WinCue— y queda apuntado en el historial: un aviso que salta
+    /// mientras el operador mira otro sitio no puede perderse.</summary>
+    public void FlashStatus(string message)
+    {
+        EstadoTexto.Text = message;
+
+        _statusTimer ??= CreateStatusTimer();
+        _statusTimer.Stop();
+        _statusTimer.Start();
+
+        _statusHistory.Add(message, DateTime.Now);
+        if (StatusLog.IsWarning(message))
+            LogButton.Foreground = Theme.StandbyBrush;
+    }
+
+    private DispatcherQueueTimer CreateStatusTimer()
+    {
+        var timer = DispatcherQueue.CreateTimer();
+        timer.Interval = TimeSpan.FromSeconds(4);
+        timer.Tick += (_, _) => { EstadoTexto.Text = ""; timer.Stop(); };
+        return timer;
+    }
+
+    /// <summary>Abre el historial. Va en un Flyout y no en un ContentDialog
+    /// porque no es una decisión que haya que contestar: se mira y se cierra
+    /// pinchando fuera. Al abrirlo se apaga el aviso del botón.</summary>
+    private void OnShowStatusLog(object sender, RoutedEventArgs e)
+    {
+        LogButton.Foreground = Theme.TextDimBrush;
+
+        var text = new TextBox
+        {
+            Text = _statusHistory.Render(
+                Loc.T("(sin mensajes todavía)", "(no messages yet)")),
+            IsReadOnly = true,
+            TextWrapping = TextWrapping.Wrap,
+            Background = Theme.WindowBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+            BorderThickness = new Thickness(0),
+            FontSize = 12,
+        };
+        var flyout = new Flyout
+        {
+            Content = new ScrollViewer
+            {
+                Width = 560,
+                Height = 320,
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                Content = text,
+            },
+            Placement = Microsoft.UI.Xaml.Controls.Primitives.FlyoutPlacementMode.Top,
+        };
+        flyout.ShowAt(LogButton);
+    }
 
     /// <summary>Sin ContentDialog modal a propósito: sacar el error por la
     /// MISMA barra de estado que FlashStatus mantiene la ventana observable

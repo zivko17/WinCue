@@ -402,7 +402,7 @@ public partial class MainWindow : Window, IShowView
 
     // Historial de mensajes de estado (panel de avisos del botón 🕮).
     // El estado "hay avisos" lo lleva el color del propio LogButton.
-    private readonly List<string> _statusHistory = new();
+    private readonly StatusLog _statusHistory = new();
 
     public void FlashStatus(string message)
     {
@@ -410,16 +410,14 @@ public partial class MainWindow : Window, IShowView
         _statusTimer.Stop();
         _statusTimer.Start();
 
-        // Los avisos pasan fugaces por la barra: quedan en el historial
-        _statusHistory.Add($"[{DateTime.Now:HH:mm:ss}] {message}");
-        if (_statusHistory.Count > 300)
-            _statusHistory.RemoveAt(0);
-        if (message.Contains("[AVISO]") || message.Contains(Icons.Warning)
-            || message.Contains("Error", StringComparison.OrdinalIgnoreCase)
-            || message.Contains("falló", StringComparison.OrdinalIgnoreCase))
-        {
+        // Los avisos pasan fugaces por la barra: quedan en el historial.
+        // El tope, el sello de hora y QUÉ CUENTA COMO AVISO viven en
+        // WinCue.Presentation.StatusLog, que es de donde lo lee también
+        // Secuence: si los dos no coinciden, el mismo mensaje enciende el
+        // botón en uno y no en el otro.
+        _statusHistory.Add(message, DateTime.Now);
+        if (StatusLog.IsWarning(message))
             LogButton.Foreground = Theme.StandbyBrush;
-        }
     }
 
     private void OnShowStatusLog(object sender, RoutedEventArgs e)
@@ -428,9 +426,8 @@ public partial class MainWindow : Window, IShowView
 
         var text = new TextBox
         {
-            Text = _statusHistory.Count > 0
-                ? string.Join(Environment.NewLine, Enumerable.Reverse(_statusHistory))
-                : Loc.T("(sin mensajes todavía)", "(no messages yet)"),
+            Text = _statusHistory.Render(
+                Loc.T("(sin mensajes todavía)", "(no messages yet)")),
             IsReadOnly = true,
             TextWrapping = TextWrapping.Wrap,
             Background = Theme.WindowBgBrush,

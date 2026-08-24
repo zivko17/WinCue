@@ -251,6 +251,9 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - **Agrupar con `Ctrl+G`.** Antes de esto, en Secuence no había forma de meter
   un cue dentro de un grupo: se podía crear el GROUP y nada más.
 - **Menú contextual de la tabla** con las acciones de WinCue.
+- **Barra de estado con historial**: el mensaje se borra solo a los 4 s y
+  queda apuntado; el boton lo abre y se enciende en ambar si el mensaje era
+  un aviso (WinCue.Presentation.StatusLog decide que cuenta como tal).
 - **Soltar archivos del Explorador sobre la tabla** — alta por el mismo
   camino que el botón IMPORTAR. En modo SHOW se rechaza ya en el `DragOver`,
   para que el cursor lo diga antes de soltar.
@@ -272,7 +275,6 @@ ha movido a la lista de arriba):
 - **Reordenar filas arrastrándolas** dentro de la tabla. Es la OTRA mitad del
   `Drop` de WinCue (formato `"WinCueRow"` → `OnMoveCue`); soltar archivos ya
   está. En Secuence se reordena desde el timeline, no desde la tabla.
-- **Barra de estado.**
 - **Timeline: el cursor de edición** con scrub y doble clic (clic en la regla
   lo coloca, doble clic reproduce desde ahí). Es lo único que queda de la
   interacción del timeline.

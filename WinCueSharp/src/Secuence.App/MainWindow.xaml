@@ -882,9 +882,22 @@
                     <ColumnDefinition Width="*"/>
                     <ColumnDefinition Width="Auto"/>
                 </Grid.ColumnDefinitions>
-                <TextBlock x:Name="EstadoTexto" Grid.Column="0"
-                           Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
-                           FontSize="13" TextWrapping="Wrap"/>
+                <!-- Botón de historial + texto, en la misma celda: el botón a
+                     la izquierda y el mensaje detrás, como en WinCue
+                     (LogButton + StatusLabel dentro de su DockPanel). -->
+                <StackPanel Grid.Column="0" Orientation="Horizontal">
+                    <Button x:Name="LogButton" Click="OnShowStatusLog"
+                            Padding="4,0" Margin="0,0,8,0" MinWidth="0"
+                            Background="Transparent" BorderThickness="0"
+                            Foreground="{x:Bind local:Theme.TextDimBrush}">
+                        <TextBlock x:Name="LogButtonIcon"
+                                   FontFamily="{x:Bind local:IconFont.Font}" FontSize="14"/>
+                    </Button>
+                    <TextBlock x:Name="EstadoTexto"
+                               Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                               FontSize="13" TextWrapping="Wrap"
+                               VerticalAlignment="Center"/>
+                </StackPanel>
                 <TextBlock x:Name="TallyLabel" Grid.Column="1" Text="SALIDA: NEGRO"
                            Foreground="{x:Bind local:Theme.TextTertiaryBrush}"
                            FontSize="12" Margin="12,0,0,0" VerticalAlignment="Center"/>
