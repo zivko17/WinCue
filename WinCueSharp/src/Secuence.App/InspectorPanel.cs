@@ -66,10 +66,11 @@
 // modo FULL/CUSTOM, aspecto, escala, posición y rotación, con el mismo
 // GeometryCanvas (Win2D) que WinCue.App.GeometryCanvasControl (WPF) — el
 // CÁLCULO de coordenadas es compartido (WinCue.Presentation.GeometryLayout),
-// ver GeometryCanvas.cs para el detalle. Sin el compositor multi-salida
-// (opacidad, canvas/output por cue) ni el visor de edición con fotograma fijo
-// — eso pide controles y una ventana que Secuence no tiene todavía; ver la
-// cabecera de GeometryCanvas.cs para el porqué exacto.
+// ver GeometryCanvas.cs para el detalle. Con la opacidad del compositor y la
+// salida de vídeo por cue, en su columna derecha, igual que WinCue. Sigue
+// fuera el VISOR DE EDICIÓN con fotograma fijo que WinCue pone a la derecha
+// de esa pestaña — eso pide una ventana de vídeo que Secuence no tiene
+// todavía; ver la cabecera de GeometryCanvas.cs para el porqué exacto.
 //
 // EDICIÓN EN VIVO: ningún campo se deshabilita por que el cue esté sonando.
 // WinCue tampoco lo hace (ver InspectorPanel.cs de WPF, Commit/
@@ -102,6 +103,7 @@ using Microsoft.UI.Xaml.Controls;
 using Microsoft.UI.Xaml.Shapes;
 using Windows.System;
 using Windows.UI;
+using WinCue.Controller;
 using WinCue.Core;
 using WinCue.Presentation;
 
@@ -204,6 +206,13 @@ public sealed class InspectorPanel : ContentControl
     /// reales) — false = vídeo cuyo audio sale por mpv sin espejo.</summary>
     public Func<int, bool>? AudioAnalysisProvider;
 
+    /// <summary>¿El audio de este cue pasa por el rack nativo? Sin proveedor
+    /// cableado se asume el comportamiento clásico (solo los cues de AUDIO
+    /// tienen analizador) — mismo criterio que
+    /// WinCue.App.InspectorPanel.HasAudioAnalysis.</summary>
+    private bool HasAudioAnalysis(Cue cue) =>
+        AudioAnalysisProvider?.Invoke(cue.Id) ?? cue.Type == CueType.Audio;
+
     private readonly EqCurveCanvas _eqCanvas = new();
     private readonly CompCurveCanvas _compCanvas = new();
     private readonly TextBlock _eqReadout = new()
@@ -232,6 +241,8 @@ public sealed class InspectorPanel : ContentControl
     private readonly GeometryCanvas _geoCanvas = new();
     private StackPanel _fullGeoPanel = null!;
     private StackPanel _customGeoPanel = null!;
+    private RadioButton _rbFull = null!;
+    private RadioButton _rbCustom = null!;
     private readonly List<(Button Btn, int Deg)> _rotButtons = new();
 
     /// <summary>Claves cuyo cambio se refleja en el lienzo + paneles + botones
@@ -305,8 +316,12 @@ public sealed class InspectorPanel : ContentControl
         Txt("number", Loc.T("Número:", "Number:"), c => c.Number);
         Txt("name", Loc.T("Nombre:", "Name:"), c => c.Name);
         ColorSwatches();
-        Chk("armed", Loc.T("Armado", "Armed"), c => c.Armed);
-        Chk("flagged", $"{Icons.Flag} Flag", c => c.Flagged, icon: true);
+        // Armado y Flag van EN LA MISMA FILA, como en WinCue (ChkRow): son la
+        // misma decisión —si el cue entra en el GO y si va marcado— y apiladas
+        // estiraban esta columna una fila más que sus dos vecinas.
+        var armedRow = ChkRow();
+        Chk(armedRow, "armed", Loc.T("Armado", "Armed"), c => c.Armed);
+        Chk(armedRow, "flagged", $"{Icons.Flag} Flag", c => c.Flagged, icon: true);
         TxtMultiline("notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
             c => c.Notes);
 
@@ -351,7 +366,9 @@ public sealed class InspectorPanel : ContentControl
         Chk("preserve_pitch",
             Loc.T("Mantener el tono al cambiar la velocidad", "Preserve pitch when changing speed"),
             c => c.PreservePitch);
-        VolumeField();
+        // (Aquí NO va el volumen: en WinCue el fader del cue vive en la
+        // pestaña de Audio, dentro del strip de niveles. Tenerlo en las dos
+        // repartía el mismo mando entre dos pestañas.)
 
         _root = loops[1];
         Header(Loc.T("FUNDIDOS Y RECORTE", "FADES & TRIM"));
@@ -373,7 +390,7 @@ public sealed class InspectorPanel : ContentControl
         GeometrySection();
 
         _audioTab = Tab($"{Icons.Volume} Audio", icon: true);
-        EqSection();
+        AudioTabSections();
 
         IsEnabled = false;   // sin cue seleccionado
         _header.Text = Loc.T("— sin cue seleccionado —", "— no cue selected —");
@@ -724,17 +741,38 @@ public sealed class InspectorPanel : ContentControl
     /// mismo TextBlock (ver IconFont.cs); en WPF no hace falta porque su
     /// fuente compuesta resuelve por rango.</summary>
     private void Chk(string key, string label, Func<Cue, bool> read, bool icon = false)
+        => Chk(_root, key, label, read, icon);
+
+    /// <summary>Casilla dentro de un contenedor CONCRETO — para las que van
+    /// en una fila horizontal compartida (ver <see cref="ChkRow"/>). El
+    /// margen es distinto según dónde caiga: apilada necesita aire arriba y
+    /// abajo, en fila lo necesita a la derecha. Son los dos márgenes de
+    /// WinCue (ChkRow + Chk de allí).</summary>
+    private void Chk(StackPanel target, string key, string label, Func<Cue, bool> read,
+                     bool icon = false)
     {
+        bool inRow = target.Orientation == Orientation.Horizontal;
         var cb = new CheckBox
         {
             Content = icon ? IconLabel(label) : label,
             Foreground = Theme.TextPrimaryBrush,
-            Margin = new Thickness(0, 3, 0, 3),   // ChkRow de WinCue
+            Margin = inRow ? new Thickness(0, 0, 16, 0) : new Thickness(0, 3, 0, 3),
+            VerticalAlignment = VerticalAlignment.Center,
         };
         cb.Checked += (_, _) => Commit(key, true);
         cb.Unchecked += (_, _) => Commit(key, false);
-        _root.Children.Add(cb);
+        target.Children.Add(cb);
         _loaders[key] = c => cb.IsChecked = read(c);
+    }
+
+    /// <summary>Fila horizontal para casillas que se leen JUNTAS (Armado +
+    /// Flag). Mismo helper y mismo margen que WinCue.App.InspectorPanel.</summary>
+    private StackPanel ChkRow()
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
+        _root.Children.Add(row);
+        return row;
     }
 
     /// <summary>Etiqueta que empieza por un glifo de icono: glifo con Phosphor
@@ -882,11 +920,14 @@ public sealed class InspectorPanel : ContentControl
         _root = cols[0];
         Header(Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
         Txt("hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
+        Cmb("retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
+            CueChoices.RetriggerModes);
+        // La advertencia va DEBAJO de los dos campos, no en medio: entre
+        // «Hotkey» y «Segundo disparo» rompía el orden que tiene WinCue y
+        // separaba dos campos que se leen juntos.
         Note(Loc.T(
             "Los hotkeys por cue todavía no se atienden en Secuence:\nel campo se guarda y WinCue lo respeta.",
             "Per-cue hotkeys are not handled in Secuence yet:\nthe field is saved and WinCue honours it."));
-        Cmb("retrigger", Loc.T("Segundo disparo:", "Second trigger:"), c => c.Retrigger.ToString(),
-            CueChoices.RetriggerModes);
 
         Header(Loc.T("FUNDIR Y PARAR OTROS", "FADE & STOP OTHERS"));
         Chk("fade_others",
@@ -905,7 +946,7 @@ public sealed class InspectorPanel : ContentControl
                    "Triggers every day at that time\nwhile the show is open."));
 
         _root = cols[2];
-        Header("MIDI");
+        Header(Loc.T("MIDI (backend en fase 6)", "MIDI (backend in phase 6)"));
         Chk("midi_enabled", Loc.T("Disparo por MIDI", "MIDI trigger"), c => c.MidiEnabled);
         Cmb("midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
             CueChoices.MidiTypes);
@@ -965,11 +1006,6 @@ public sealed class InspectorPanel : ContentControl
     /// demás, la lista viene de CueChoices: repetir aquí las opciones de un
     /// enum es exactamente la copia que la regla 2 prohíbe.</summary>
     private void Cmb(string key, string label, Func<Cue, string> read,
-                     params (string Value, string Label)[] items) =>
-        Cmb(key, label, read,
-            items.Select(i => new CueChoice(i.Value, i.Label)).ToList());
-
-    private void Cmb(string key, string label, Func<Cue, string> read,
                      IReadOnlyList<CueChoice> items)
     {
         var row = LabeledRow(label);
@@ -1028,34 +1064,302 @@ public sealed class InspectorPanel : ContentControl
         _loaders["file_path"] = c => tb.Text = c.FilePath;
     }
 
-    /// <summary>Volumen: mismo fader (rango y ley de WinCue.Core.AudioLevels,
-    /// COMPARTIDO con el mixer y el inspector de WPF) sin el VU ni los
-    /// botones MUTE/CUE — eso es "rack de audio" y queda fuera de esta
-    /// pasada (ver el encargo). El Commit real vive en el ValueChanged del
-    /// slider: escribir la cifra en dB solo MUEVE el slider (igual patrón
-    /// que el inspector de WPF), así que solo hay un sitio que compromete el
-    /// campo al motor.</summary>
-    private void VolumeField()
+    // ==================================================================
+    // Pestaña de AUDIO: niveles del cue a la izquierda, rack (ganancia, EQ y
+    // compresor) a la derecha — el MISMO reparto que
+    // WinCue.App.InspectorPanel.BuildAudioTab, que dockea el bloque de
+    // niveles a la izquierda y deja el editor de EQ llenando el resto.
+    //
+    // El fader de VOLUMEN vive AQUÍ y no en «Tiempo y bucles»: es el mismo
+    // mando que el del strip de la mesa (misma ley, mismo tope), y tenerlo en
+    // dos pestañas repartía la misma decisión entre dos sitios.
+    // ==================================================================
+
+    private void AudioTabSections()
     {
-        var row = LabeledRow(Loc.T("Volumen:", "Volume:"));
+        var page = _root;
+
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+        grid.ColumnDefinitions.Add(
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var levels = new StackPanel();
+        var rack = new StackPanel();
+        Grid.SetColumn(levels, 0);
+        Grid.SetColumn(rack, 2);
+        grid.Children.Add(levels);
+        grid.Children.Add(rack);
+        page.Children.Add(grid);
+
+        _root = levels;
+        LevelsSection();
+        _root = rack;
+        EqSection();
+        _root = page;
+    }
+
+    // ── Strip de niveles del cue (el mismo que en la mesa) ──────────────
+    private readonly VuMeterCanvas _levelVu = new(vertical: true);
+    private readonly VuMeterCanvas _levelVuR = new(vertical: true);
+    private Slider? _volSlider;
+    private TextBox? _volBox;
+    private Button _muteBtn = null!;
+    private Button _soloBtn = null!;
+
+    /// <summary>Estado de mute/solo de la mesa — el MISMO board que usa el
+    /// mixer (MixerPanel.Board). No son dos juegos de botones que haya que
+    /// mantener de acuerdo: es el mismo estado visto desde dos sitios.</summary>
+    public MuteSoloBoard? MuteSolo;
+    /// <summary>Avisar a la mesa de que el board cambió, para que repinte sus
+    /// strips.</summary>
+    public Action? MuteSoloChanged;
+    /// <summary>Pedir la preescucha (PFL) de un cue por los cascos.</summary>
+    public Action<int>? CueRequested;
+    /// <summary>Id del cue que está ahora en el bus de audición, para encender
+    /// el botón CUE.</summary>
+    public Func<int>? AuditionSourceId;
+    /// <summary>false si no hay dispositivo de cascos: sin él, CUE no puede
+    /// hacer nada y va deshabilitado en vez de encenderse sin sonar.</summary>
+    public Func<bool>? CueAvailable;
+
+    /// <summary>Botón de la botonera de niveles, con la palabra entera —
+    /// mismas medidas que en el strip de la mesa (UiMetrics).</summary>
+    private static Button LevelButton(string text, string tip)
+    {
+        var b = new Button
+        {
+            Content = text,
+            Width = UiMetrics.StripButtonWidth,
+            Height = UiMetrics.StripButtonHeight,
+            FontSize = 11,
+            FontWeight = FontWeights.Bold,
+            Padding = new Thickness(0),
+            Margin = new Thickness(2, 0, 2, 0),
+            Background = Theme.ButtonBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+        };
+        ToolTipService.SetToolTip(b, tip);
+        return b;
+    }
+
+    /// <summary>Pone los botones al día con lo que dice el board — mismo
+    /// criterio que WinCue.App.InspectorPanel.RefreshMuteSolo: sin strip vivo
+    /// no hay nada que silenciar, y sin cascos no hay dónde pinchar.</summary>
+    private void RefreshMuteSolo()
+    {
+        bool live = _cue is not null && MuteSolo?.Knows(_cue.Id) == true;
+        _muteBtn.IsEnabled = live;
+
+        bool hayCascos = CueAvailable?.Invoke() ?? true;
+        _soloBtn.IsEnabled = live && hayCascos;
+        ToolTipService.SetToolTip(_soloBtn, hayCascos
+            ? Loc.T("Escuchar este cue por los cascos (no toca la sala)",
+                    "Listen to this cue on headphones (does not touch the room)")
+            : Loc.T("Sin dispositivo de audición: elígelo en Ajustes → Audio",
+                    "No audition device: pick one in Settings → Audio"));
+
+        bool muted = live && MuteSolo!.IsMuted(_cue!.Id);
+        bool soloed = _cue is not null && AuditionSourceId?.Invoke() == _cue.Id;
+        _muteBtn.Background = muted ? Theme.PgmBrush : Theme.ButtonBgBrush;
+        _muteBtn.Foreground = muted ? Theme.Solid(Colors.Black) : Theme.TextPrimaryBrush;
+        _soloBtn.Background = soloed ? Theme.StandbyBrush : Theme.ButtonBgBrush;
+        _soloBtn.Foreground = soloed ? Theme.Solid(Colors.Black) : Theme.TextPrimaryBrush;
+    }
+
+    /// <summary>La mesa cambió de estado (o entró/salió un cue): repintar.</summary>
+    public void RefreshMuteSoloButtons() => RefreshMuteSolo();
+
+    /// <summary>VU de ESTE cue, si es el que está en el inspector. Lo llama la
+    /// ventana con los mismos niveles que manda al strip de la mesa: el mismo
+    /// cue no puede medir distinto según dónde se mire.</summary>
+    public void UpdateCueLevel(int cueId, float left, float right)
+    {
+        if (_cue is null || _cue.Id != cueId)
+            return;
+        _levelVu.SetLevel(left);
+        _levelVuR.SetLevel(right);
+    }
+
+    /// <summary>Coloca el fader donde diga el MODELO, para que el del
+    /// inspector y el del strip sean EL MISMO fader. No toca nada mientras el
+    /// operador tenga este fader agarrado o esté escribiendo la cifra —
+    /// pelearse con su mano es peor que ir desincronizado un segundo.</summary>
+    public void SyncVolumeFromModel(Cue? cue)
+    {
+        if (cue is null || _cue is null || cue.Id != _cue.Id || _volSlider is null)
+            return;
+        if (_volSlider.FocusState != FocusState.Unfocused)
+            return;
+        if (_volBox is not null && _volBox.FocusState != FocusState.Unfocused)
+            return;
+        double target = AudioLevels.GainToPosition(cue.Volume) * VolPosSteps;
+        if (Math.Abs(_volSlider.Value - target) < 1.0)
+            return;
+        bool was = _loading;
+        _loading = true;
+        try
+        {
+            _volSlider.Value = target;
+            if (_volBox is not null)
+                _volBox.Text = VolumeLabel(cue.Volume);
+        }
+        finally { _loading = was; }
+    }
+
+    /// <summary>Bloque de niveles: rótulo VOL, lectura en dB, escala + fader +
+    /// VU estéreo y la botonera MUTE/CUE, en ese orden y dentro de su caja —
+    /// el mismo strip que en la mesa (ver MixerPanel.Strip.Init) y el mismo
+    /// orden que WinCue.App.InspectorPanel.BuildLevels.</summary>
+    private void LevelsSection()
+    {
+        var faderCol = new StackPanel { Margin = new Thickness(4, 0, 0, 0) };
+
+        faderCol.Children.Add(new TextBlock
+        {
+            Text = "VOL",
+            FontSize = 10,
+            FontWeight = FontWeights.Bold,
+            Foreground = Theme.TextDimBrush,
+            HorizontalAlignment = HorizontalAlignment.Center,
+        });
+
+        // LECTURA EN dB, EDITABLE y ARRIBA — como en el strip de la mesa. El
+        // ancho es FIJO: el texto crece al subir el volumen («+0,0 dB (100%)»
+        // → «+12,0 dB (400%)») y sin ancho reservado empujaba a su vecino.
+        var box = new TextBox
+        {
+            FontFamily = new Microsoft.UI.Xaml.Media.FontFamily("Consolas"),
+            FontSize = 12,
+            Foreground = Theme.GoBrush,
+            Background = Theme.TransparentBrush,
+            BorderThickness = new Thickness(0),
+            Padding = new Thickness(0),
+            Width = UiMetrics.DbReadoutWideWidth,
+            TextAlignment = TextAlignment.Center,
+            Text = VolumeLabel(1.0),
+        };
+        ToolTipService.SetToolTip(box,
+            Loc.T("Escribe los dB y pulsa Intro", "Type the dB value and press Enter"));
+        faderCol.Children.Add(new Border
+        {
+            Background = Theme.SunkenBgBrush,
+            BorderBrush = Theme.DividerBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(4, 2, 4, 2),
+            Margin = new Thickness(0, 4, 0, 4),
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Child = box,
+        });
+
+        // El fader recorre POSICIÓN (0..1000), no ganancia: la ley la reparte
+        // AudioLevels, COMPARTIDA con el mixer y con el inspector de WinCue.
         var slider = new Slider
         {
-            Minimum = 0, Maximum = VolPosSteps, Width = 160,
-            VerticalAlignment = VerticalAlignment.Center,
+            Orientation = Orientation.Vertical,
+            Minimum = 0, Maximum = VolPosSteps,
+            Width = UiMetrics.FaderWidth, Height = UiMetrics.FaderHeight,
+            HorizontalAlignment = HorizontalAlignment.Center,
         };
-        var box = MakeTextBox(90);
+        ToolTipService.SetToolTip(slider, Loc.T(
+            "Volumen del cue: en vivo si está sonando.",
+            "Cue volume: live if it is playing."));
+
+        var faderRow = new StackPanel
+        { Orientation = Orientation.Horizontal, HorizontalAlignment = HorizontalAlignment.Center };
+        faderRow.Children.Add(new FaderScaleCanvas
+        { Width = UiMetrics.FaderScaleWidth, Height = UiMetrics.FaderHeight });
+        faderRow.Children.Add(slider);
+        // VU ESTÉREO pegado al fader, con las mismas medidas que en la mesa:
+        // dos medidores de la misma señal con distinto ancho se leen como si
+        // midieran cosas distintas.
+        _levelVu.Width = 7;
+        _levelVu.Height = UiMetrics.FaderHeight;
+        _levelVu.Margin = new Thickness(6, 0, 0, 0);
+        _levelVuR.Width = 7;
+        _levelVuR.Height = UiMetrics.FaderHeight;
+        _levelVuR.Margin = new Thickness(1, 0, 0, 0);
+        ToolTipService.SetToolTip(_levelVu, Loc.T(
+            "VU real de ESTE cue (cues de AUDIO y vídeos con AUDIO ESPEJO).",
+            "THIS cue's real VU (AUDIO cues and videos with MIRRORED AUDIO)."));
+        faderRow.Children.Add(_levelVu);
+        faderRow.Children.Add(_levelVuR);
+        faderCol.Children.Add(faderRow);
+
+        // BOTONERA, la misma que en la mesa y sobre el MISMO board. Solo valen
+        // con el cue SONANDO —es cuando existe su strip—, así que fuera de eso
+        // van deshabilitados en vez de mentir.
+        var btnRow = new StackPanel
+        {
+            Orientation = Orientation.Horizontal,
+            HorizontalAlignment = HorizontalAlignment.Center,
+            Margin = new Thickness(0, 8, 0, 0),
+        };
+        _muteBtn = LevelButton("MUTE", Loc.T("Silenciar este cue", "Mute this cue"));
+        // CUE, no solo: manda el cue a los CASCOS sin tocar la sala.
+        _soloBtn = LevelButton("CUE", Loc.T(
+            "Escuchar este cue por los cascos (no toca la sala)",
+            "Listen to this cue on headphones (does not touch the room)"));
+        btnRow.Children.Add(_muteBtn);
+        btnRow.Children.Add(_soloBtn);
+        faderCol.Children.Add(btnRow);
+
+        _muteBtn.Click += (_, _) =>
+        {
+            if (_cue is null) return;
+            MuteSolo?.ToggleMute(_cue.Id);
+            MuteSoloChanged?.Invoke();
+            RefreshMuteSolo();
+        };
+        _soloBtn.Click += (_, _) =>
+        {
+            if (_cue is null) return;
+            CueRequested?.Invoke(_cue.Id);
+            MuteSoloChanged?.Invoke();
+            RefreshMuteSolo();
+        };
+        _loaders["__mute_solo"] = _ => RefreshMuteSolo();
+
+        _root.Children.Add(new Border
+        {
+            Background = Theme.ToolbarBgBrush,
+            BorderBrush = Theme.BorderBrush,
+            BorderThickness = new Thickness(1),
+            CornerRadius = new CornerRadius(4),
+            Padding = new Thickness(8, 6, 8, 6),
+            VerticalAlignment = VerticalAlignment.Top,
+            HorizontalAlignment = HorizontalAlignment.Left,
+            Child = faderCol,
+        });
+
+        // El VU por cue solo existe donde hay rack nativo (cues de AUDIO y
+        // vídeo con audio espejo). El vídeo cuyo audio sale por mpv no es
+        // medible → sin VU, igual que en la mesa.
+        _conditional.Add((_levelVu, HasAudioAnalysis));
+        _conditional.Add((_levelVuR, HasAudioAnalysis));
+
+        _volSlider = slider;
+        _volBox = box;
 
         slider.ValueChanged += (_, e) =>
         {
             double v = AudioLevels.PositionToGain(e.NewValue / VolPosSteps);
             box.Text = VolumeLabel(v);
-            Commit("volume", v);
+            if (_loading) return;
+            Commit("volume", v);   // en vivo: el controlador lo aplica al motor
         };
 
+        // Escribir la cifra solo MUEVE el fader; quien compromete el valor al
+        // motor es el ValueChanged de arriba. Así hay UN solo sitio que
+        // commitea el volumen — mismo patrón que en WinCue.
         void CommitTypedVolume()
         {
             if (AudioLevels.ParseDb(box.Text) is not double gain)
             {
+                // Ilegible: se repone lo que había. Un texto que no se entiende
+                // no puede acabar en silencio, que es el peor sitio al que caer.
                 box.Text = VolumeLabel(AudioLevels.PositionToGain(slider.Value / VolPosSteps));
                 return;
             }
@@ -1069,10 +1373,14 @@ public sealed class InspectorPanel : ContentControl
                 CommitTypedVolume();
                 e.Handled = true;
             }
+            else if (e.Key == VirtualKey.Escape)
+            {
+                box.Text = VolumeLabel(AudioLevels.PositionToGain(slider.Value / VolPosSteps));
+                e.Handled = true;
+            }
         };
+        box.GotFocus += (_, _) => box.SelectAll();
 
-        row.Children.Add(slider);
-        row.Children.Add(box);
         _loaders["volume"] = c =>
         {
             slider.Value = AudioLevels.GainToPosition(c.Volume) * VolPosSteps;
@@ -1081,82 +1389,102 @@ public sealed class InspectorPanel : ContentControl
     }
 
     private static string VolumeLabel(double v) =>
-        v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB";
+        v <= 0.0001 ? "−∞ dB" : $"{20.0 * Math.Log10(v):+0.0;-0.0} dB ({v * 100:0}%)";
 
     // ==================================================================
-    // Geometría de vídeo: modo, aspecto, escala/posición/rotación y el
-    // lienzo interactivo (GeometryCanvas, Win2D). Mismo reparto de campos
-    // que WinCue.App.InspectorPanel.BuildGeometry, en la columna única de
-    // este formulario (Secuence no tiene aún el layout a dos columnas de
-    // WPF — ver la cabecera del archivo).
+    // Geometría de vídeo: modo, aspecto, escala/posición/rotación, opacidad
+    // del compositor, salida del cue y el lienzo interactivo (GeometryCanvas,
+    // Win2D). Mismo reparto y mismo ORDEN que
+    // WinCue.App.InspectorPanel.BuildGeometry: MODO │ COMPOSITOR + SALIDA │
+    // lienzo. En una sola columna los controles no cabían de una vez.
     // ==================================================================
-
-    /// <summary>Campo numérico (double) con commit al perder foco/Enter —
-    /// mismo contrato que TimeF/Int, sin el formato de tiempo.</summary>
-    private void Dbl(string key, string label, Func<Cue, double> read, string fmt = "0.##")
-    {
-        var row = LabeledRow(label);
-        var tb = MakeTextBox(80);
-        WireTextCommit(tb, key, () =>
-            double.TryParse(tb.Text.Replace(',', '.'), NumberStyles.Float, CultureInfo.InvariantCulture, out double v)
-                ? v : (object?)null);
-        row.Children.Add(tb);
-        _loaders[key] = c => tb.Text = read(c).ToString(fmt, CultureInfo.InvariantCulture);
-    }
 
     private void GeometrySection()
     {
-        // Toda la sección (cabecera, modo, paneles FULL/CUSTOM y lienzo) solo
-        // tiene sentido para cues de VÍDEO — a diferencia del resto de campos
-        // de esta pasada (tiempos, fundidos…), que WinCue tampoco esconde por
-        // tipo. VisibleIf lo evalúa SetCue; aquí solo se recogen los
-        // elementos de nivel superior para registrarlos.
+        // Toda la pestaña solo tiene sentido para cues de VÍDEO — a diferencia
+        // del resto de campos del inspector (tiempos, fundidos…), que WinCue
+        // tampoco esconde por tipo.
         bool VideoOnly(Cue c) => c.Type == CueType.Video;
 
-        var header = LastAdded(() => Header(Loc.T("GEOMETRÍA DE VÍDEO", "VIDEO GEOMETRY")));
-        _conditional.Add((header, VideoOnly));
+        var page = _root;
 
-        var modeRow = LastAdded(() => Cmb("geo_mode", Loc.T("Modo:", "Mode:"),
-            c => c.GeoMode.ToString().ToUpperInvariant(),
-            ("FULL", Loc.T("Full — llena el canvas", "Full — fills the canvas")),
-            ("CUSTOM", Loc.T("Custom — posición manual", "Custom — manual position"))));
-        _conditional.Add((modeRow, VideoOnly));
+        // MODO │ COMPOSITOR + SALIDA │ LIENZO — el mismo reparto que
+        // WinCue.App.InspectorPanel.BuildGeometry: dos columnas de controles
+        // a la izquierda y el lienzo llenando lo que queda. En una sola
+        // columna los controles pasaban del alto del panel y aparecía una
+        // barra de desplazamiento: en una superficie de directo, un control
+        // que hay que buscar deslizando es un control que no está.
+        var grid = new Grid();
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+        grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+        grid.ColumnDefinitions.Add(
+            new ColumnDefinition { Width = new GridLength(1, GridUnitType.Star) });
+
+        var controls = new StackPanel { Width = 330 };
+        var controlsRight = new StackPanel { Width = 250 };
+        Grid.SetColumn(controls, 0);
+        Grid.SetColumn(controlsRight, 2);
+        grid.Children.Add(controls);
+        grid.Children.Add(controlsRight);
+        page.Children.Add(grid);
+        _conditional.Add((grid, VideoOnly));
+
+        // ── Columna IZQUIERDA: MODO ────────────────────────────────────
+        _root = controls;
+        Header(Loc.T("MODO", "MODE"));
+
+        // DOS RADIOS, no un desplegable: son dos modos excluyentes y se ven
+        // los dos a la vez, igual que en WinCue. Con un combo había que
+        // abrirlo para saber qué otras opciones existían.
+        _rbFull = new RadioButton
+        {
+            Content = Loc.T("Superficie completa — llena el canvas",
+                            "Full surface — fills the canvas"),
+            GroupName = "geo_mode_grp",
+            Margin = new Thickness(0, 2, 0, 2),
+            Foreground = Theme.TextPrimaryBrush,
+        };
+        _rbCustom = new RadioButton
+        {
+            Content = Loc.T("Posición manual — escala, posición y giro",
+                            "Manual position — scale, position and rotation"),
+            GroupName = "geo_mode_grp",
+            Margin = new Thickness(0, 2, 0, 2),
+            Foreground = Theme.TextPrimaryBrush,
+        };
+        _rbFull.Checked += (_, _) => OnGeoModeChanged(false);
+        _rbCustom.Checked += (_, _) => OnGeoModeChanged(true);
+        controls.Children.Add(_rbFull);
+        controls.Children.Add(_rbCustom);
 
         // ── Panel FULL ──────────────────────────────────────────────────
-        _fullGeoPanel = new StackPanel();
-        _root.Children.Add(_fullGeoPanel);
-        _conditional.Add((_fullGeoPanel, VideoOnly));
-        {
-            var aspectRow = new CheckBox
-            {
-                Content = Loc.T("Mantener relación de aspecto", "Keep aspect ratio"),
-                Foreground = Theme.TextPrimaryBrush,
-                Margin = new Thickness(10, 3, 10, 3),
-            };
-            aspectRow.Checked += (_, _) => Commit("preserve_aspect", true);
-            aspectRow.Unchecked += (_, _) => Commit("preserve_aspect", false);
-            _fullGeoPanel.Children.Add(aspectRow);
-            _loaders["preserve_aspect"] = c => aspectRow.IsChecked = c.PreserveAspect;
-        }
-        MoveLastRowInto(_fullGeoPanel,
-            () => Dbl("scale", Loc.T("Escala (%):", "Scale (%):"), c => c.Scale, "0"));
+        _fullGeoPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        controls.Children.Add(_fullGeoPanel);
+        Chk(_fullGeoPanel, "preserve_aspect",
+            Loc.T("Mantener relación de aspecto", "Keep aspect ratio"),
+            c => c.PreserveAspect);
+        SliderF(_fullGeoPanel, "scale", Loc.T("Escala (%):", "Scale (%):"),
+            10, 400, c => c.Scale, "0");
 
         // ── Panel CUSTOM ────────────────────────────────────────────────
-        _customGeoPanel = new StackPanel();
-        _root.Children.Add(_customGeoPanel);
-        _conditional.Add((_customGeoPanel, VideoOnly));
-        MoveLastRowInto(_customGeoPanel,
-            () => Dbl("scale_x", Loc.T("Escala (×):", "Scale (×):"), c => c.ScaleX, "0.00"));
-        MoveLastRowInto(_customGeoPanel,
-            () => Dbl("translate_x", Loc.T("Posición X (px):", "Position X (px):"), c => c.TranslateX, "0"));
-        MoveLastRowInto(_customGeoPanel,
-            () => Dbl("translate_y", Loc.T("Posición Y (px):", "Position Y (px):"), c => c.TranslateY, "0"));
+        _customGeoPanel = new StackPanel { Margin = new Thickness(0, 8, 0, 0) };
+        controls.Children.Add(_customGeoPanel);
+        SliderF(_customGeoPanel, "scale_x", Loc.T("Escala (×):", "Scale (×):"),
+            0.1, 4.0, c => c.ScaleX, "0.00");
+        SliderF(_customGeoPanel, "translate_x", Loc.T("Posición X (px):", "Position X (px):"),
+            -960, 960, c => c.TranslateX, "0");
+        SliderF(_customGeoPanel, "translate_y", Loc.T("Posición Y (px):", "Position Y (px):"),
+            -540, 540, c => c.TranslateY, "0");
 
         var rotRow = new StackPanel
-        { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 4, 10, 2) };
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 4, 0, 2) };
         rotRow.Children.Add(new TextBlock
         {
-            Text = Loc.T("Rotación:", "Rotation:"), Width = 150,
+            // 112, el de WinCue: es la misma fila con los mismos cuatro
+            // botones y tiene que empezar donde empiezan los deslizadores.
+            Text = Loc.T("Rotación:", "Rotation:"), Width = 112,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Theme.TextTertiaryBrush,
         });
@@ -1164,7 +1492,8 @@ public sealed class InspectorPanel : ContentControl
         {
             var btn = new Button
             {
-                Content = $"{deg}°", Width = 50,
+                Content = $"{deg}°", Width = 46,
+                Padding = new Thickness(0),
                 Margin = new Thickness(0, 0, 4, 0),
                 Background = Theme.ButtonBgBrush,
                 Foreground = Theme.TextPrimaryBrush,
@@ -1179,22 +1508,202 @@ public sealed class InspectorPanel : ContentControl
         }
         _customGeoPanel.Children.Add(rotRow);
 
-        // El lienzo ocupa el ancho del formulario, con la misma proporción
-        // 16:9 aproximada que WinCue le da en su columna derecha.
+        // CENTRAR y RESTABLECER: los dos atajos de WinCue. Sin ellos, volver
+        // de una posición manual a la de partida era teclear cuatro campos.
+        var btnRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 8, 0, 0) };
+        var btnCenter = new Button
+        {
+            Content = IconLabel($"{Icons.Target} {Loc.T("Centrar", "Center")}"),
+            Padding = new Thickness(10, 4, 10, 4),
+            Background = Theme.ButtonBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+        };
+        var btnReset = new Button
+        {
+            Content = IconLabel($"{Icons.Reset} {Loc.T("Restablecer", "Reset")}"),
+            Padding = new Thickness(10, 4, 10, 4),
+            Margin = new Thickness(6, 0, 0, 0),
+            Background = Theme.ButtonBgBrush,
+            Foreground = Theme.TextPrimaryBrush,
+        };
+        btnCenter.Click += (_, _) =>
+        {
+            Commit("translate_x", 0.0);
+            Commit("translate_y", 0.0);
+        };
+        btnReset.Click += (_, _) =>
+        {
+            Commit("scale_x", 1.0);
+            Commit("translate_x", 0.0);
+            Commit("translate_y", 0.0);
+            Commit("rotate_z", 0.0);
+        };
+        btnRow.Children.Add(btnCenter);
+        btnRow.Children.Add(btnReset);
+        _customGeoPanel.Children.Add(btnRow);
+
+        // ── Columna DERECHA: compositor y salida ───────────────────────
+        _root = controlsRight;
+        Header(Loc.T("COMPOSITOR", "COMPOSITOR"));
+        var compRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        compRow.Children.Add(new TextBlock
+        {
+            Text = Loc.T("Opacidad %:", "Opacity %:"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Theme.TextTertiaryBrush,
+            Margin = new Thickness(0, 0, 4, 0),
+        });
+        var opacityBox = MakeTextBox(48);
+        WireTextCommit(opacityBox, "opacity", () =>
+            double.TryParse(opacityBox.Text.Replace(',', '.'),
+                NumberStyles.Float, CultureInfo.InvariantCulture, out double ov)
+                ? ov : (object?)null);
+        compRow.Children.Add(opacityBox);
+        controlsRight.Children.Add(compRow);
+        _loaders["opacity"] = c =>
+            opacityBox.Text = c.Opacity.ToString("0.#", CultureInfo.InvariantCulture);
+
+        // ── Salida de vídeo del cue (multi-monitor estilo Watchout) ────
+        Header(Loc.T("SALIDA", "OUTPUT"));
+        var outRow = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 0) };
+        outRow.Children.Add(new TextBlock
+        {
+            Text = Loc.T("Salida:", "Output:"),
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Theme.TextTertiaryBrush,
+            Margin = new Thickness(0, 0, 4, 0),
+        });
+        var screenCombo = new ComboBox { MinWidth = 170 };
+        for (int i = 0; i < 4; i++)
+            screenCombo.Items.Add(new ComboBoxItem
+            {
+                Content = i == 0
+                    ? Loc.T("Salida 1 (principal)", "Output 1 (main)")
+                    : Loc.T($"Salida {i + 1}", $"Output {i + 1}"),
+                Tag = i,
+            });
+        screenCombo.SelectionChanged += (_, _) =>
+        {
+            if (_loading || _cue is null) return;
+            if ((screenCombo.SelectedItem as ComboBoxItem)?.Tag is int scr)
+                Commit("video_output", scr);
+        };
+        outRow.Children.Add(screenCombo);
+        controlsRight.Children.Add(outRow);
+
+        var outNote = new TextBlock
+        {
+            Text = Loc.T("El monitor de cada salida se asigna en Ajustes → Vídeo.",
+                         "Each output's monitor is set in Settings → Video."),
+            Foreground = Theme.TextDimBrush,
+            FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+        };
+        controlsRight.Children.Add(outNote);
+        var canvasNote = new TextBlock
+        {
+            Text = Loc.T(
+                "MODO CANVAS activo: el cue se coloca en el canvas y cada salida muestra su recorte (Ajustes → Vídeo).",
+                "CANVAS MODE active: the cue is placed on the canvas and each output shows its crop (Settings → Video)."),
+            Foreground = Theme.TextDimBrush,
+            FontSize = 11, Margin = new Thickness(0, 3, 0, 0),
+            TextWrapping = TextWrapping.Wrap,
+            Visibility = Visibility.Collapsed,
+        };
+        controlsRight.Children.Add(canvasNote);
+        _loaders["video_output"] = c =>
+        {
+            screenCombo.SelectedIndex = Math.Clamp(c.VideoOutput, 0, 3);
+            // Con el modo canvas la selección de salida SE IGNORA: ocultarla,
+            // porque mostrar un control muerto invita a errores en directo.
+            bool canvasMode = SettingsManager.Instance.Get("video_canvas_mode", false)
+                && SettingsManager.Instance.Get("video_compositor", false);
+            outRow.Visibility = canvasMode ? Visibility.Collapsed : Visibility.Visible;
+            outNote.Visibility = canvasMode ? Visibility.Collapsed : Visibility.Visible;
+            canvasNote.Visibility = canvasMode ? Visibility.Visible : Visibility.Collapsed;
+        };
+
+        // ── El lienzo llena lo que queda a la derecha ───────────────────
         _geoCanvas.Height = UiMetrics.TrimBarHeight * 3;
-        _geoCanvas.Margin = new Thickness(10, 8, 10, 10);
+        _geoCanvas.HorizontalAlignment = HorizontalAlignment.Stretch;
+        _geoCanvas.VerticalAlignment = VerticalAlignment.Top;
+        _geoCanvas.Margin = new Thickness(0, 6, 0, 10);
         _geoCanvas.Translated += (tx, ty) =>
         {
             Commit("translate_x", tx);
             Commit("translate_y", ty);
         };
-        // Commit dispara SyncGeometryUi, así que el campo "Escala (×)" sigue
-        // al tirador solo; no hace falta tocarlo aquí.
+        // Commit dispara SyncGeometryUi, así que el deslizador de «Escala (×)»
+        // sigue al tirador solo; no hace falta tocarlo aquí.
         _geoCanvas.Scaled += sx => Commit("scale_x", sx);
-        _root.Children.Add(_geoCanvas);
-        _conditional.Add((_geoCanvas, VideoOnly));
+        Grid.SetColumn(_geoCanvas, 4);
+        grid.Children.Add(_geoCanvas);
 
         _loaders["__geo_sync"] = SyncGeometryUi;
+        _root = page;
+    }
+
+    /// <summary>Cambio de modo desde los radios. Con _loading puesto es la
+    /// propia carga del cue moviendo el radio, no el operador.</summary>
+    private void OnGeoModeChanged(bool custom)
+    {
+        if (_loading || _cue is null)
+            return;
+        Commit("geo_mode", custom ? "CUSTOM" : "FULL");
+    }
+
+    /// <summary>Deslizador + cifra editable, como en WinCue: el deslizador
+    /// para buscar y la cifra para clavar el valor. Los dos comprometen el
+    /// mismo campo.</summary>
+    private void SliderF(StackPanel target, string key, string label,
+                         double min, double max, Func<Cue, double> read, string fmt)
+    {
+        var row = new StackPanel
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 3, 0, 3) };
+        row.Children.Add(new TextBlock
+        {
+            Text = label, Width = 112,
+            VerticalAlignment = VerticalAlignment.Center,
+            Foreground = Theme.TextTertiaryBrush,
+        });
+        var slider = new Slider
+        {
+            Minimum = min, Maximum = max, Width = 140,
+            VerticalAlignment = VerticalAlignment.Center,
+        };
+        var box = MakeTextBox(52);
+        box.Margin = new Thickness(6, 0, 0, 0);
+
+        slider.ValueChanged += (_, e) =>
+        {
+            if (_loading) return;
+            box.Text = e.NewValue.ToString(fmt, CultureInfo.InvariantCulture);
+            Commit(key, e.NewValue);
+        };
+        WireTextCommit(box, key, () =>
+        {
+            if (!double.TryParse(box.Text.Replace(',', '.'),
+                    NumberStyles.Float, CultureInfo.InvariantCulture, out double v))
+                return null;
+            v = Math.Clamp(v, min, max);
+            bool was = _loading;
+            _loading = true;
+            try { slider.Value = v; } finally { _loading = was; }
+            return v;
+        });
+
+        row.Children.Add(slider);
+        row.Children.Add(box);
+        target.Children.Add(row);
+        _loaders[key] = c =>
+        {
+            double v = Math.Clamp(read(c), min, max);
+            slider.Value = v;
+            box.Text = v.ToString(fmt, CultureInfo.InvariantCulture);
+        };
     }
 
     /// <summary>Ejecuta <paramref name="build"/> (que añade una fila a
@@ -1207,22 +1716,23 @@ public sealed class InspectorPanel : ContentControl
         return (FrameworkElement)_root.Children[^1];
     }
 
-    /// <summary>Como <see cref="LastAdded"/>, pero MUEVE la fila resultante a
-    /// <paramref name="target"/> en vez de dejarla en _root — para los campos
-    /// que caen dentro del panel FULL o CUSTOM (Dbl() no recibe un StackPanel
-    /// de destino).</summary>
-    private void MoveLastRowInto(StackPanel target, Action build)
-    {
-        var row = LastAdded(build);
-        _root.Children.RemoveAt(_root.Children.Count - 1);
-        target.Children.Add(row);
-    }
-
     /// <summary>Paneles FULL/CUSTOM, botones de rotación y lienzo — mismo
     /// reparto que WinCue.App.InspectorPanel.SyncGeometryUi.</summary>
     private void SyncGeometryUi(Cue c)
     {
         bool custom = c.GeoMode == GeoMode.Custom;
+        // Marcar un radio dispara su Checked: con _loading puesto,
+        // OnGeoModeChanged no commitea. Se pone a mano porque SyncGeometryUi
+        // también se llama desde Commit (GeoPreviewKeys), fuera de SetCue.
+        bool was = _loading;
+        _loading = true;
+        try
+        {
+            _rbFull.IsChecked = !custom;
+            _rbCustom.IsChecked = custom;
+        }
+        finally { _loading = was; }
+
         _fullGeoPanel.Visibility = custom ? Visibility.Collapsed : Visibility.Visible;
         _customGeoPanel.Visibility = custom ? Visibility.Visible : Visibility.Collapsed;
 
@@ -1236,10 +1746,11 @@ public sealed class InspectorPanel : ContentControl
     // ==================================================================
     // Rack de audio: ganancia + EQ paramétrica (4 bandas + HPF/LPF) +
     // compresor, con RTA y medidor GR en vivo. Vale para cues de AUDIO y de
-    // VÍDEO — mismo alcance que WinCue.App.EqEditorControl. Layout en
-    // columna única (Secuence no tiene aún el reparto "parámetros a la
-    // izquierda de su gráfica" de WPF — mismo motivo que GeometrySection):
-    // los campos van encima, el lienzo debajo, igual que la barra de trim.
+    // VÍDEO — mismo alcance que WinCue.App.EqEditorControl. Ocupa la COLUMNA
+    // DERECHA de la pestaña de Audio; a su izquierda va el strip de niveles
+    // del cue (ver AudioTabSections/LevelsSection), igual que en
+    // WinCue.App.InspectorPanel.BuildAudioTab. Dentro de la columna, los
+    // campos van encima y su lienzo debajo.
     // ==================================================================
 
     private void EqSection()

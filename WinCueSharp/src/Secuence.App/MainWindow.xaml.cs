@@ -486,9 +486,17 @@ public sealed partial class MainWindow : Window, IShowView
         // se deshabilita en vez de encenderse y no sonar.
         _mixer.CueAvailable = () => _settings.Get("audition_device_name", "").Length > 0;
         _mixer.CueBusSourceNow = () => controller.CueBusNow;
-        // StripsRepainted queda sin conectar a propósito: el inspector de
-        // Secuence todavía no tiene botones de mute/solo que sincronizar
-        // (ver InspectorPanel.cs, "FUERA de esta pasada: el rack de audio").
+
+        // MUTE/CUE del inspector y de la mesa son EL MISMO estado (un solo
+        // MuteSoloBoard) visto desde dos sitios, así que cada uno repinta al
+        // otro — mismo cableado que WinCue.App.MainWindow (Inspector.MuteSolo
+        // = Mixer.Board + los dos avisos cruzados).
+        _inspector.MuteSolo = _mixer.Board;
+        _inspector.MuteSoloChanged = () => _mixer.RefreshStripButtons();
+        _mixer.StripsRepainted = () => _inspector.RefreshMuteSoloButtons();
+        _inspector.CueRequested = PedirCue;
+        _inspector.AuditionSourceId = () => controller.AuditionSourceCueId;
+        _inspector.CueAvailable = _mixer.CueAvailable;
 
         _mixer.SetMasterFader(_settings.Get("master_volume", 100));
         _mixer.SetAuditionFader(_settings.Get("audition_volume", 100));
@@ -1266,6 +1274,13 @@ public sealed partial class MainWindow : Window, IShowView
         // recrear) — mismo reparto que WinCue.App.MainWindow.xaml.cs.
         _lastActive = rows;
         SyncMixer();
+
+        // El fader del inspector y el del strip son EL MISMO fader: mover uno
+        // tiene que mover el otro EN VIVO. El strip ya se refrescaba del
+        // modelo en cada vuelta; sin esto el inspector solo se enteraba al
+        // reseleccionar el cue y el mismo volumen se veía con dos valores.
+        if (_selectedCueId >= 0)
+            _inspector.SyncVolumeFromModel(_model.GetById(_selectedCueId));
     }
 
     /// <summary>VU de programa, en Win2D (VuMeterCanvas — piloto del traslado
@@ -1282,9 +1297,8 @@ public sealed partial class MainWindow : Window, IShowView
     /// <summary>VU por cue, al strip de mezclador correspondiente (mismo
     /// reparto que WinCue.App.MainWindow.xaml.cs.UpdateCueVuMeter): la
     /// audición local es el "preview" de audio → VU del strip CUE; el resto,
-    /// al strip de su propio cue. El inspector sigue sin rack de audio en
-    /// esta pasada (ver InspectorPanel.cs), así que aquí no hay nada más que
-    /// alimentar.</summary>
+    /// al strip de su propio cue, y también al strip de niveles del
+    /// INSPECTOR, que mide la misma señal (filtra él por cue).</summary>
     public void UpdateCueVuMeter(int cueId, float left, float right)
     {
         if (cueId == MainController.AuditionCueId)
@@ -1297,6 +1311,9 @@ public sealed partial class MainWindow : Window, IShowView
             return;
         }
         _mixer.UpdateCueLevel(cueId, left, right);
+        // Y al strip del INSPECTOR, que mide la misma señal: el mismo cue no
+        // puede leerse distinto según la pestaña. Filtra él por cue.
+        _inspector.UpdateCueLevel(cueId, left, right);
     }
 
     /// <summary>Mantiene la caja de un monitor en 16:9 al cambiar de ancho.
