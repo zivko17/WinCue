@@ -468,11 +468,15 @@ public sealed partial class MainWindow : Window, IShowView
             int row = _model.IndexOfId(cueId);
             if (row < 0)
                 return;
-            // Selecciona la fila: dispara OnCueSelectionChanged, que puebla
-            // el inspector — mismo efecto que WPF (CueGrid.SelectedIndex),
-            // sin pestaña de inspector que cambiar (Secuence lo enseña
-            // siempre, en la columna de la derecha).
+            // Selecciona la fila (dispara OnCueSelectionChanged, que puebla el
+            // inspector), salta a la pestaña del inspector y abre dentro la de
+            // Audio — los TRES pasos que da WinCue (CueGrid.SelectedIndex +
+            // BottomTabs.SelectedIndex=1 + Inspector.ShowAudioTab). Pinchar el
+            // canal de un cue en la mesa es pedir SU rack de audio; dejarlo en
+            // la pestaña que estuviera abierta obligaba a buscarlo a mano.
             CueList.SelectedIndex = row;
+            SelectTab(1);
+            _inspector.ShowAudioTab();
         };
         // CUE = PFL: pinchar la señal VIVA de ese cue en los cascos.
         void PedirCue(int cueId) => controller.PflToggle(cueId);

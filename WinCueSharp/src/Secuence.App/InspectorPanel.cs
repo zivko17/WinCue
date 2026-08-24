@@ -237,7 +237,24 @@ public sealed class InspectorPanel : ContentControl
         TextWrapping = TextWrapping.Wrap,
     };
 
-    private readonly StackPanel _root = new() { Margin = new Thickness(0, 0, 0, 16) };
+    /// <summary>Contenedor al que se añaden los campos AHORA MISMO. No es un
+    /// panel fijo: Tab()/Columns() lo van moviendo según se construye el
+    /// formulario, de modo que TODOS los helpers (Header/LabeledRow/Chk/
+    /// Note/…) siguen escribiendo en «el sitio actual» sin saber en qué
+    /// pestaña ni en qué columna están. Es lo que permitió pasar el inspector
+    /// de una columna única a las pestañas de WinCue sin tocar los ~25 sitios
+    /// que ya escribían aquí.</summary>
+    private StackPanel _root = new();
+
+    /// <summary>Las pestañas del inspector — LAS MISMAS que WinCue.App
+    /// (Básicos · Disparadores · Tiempo y bucles · Geometría · Audio), en el
+    /// mismo orden.</summary>
+    private readonly TabView _tabs = new()
+    {
+        IsAddTabButtonVisible = false,
+        TabWidthMode = TabViewWidthMode.SizeToContent,
+        Background = Theme.PanelBgBrush,
+    };
 
     // Registro clave → escribir valor al control (para poblar al seleccionar)
     private readonly Dictionary<string, Action<Cue>> _loaders = new();
@@ -248,21 +265,29 @@ public sealed class InspectorPanel : ContentControl
 
     public InspectorPanel()
     {
-        var scroll = new ScrollViewer
-        {
-            VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
-            HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
-            Content = _root,
-        };
         var layout = new Grid();
         layout.RowDefinitions.Add(new RowDefinition { Height = GridLength.Auto });
         layout.RowDefinitions.Add(new RowDefinition { Height = new GridLength(1, GridUnitType.Star) });
         Grid.SetRow(_header, 0);
-        Grid.SetRow(scroll, 1);
+        Grid.SetRow(_tabs, 1);
         layout.Children.Add(_header);
-        layout.Children.Add(scroll);
+        layout.Children.Add(_tabs);
         Content = layout;
 
+        // El TabView tiene que LLENAR el hueco (WinUI 3 da Left/Top por
+        // defecto en un ContentControl — misma trampa que el diálogo de
+        // Ajustes, ver SettingsPanel).
+        HorizontalContentAlignment = HorizontalAlignment.Stretch;
+        VerticalContentAlignment = VerticalAlignment.Stretch;
+
+        // ═══ Las CINCO pestañas de WinCue, en su orden y con su reparto en
+        // columnas (ver BuildBasics/BuildTriggers/BuildTimeLoops de allí). ═══
+
+        // ── Básicos: IDENTIDAD │ TEMPORIZACIÓN │ DESTINO ──
+        Tab(Loc.T("Básicos", "Basics"));
+        var basics = Columns(3);
+
+        _root = basics[0];
         Header(Loc.T("IDENTIDAD", "IDENTITY"));
         Txt("number", Loc.T("Número:", "Number:"), c => c.Number);
         Txt("name", Loc.T("Nombre:", "Name:"), c => c.Name);
@@ -272,6 +297,15 @@ public sealed class InspectorPanel : ContentControl
         TxtMultiline("notes", Loc.T("Notas (se muestran en standby):", "Notes (shown in standby):"),
             c => c.Notes);
 
+        _root = basics[1];
+        Header(Loc.T("TEMPORIZACIÓN", "TIMING"));
+        Cmb("continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
+            CueChoices.ContinueModes);
+        TimeF("pre_wait", "Pre-wait:", c => c.PreWait);
+        TimeF("duration", Loc.T("Duración:", "Duration:"), c => c.Duration);
+        TimeF("post_wait", "Post-wait:", c => c.PostWait);
+
+        _root = basics[2];
         Header(Loc.T("DESTINO", "TARGET"));
         FileRow();
         TargetCombo();
@@ -286,32 +320,46 @@ public sealed class InspectorPanel : ContentControl
             Loc.T("Detener los demás al empezar (GO per-cue)", "Stop others when starting (per-cue GO)"),
             c => c.StopOthers);
 
-        Header(Loc.T("TEMPORIZACIÓN", "TIMING"));
-        Cmb("continue_mode", Loc.T("Al terminar:", "On finish:"), c => c.ContinueMode.ToString(),
-            CueChoices.ContinueModes);
-        TimeF("pre_wait", "Pre-wait:", c => c.PreWait);
-        TimeF("duration", Loc.T("Duración:", "Duration:"), c => c.Duration);
-        TimeF("post_wait", "Post-wait:", c => c.PostWait);
+        // ── Disparadores ──
+        Tab(Loc.T("Disparadores", "Triggers"));
+        TriggersSection();
 
-        Header(Loc.T("FUNDIDOS", "FADES"));
-        TimeF("fade_in", "Fade in:", c => c.FadeIn);
-        TimeF("fade_out", "Fade out:", c => c.FadeOut);
-        _root.Children.Add(_fadeWarn);
+        // ── Tiempo y bucles: REPRODUCCIÓN │ FUNDIDOS Y RECORTE, con la barra
+        //    de trim debajo (mismo reparto que WinCue.BuildTimeLoops) ──
+        Tab(Loc.T("Tiempo y bucles", "Time & Loops"));
+        var timeLoops = _root;
+        var loops = Columns(2);
 
+        _root = loops[0];
         Header(Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         Chk("loop", Loc.T("Loop infinito (hasta STOP)", "Infinite loop (until STOP)"), c => c.Loop);
         Int("play_count", Loc.T("Repeticiones (play count):", "Repeats (play count):"), c => c.PlayCount);
-        TimeF("trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
-        TimeF("trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
         Num("rate", Loc.T("Velocidad (1.0 = normal):", "Speed (1.0 = normal):"), c => c.Rate);
         Chk("preserve_pitch",
             Loc.T("Mantener el tono al cambiar la velocidad", "Preserve pitch when changing speed"),
             c => c.PreservePitch);
-        WaveformRow();
         VolumeField();
 
-        TriggersSection();
+        _root = loops[1];
+        Header(Loc.T("FUNDIDOS Y RECORTE", "FADES & TRIM"));
+        TimeF("fade_in", "Fade in:", c => c.FadeIn);
+        TimeF("fade_out", "Fade out:", c => c.FadeOut);
+        _root.Children.Add(_fadeWarn);
+        TimeF("trim_start", Loc.T("Trim: inicio:", "Trim: start:"), c => c.TrimStart);
+        TimeF("trim_end", Loc.T("Trim: fin (0 = final):", "Trim: end (0 = end):"), c => c.TrimEnd);
+
+        // La barra de onda va A LO ANCHO, bajo las dos columnas — igual que en
+        // WinCue, donde el DockPanel la deja debajo del bloque de campos.
+        _root = timeLoops;
+        Header(Loc.T("BARRA DE TRIM — arrastra los manejadores",
+                     "TRIM BAR — drag the handles"));
+        WaveformRow();
+
+        // ── Geometría y Audio: cada una en la suya, como WinCue ──
+        Tab(Loc.T("Geometría", "Geometry"));
         GeometrySection();
+
+        _audioTab = Tab($"{Icons.Volume} Audio", icon: true);
         EqSection();
 
         IsEnabled = false;   // sin cue seleccionado
@@ -491,7 +539,9 @@ public sealed class InspectorPanel : ContentControl
 
     private static void Header(StackPanel panel, string text)
     {
-        var block = new StackPanel { Margin = new Thickness(10, 12, 10, 4) };
+        // Margen (0,12,0,4): el de WinCue. El 10 horizontal que llevaba antes
+        // sobra desde que cada página tiene su propio margen (ver Tab()).
+        var block = new StackPanel { Margin = new Thickness(0, 12, 0, 4) };
         block.Children.Add(new TextBlock
         {
             Text = text,
@@ -511,14 +561,78 @@ public sealed class InspectorPanel : ContentControl
 
     private void Header(string text) => Header(_root, text);
 
+    // ------------------------------------------------------------------
+    // Pestañas y columnas — mismas medidas que WinCue.App/InspectorPanel.cs
+    // ------------------------------------------------------------------
+    // WinCue reparte el inspector en pestañas, y dentro de cada una en
+    // columnas separadas por 30 px (helpers Tab/Page/Columns de allí). Esto es
+    // su equivalente en WinUI 3, con los MISMOS números: si se cambia uno, el
+    // inspector se lee distinto que el de WinCue y esa es justo la diferencia
+    // que este trabajo vino a quitar.
+
+    /// <summary>Abre una pestaña nueva y deja _root apuntando a su página, de
+    /// modo que todo lo que se construya a partir de aquí cae dentro.
+    ///
+    /// icon: true cuando el título EMPIEZA por un glifo de Icons (Phosphor):
+    /// en WinUI 3 la fuente es del control entero, así que un Header de texto
+    /// plano pintaría el glifo como un cuadrito. Se parte en dos TextBlock,
+    /// mismo remedio que Chk(icon: true) — ver IconFont.cs.</summary>
+    private TabViewItem Tab(string title, bool icon = false)
+    {
+        var panel = new StackPanel { Margin = new Thickness(10, 6, 10, 10) };
+        var item = new TabViewItem
+        {
+            Header = icon ? IconLabel(title) : title,
+            IsClosable = false,
+            Content = new ScrollViewer
+            {
+                VerticalScrollBarVisibility = ScrollBarVisibility.Auto,
+                HorizontalScrollBarVisibility = ScrollBarVisibility.Disabled,
+                Content = panel,
+            },
+        };
+        _tabs.TabItems.Add(item);
+        _root = panel;
+        return item;
+    }
+
+    /// <summary>Abre la pestaña de Audio — la usa el mixer al pinchar un canal
+    /// de cue, igual que WinCue.App.InspectorPanel.ShowAudioTab.</summary>
+    public void ShowAudioTab() => _tabs.SelectedItem = _audioTab;
+
+    private TabViewItem? _audioTab;
+
+    /// <summary>Parte la página actual en <paramref name="count"/> columnas de
+    /// ancho automático separadas por 30 px, y devuelve sus paneles. Quien
+    /// llama va poniendo _root en cada uno para llenarlo.</summary>
+    private StackPanel[] Columns(int count)
+    {
+        var grid = new Grid();
+        var cols = new StackPanel[count];
+        for (int i = 0; i < count; i++)
+        {
+            if (i > 0)
+                grid.ColumnDefinitions.Add(new ColumnDefinition { Width = new GridLength(30) });
+            grid.ColumnDefinitions.Add(new ColumnDefinition { Width = GridLength.Auto });
+            cols[i] = new StackPanel();
+            Grid.SetColumn(cols[i], i * 2);
+            grid.Children.Add(cols[i]);
+        }
+        _root.Children.Add(grid);
+        return cols;
+    }
+
     private StackPanel LabeledRow(string label)
     {
         var row = new StackPanel
-        { Orientation = Orientation.Horizontal, Margin = new Thickness(10, 3, 10, 3) };
+        { Orientation = Orientation.Horizontal, Margin = new Thickness(0, 2, 0, 2) };
         row.Children.Add(new TextBlock
         {
             Text = label,
-            Width = 150,
+            // 185 y margen (0,2,0,2): los de WinCue.App.LabeledRow. Con 150 las
+            // etiquetas largas se partían en dos líneas y las filas no
+            // cuadraban entre columnas.
+            Width = 185,
             VerticalAlignment = VerticalAlignment.Center,
             Foreground = Theme.TextTertiaryBrush,
         });
@@ -602,7 +716,7 @@ public sealed class InspectorPanel : ContentControl
         {
             Content = icon ? IconLabel(label) : label,
             Foreground = Theme.TextPrimaryBrush,
-            Margin = new Thickness(10, 3, 10, 3),
+            Margin = new Thickness(0, 3, 0, 3),   // ChkRow de WinCue
         };
         cb.Checked += (_, _) => Commit(key, true);
         cb.Unchecked += (_, _) => Commit(key, false);
@@ -748,6 +862,11 @@ public sealed class InspectorPanel : ContentControl
     /// exponerlos, no implementarlos.</summary>
     private void TriggersSection()
     {
+        // Tres columnas, el MISMO reparto que WinCue.App.BuildTriggers:
+        // disparo local + fundir/parar otros │ wall-clock │ MIDI.
+        var cols = Columns(3);
+
+        _root = cols[0];
         Header(Loc.T("DISPARO LOCAL", "LOCAL TRIGGER"));
         Txt("hotkey", Loc.T("Hotkey (tecla):", "Hotkey (key):"), c => c.Hotkey);
         Note(Loc.T(
@@ -764,6 +883,7 @@ public sealed class InspectorPanel : ContentControl
         Cmb("fade_others_scope", Loc.T("Ámbito:", "Scope:"), c => c.FadeOthersScope.ToString(),
             CueChoices.FadeScopes);
 
+        _root = cols[1];
         Header(Loc.T("WALL-CLOCK (disparo por hora)", "WALL-CLOCK (time-of-day trigger)"));
         Chk("wallclock_enabled", Loc.T("Disparar a una hora del día", "Trigger at a time of day"),
             c => c.WallclockEnabled);
@@ -771,6 +891,7 @@ public sealed class InspectorPanel : ContentControl
         Note(Loc.T("Se dispara cada día a esa hora\nmientras el show esté abierto.",
                    "Triggers every day at that time\nwhile the show is open."));
 
+        _root = cols[2];
         Header("MIDI");
         Chk("midi_enabled", Loc.T("Disparo por MIDI", "MIDI trigger"), c => c.MidiEnabled);
         Cmb("midi_type", Loc.T("Tipo de mensaje:", "Message type:"), c => c.MidiType.ToString(),
@@ -821,7 +942,7 @@ public sealed class InspectorPanel : ContentControl
         Foreground = Theme.TextFaintBrush,
         TextWrapping = TextWrapping.Wrap,
         MaxWidth = 300,
-        Margin = new Thickness(10, 0, 10, 6),
+        Margin = new Thickness(0, 0, 0, 6),
     });
 
     /// <summary>Desplegable con opciones escritas aquí mismo. Reservado a los
