@@ -11,14 +11,20 @@
 using WinCue.Core;
 using WinCue.Video.Containers;
 using WinCue.Video.Hap;
+using Xunit.Abstractions;
 
 namespace WinCue.Video.Tests;
 
 public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
 {
     private readonly HapMediaFixture _media;
+    private readonly ITestOutputHelper _out;
 
-    public HapGpuPlaybackTests(HapMediaFixture media) => _media = media;
+    public HapGpuPlaybackTests(HapMediaFixture media, ITestOutputHelper output)
+    {
+        _media = media;
+        _out = output;
+    }
 
     [Fact]
     public void ClipEntero_SeRenderizaYTerminaSolo()
@@ -53,6 +59,40 @@ public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
         // La copia de presentación (la que haría el UI dentro del Lock del
         // D3DImage) no debe fallar con el pipeline vivo
         pipeline.CopyPresent();
+    }
+
+    /// <summary>Task 5: el handle compartido de presentación y la variante
+    /// fenceada, ejercitados de verdad (no solo compilados). Sin esto, nadie
+    /// en la suite tocaba SetSharedHandle/*SharedHandle/CopyPresentFenced —
+    /// código nuevo del que no se sabía nada (hallazgo de revisión).
+    /// _out.WriteLine dice si la máquina tenía GPU/driver utilizable: sin eso
+    /// el "sin GPU: return" silencioso podría estar pasando por no afirmar
+    /// nada, no por afirmar algo cierto.</summary>
+    [Fact]
+    public void PresentSharedHandle_YCopyPresentFenced_FuncionanConLaQueryPersistente()
+    {
+        using var pipeline = TryCreatePipeline();
+        if (pipeline is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU/driver D3D9Ex+D3D11 utilizable en esta máquina.");
+            return;   // sin GPU/driver utilizable: nada que afirmar
+        }
+
+        // El handle compartido de PRESENTACIÓN (nunca el del interop, ese
+        // fugaba VRAM — auditoría 05) tiene que existir para que Secuence
+        // pueda abrirlo desde D3D11.
+        Assert.NotEqual(0, pipeline.PresentSharedHandle);
+
+        // Llamable sin lanzar y DOS VECES seguidas: la query de evento es
+        // PERSISTENTE (se crea una vez con el pipeline, auditoría 05 otra
+        // vez), así que la segunda llamada tiene que reutilizarla en vez de
+        // quedarse en un estado del que no sale (Issue/GetData mal
+        // encadenados dejarían la query "pendiente" para siempre).
+        pipeline.CopyPresentFenced();
+        pipeline.CopyPresentFenced();
+
+        _out.WriteLine($"GPU/driver utilizable: PresentSharedHandle=0x" +
+            $"{pipeline.PresentSharedHandle:X}; CopyPresentFenced() x2 sin lanzar.");
     }
 
     /// <summary>CA2000: la creación va en método aparte — devolver el objeto
