@@ -1521,7 +1521,7 @@ public sealed partial class MainWindow : Window, IShowView
                 DefaultButton = ContentDialogButton.Close,
                 XamlRoot = Content.XamlRoot,
             };
-            if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+            if (await MostrarDialogoAsync(dialog) != ContentDialogResult.Primary)
             {
                 _modeReverting = true;
                 ModeToggle.IsChecked = true;   // re-dispara OnShowMode (idempotente)
@@ -1763,7 +1763,7 @@ public sealed partial class MainWindow : Window, IShowView
             panel.LoadDefaults();
         };
 
-        if (await dialog.ShowAsync() != ContentDialogResult.Primary)
+        if (await MostrarDialogoAsync(dialog) != ContentDialogResult.Primary)
             return;
 
         int previousSampleRate = panel.InitialSampleRate;
@@ -1781,7 +1781,7 @@ public sealed partial class MainWindow : Window, IShowView
                 CloseButtonText = "OK",
                 XamlRoot = Content.XamlRoot,
             };
-            await info.ShowAsync();
+            await MostrarDialogoAsync(info);
         }
 
         // Reconfigurar EN CALIENTE — mismo reparto que
@@ -1958,7 +1958,53 @@ public sealed partial class MainWindow : Window, IShowView
             DefaultButton = ContentDialogButton.Close,
             XamlRoot = Content.XamlRoot,
         };
-        return await dialog.ShowAsync() == ContentDialogResult.Primary;
+        return await MostrarDialogoAsync(dialog) == ContentDialogResult.Primary;
+    }
+
+    // ==================================================================
+    // Diálogos modales y los huecos de vídeo — la mitigación del airspace
+    // ==================================================================
+
+    /// <summary>Cuántos diálogos modales hay abiertos AHORA. Es un contador y
+    /// no un booleano porque un diálogo puede abrir otro cuando el primero se
+    /// cierra (Ajustes → aviso de frecuencia de muestreo), y con un booleano el
+    /// segundo destaparía los monitores al terminar el primero.</summary>
+    private int _dialogosAbiertos;
+
+    /// <summary>Abre un ContentDialog CON LOS HUECOS DE VÍDEO APARTADOS.
+    ///
+    /// POR QUÉ: los previos PGM/PVW son ventanas hijas Win32 que se pintan por
+    /// encima del XAML de esta ventana (ver HwndHijo). Está fotografiado que,
+    /// donde el diálogo se solapa con ellos, el vídeo se pinta ENCIMA del
+    /// diálogo — se come los rótulos y las casillas—, y que el velo de
+    /// atenuación del ContentDialog no atenúa los huecos (luma 75,64 con el
+    /// diálogo abierto, la misma que sin él). Con la ventana a 1440 px no se
+    /// solapan; a 980 px, y en la pantalla de 1024×600 del autor, sí. Sin esto,
+    /// Ajustes es inusable.
+    ///
+    /// Se ocultan los hijos —el mismo camino que ya usan Clear y el blackout— y
+    /// se restauran al cerrar. Los popups de WinUI 3 (menús, flyouts, el
+    /// desplegable del propio PGM) NO necesitan esto: van por su propia capa,
+    /// por encima del puente, y está medido que se siguen viendo.</summary>
+    private async Task<ContentDialogResult> MostrarDialogoAsync(ContentDialog dialog)
+    {
+        if (_dialogosAbiertos++ == 0)
+        {
+            _pgm.OcultarPorDialogo();
+            _pvw.OcultarPorDialogo();
+        }
+        try
+        {
+            return await dialog.ShowAsync();
+        }
+        finally
+        {
+            if (--_dialogosAbiertos == 0)
+            {
+                _pgm.MostrarTrasDialogo();
+                _pvw.MostrarTrasDialogo();
+            }
+        }
     }
 
     /// <summary>Reloj del show, fila 0: cuenta atrás de la duración total

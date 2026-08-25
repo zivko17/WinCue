@@ -113,6 +113,25 @@ internal sealed class LiveMonitorControl : IDisposable
     // HWND es negro garantizado, ver VideoOutputWindow.LiberarSalidaGpu). Se
     // enseña uno u otro según la rama activa.
     private nint _hijoEspejo;
+
+    /// <summary>Hay un diálogo modal (el `ContentDialog` de Ajustes, una
+    /// confirmación…) abierto ENCIMA de este monitor, así que sus dos HWND
+    /// hijos están ocultos a propósito.
+    ///
+    /// POR QUÉ HACE FALTA: ahora que el hijo se sube por encima del puente XAML
+    /// (ver HwndHijo), el vídeo se pinta también por encima del diálogo donde
+    /// se solapen — está fotografiado: el hueco del PGM comiéndose los rótulos
+    /// de Ajustes, y su velo de atenuación sin atenuar el hueco (luma 75,64
+    /// con el diálogo abierto, idéntica a la de antes de abrirlo). Con la
+    /// ventana ancha no se solapan; en la pantalla de 1024×600 del autor sí.
+    /// Ocultar los hijos mientras dure el diálogo es el mismo camino que ya
+    /// usan Clear y el blackout.
+    ///
+    /// El latch vive AQUÍ y no en quien abre el diálogo porque el tic del PGM
+    /// sigue corriendo cada 500 ms por debajo: sin él, RefrescarEspejo o
+    /// ShowVideo volverían a mostrar el hijo a media conversación.</summary>
+    private bool _tapadoPorDialogo;
+
     private SwapChainSink? _sinkEspejo;
     private SalidaGpu? _anfitriona;   // salida cuyo compositor DIBUJA el espejo
     private int _espejoW, _espejoH;   // tamaño del sink vivo
@@ -395,7 +414,7 @@ internal sealed class LiveMonitorControl : IDisposable
         // no hay por qué apostar a eso pudiendo mostrarla antes. Solo se ve
         // vacía durante las tres líneas que faltan para EntrarEnEspejo, todas
         // en el mismo turno del hilo de interfaz: no da tiempo a repintar.
-        HwndHijo.Mostrar(_hijoEspejo);
+        MostrarHijo(_hijoEspejo);
 
         try
         {
@@ -546,7 +565,7 @@ internal sealed class LiveMonitorControl : IDisposable
             StopPlayback();                       // suelta el decode del monitor
             if (_hijo != 0)
                 HwndHijo.Ocultar(_hijo);          // el HWND de mpv taparía el espejo
-            HwndHijo.Mostrar(_hijoEspejo);
+            MostrarHijo(_hijoEspejo);
             _message.Visibility = Visibility.Collapsed;
             _espejando = true;
         }
@@ -627,7 +646,7 @@ internal sealed class LiveMonitorControl : IDisposable
                 _player.Command("loadfile", path);
             }
             catch (Exception) { return; }
-            HwndHijo.Mostrar(_hijo);
+            MostrarHijo(_hijo);
             _message.Visibility = Visibility.Collapsed;
             _status.Text = System.IO.Path.GetFileName(path);
         }
@@ -667,7 +686,7 @@ internal sealed class LiveMonitorControl : IDisposable
                 _player.Command("loadfile", path);
             }
             catch (Exception) { return; }
-            HwndHijo.Mostrar(_hijo);
+            MostrarHijo(_hijo);
             _message.Visibility = Visibility.Collapsed;
             _status.Text = System.IO.Path.GetFileName(path);
         }
@@ -799,6 +818,51 @@ internal sealed class LiveMonitorControl : IDisposable
         _status.Text = "";
         if (_hijo != 0)
             HwndHijo.Ocultar(_hijo);
+    }
+
+    // ------------------------------------------------------------------
+    // Mitigación del diálogo modal (ver _tapadoPorDialogo)
+    // ------------------------------------------------------------------
+
+    /// <summary>Muestra el hijo… salvo que haya un diálogo modal encima. TODOS
+    /// los caminos que enseñan un hijo pasan por aquí, y no por
+    /// HwndHijo.Mostrar directamente: el tic del PGM corre cada 500 ms por
+    /// debajo del diálogo y volvería a destaparlo sin esto.</summary>
+    private void MostrarHijo(nint hijo)
+    {
+        if (hijo == 0 || _tapadoPorDialogo)
+            return;
+        HwndHijo.Mostrar(hijo);
+    }
+
+    /// <summary>Se abre un diálogo modal encima: los dos hijos se apartan.
+    /// Idempotente (varios monitores, y el mismo monitor dos veces).</summary>
+    public void OcultarPorDialogo()
+    {
+        if (_tapadoPorDialogo)
+            return;
+        _tapadoPorDialogo = true;
+        if (_hijo != 0)
+            HwndHijo.Ocultar(_hijo);
+        if (_hijoEspejo != 0)
+            HwndHijo.Ocultar(_hijoEspejo);
+    }
+
+    /// <summary>El diálogo se ha cerrado. Se vuelve a enseñar el hijo que toque
+    /// AHORA, no el que estaba antes: mientras el diálogo estaba abierto el tic
+    /// del PGM ha podido cambiar de rama (espejo ↔ mpv clásico) o dejar el
+    /// monitor en NEGRO, y restaurar la foto vieja enseñaría un hueco que ya no
+    /// corresponde. Si no hay nada que enseñar, no se enseña nada — que es lo
+    /// mismo que hace Clear.</summary>
+    public void MostrarTrasDialogo()
+    {
+        if (!_tapadoPorDialogo)
+            return;
+        _tapadoPorDialogo = false;
+        if (_espejando)
+            MostrarHijo(_hijoEspejo);
+        else if (_currentPath.Length > 0)
+            MostrarHijo(_hijo);
     }
 
     /// <summary>Para lo que estuviera reproduciendo (sin destruir el HWND ni
