@@ -771,7 +771,11 @@ public sealed partial class MainWindow : Window, IShowView
             var regiones = new List<LiveMonitorControl.RegionEspejo>();
             foreach (var v in _canvas.CanvasViews())
                 if (SalidaGpuDe(v.Screen) is { Compositor: not null } salida)
-                    regiones.Add(new LiveMonitorControl.RegionEspejo(salida, v.X, v.Y, v.W, v.H));
+                    // El blackout viaja POR SALIDA: apagar la 2 deja negro SU
+                    // trozo del lienzo y no toca el de las demás, así que el
+                    // operador ve exactamente qué pantallas están a oscuras.
+                    regiones.Add(new LiveMonitorControl.RegionEspejo(
+                        salida, v.X, v.Y, v.W, v.H, EnBlackout(v.Screen)));
             if (regiones.Count == 0)
                 return null;
             var (cw, ch) = _canvas.CanvasDims();
@@ -787,8 +791,19 @@ public sealed partial class MainWindow : Window, IShowView
         if (SalidaGpuDe(output) is not { Compositor: not null } sola)
             return null;
         return (sola.Ancho, sola.Alto,
-            new[] { new LiveMonitorControl.RegionEspejo(sola, 0, 0, sola.Ancho, sola.Alto) });
+            new[]
+            {
+                new LiveMonitorControl.RegionEspejo(
+                    sola, 0, 0, sola.Ancho, sola.Alto, EnBlackout(output)),
+            });
     }
+
+    /// <summary>true si ESA salida está en blackout. La verdad la tiene la
+    /// ventana de salida (nace en negro si se abre durante un blackout), no el
+    /// interruptor global de esta ventana — por eso se pregunta ahí.</summary>
+    private bool EnBlackout(int output) =>
+        output >= 0 && output < MaxVideoOutputs &&
+        _videoOutputs[output] is { Blackout: true };
 
     // ── El selector de la cabecera del PGM ────────────────────────────
 
@@ -954,6 +969,10 @@ public sealed partial class MainWindow : Window, IShowView
         _blackout = !_blackout;
         foreach (var w in _videoOutputs)
             w?.SetBlackout(_blackout);
+        // El espejo del PGM se entera AHORA, no en el próximo tic de 500 ms:
+        // la tecla B es un corte, y un monitor que tarda medio segundo en
+        // apagarse enseña vídeo que la sala ya no está viendo.
+        UpdateProgramMonitor();
         BlackoutButton.Background = _blackout ? Theme.WarnBrush : Theme.ControlBgBrush;
         FlashStatus(_blackout
             ? $"{Icons.BlackFrame} Blackout activado."

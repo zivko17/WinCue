@@ -136,8 +136,12 @@ internal sealed class LiveMonitorControl : IDisposable
     /// por salida habilitada; mirando una sola salida hay una sola, que ocupa
     /// el lienzo entero. Cada vista llega YA RECORTADA desde MpvGpuRenderer
     /// (cada salida renderiza su propio recorte en su propia superficie), así
-    /// que aquí no hay recorte que calcular: solo colocación.</summary>
-    internal readonly record struct RegionEspejo(SalidaGpu Salida, int X, int Y, int W, int H);
+    /// que aquí no hay recorte que calcular: solo colocación.
+    ///
+    /// <c>Negro</c> = esa salida está en BLACKOUT. Su región NO se dibuja, y el
+    /// Clear del compositor la deja negra — ver ConstruirRaizEspejo.</summary>
+    internal readonly record struct RegionEspejo(
+        SalidaGpu Salida, int X, int Y, int W, int H, bool Negro);
 
     /// <summary>Lo que hay que espejar AHORA, o null si no hay nada que
     /// espejar (sin compositor, o el cue en pantalla va por la ruta clásica).
@@ -238,12 +242,12 @@ internal sealed class LiveMonitorControl : IDisposable
         // La raíz se publica ANTES de enganchar: si se enganchara primero, el
         // hilo de render podría pillar un fotograma con Mirror puesto y la
         // raíz todavía en la del plan anterior.
+        //
+        // Puede venir VACÍA (todas las salidas del plan en blackout) y eso es
+        // correcto: el espejo se queda enganchado y pinta negro. Salir del
+        // espejo aquí devolvería el monitor a su mpv propio, enseñando el
+        // vídeo que la sala NO está viendo.
         _raizEspejo = ConstruirRaizEspejo(p, anfitriona);
-        if (_raizEspejo is null)
-        {
-            SalirDelEspejo();
-            return;
-        }
 
         if (recreado || !ReferenceEquals(_anfitriona, anfitriona))
         {
@@ -337,11 +341,28 @@ internal sealed class LiveMonitorControl : IDisposable
     /// monitor. Donde no cubre ninguna región, el Clear del compositor deja
     /// negro.
     ///
+    /// BLACKOUT: una región en negro simplemente NO SE DIBUJA, y ese hueco se
+    /// queda con el Clear. Es lo que hace que el PGM no mienta justo cuando
+    /// más importa (tecla B, PANIC): un monitor que dice «esto es lo que sale»
+    /// y sigue enseñando vídeo con la sala a oscuras es peor que no tenerlo.
+    /// Se resuelve POR REGIÓN, así que en modo LIENZO el blackout de una
+    /// salida apaga SU trozo del lienzo y deja el resto: el operador ve
+    /// exactamente qué pantallas están en negro. Y se resuelve SOLO EN EL
+    /// ESPEJO — el blackout de la sala sigue siendo ocultar el HWND hijo
+    /// (VideoOutputWindow.SetBlackout): instantáneo y con negro garantizado
+    /// aunque el compositor se atasque, que en un teatro vale más que la
+    /// elegancia de un nodo de velo en el grafo.
+    ///
+    /// Devuelve una StackNode VACÍA cuando todas las regiones están en negro,
+    /// y no null: null haría salir del espejo, y el monitor volvería a su mpv
+    /// propio enseñando el vídeo que la sala no está viendo. Vacía = negro,
+    /// que es lo correcto.
+    ///
     /// SOLO TransformNode/StackNode a propósito: el RtPool del compositor está
     /// dimensionado al sink PRINCIPAL, y esos dos nodos no piden render
     /// targets intermedias. Un nodo que sí las pidiera saldría aquí con el
     /// tamaño equivocado.</summary>
-    private GraphNode? ConstruirRaizEspejo(
+    private GraphNode ConstruirRaizEspejo(
         (int LienzoW, int LienzoH, IReadOnlyList<RegionEspejo> Regiones) plan,
         SalidaGpu anfitriona)
     {
@@ -357,6 +378,8 @@ internal sealed class LiveMonitorControl : IDisposable
         var raiz = new StackNode();
         foreach (var region in plan.Regiones)
         {
+            if (region.Negro)
+                continue;   // blackout: su hueco se queda con el Clear
             // La ANFITRIONA va en VIVO (mismo lock que el hilo que dibuja);
             // de las AJENAS, una instantánea — ver la cabecera del archivo.
             GraphNode? contenido = ReferenceEquals(region.Salida, anfitriona)
@@ -373,16 +396,25 @@ internal sealed class LiveMonitorControl : IDisposable
                     Math.Max(1, (int)Math.Round(region.H * escala))),
             });
         }
-        return raiz.Children.Count > 0 ? raiz : null;
+        return raiz;
     }
 
     /// <summary>Copia de los hijos del grafo de una salida AJENA, tomada
     /// DENTRO de su propio Mutate. Es lo que impide que el hilo del compositor
     /// anfitrión recorra por índice una lista que otro dueño está mutando —
-    /// ver la cabecera del archivo. La copia queda congelada hasta el
-    /// siguiente refresco (medio segundo como mucho, y menos cuando cambian
-    /// los cues activos): en un monitor eso no se nota, y es el precio de no
-    /// poder tirar la aplicación.</summary>
+    /// ver la cabecera del archivo.
+    ///
+    /// EL RETRASO QUE ESTO CUESTA, ANOTADO A PROPÓSITO: la copia se congela
+    /// hasta el siguiente refresco, o sea hasta medio segundo (el tic del
+    /// PGM). Lo que se retrasa es QUÉ CAPAS hay en esa salida ajena — un cue
+    /// que acaba de entrar puede tardar ese medio segundo en aparecer en su
+    /// trozo del lienzo—; los PÍXELES de cada capa van al día, porque se
+    /// muestrea la superficie viva. Con una sola salida habilitada no hay
+    /// instantánea ninguna y no hay retraso.
+    ///
+    /// Y NO se refresca más a menudo a propósito: hacerlo en el tic de 100 ms
+    /// del controlador metería un Mutate a 10 Hz sobre los locks de los hilos
+    /// que van a SALA, y esos no se tocan por un monitor.</summary>
     private static GraphNode? Instantanea(SalidaGpu salida)
     {
         StackNode? copia = null;
