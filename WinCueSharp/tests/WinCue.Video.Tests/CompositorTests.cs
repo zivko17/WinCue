@@ -309,6 +309,51 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
     }
 
     // ------------------------------------------------------------------
+    // El espejo (sink secundario para el PGM)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void SinkSecundario_RecibeElMISMOFotograma()
+    {
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+            return;
+
+        using var principal = new TextureSink(gpu, W, H);
+        using var espejo = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, principal) { Mirror = espejo };
+
+        using var rojo = new SolidNode(gpu, 1f, 0f, 0f);
+        comp.Root = rojo;
+        comp.RenderOnce(0.0);
+
+        byte[] a = GpuReadback.Read(gpu, principal.Texture, W, H);
+        byte[] b = GpuReadback.Read(gpu, espejo.Texture, W, H);
+
+        Assert.Equal(GpuReadback.MeanLumaBgra8(a), GpuReadback.MeanLumaBgra8(b), 3);
+    }
+
+    [Fact]
+    public void SinEspejo_ElCompositorSigueFuncionandoIgual()
+    {
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+            return;
+
+        using var principal = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, principal);
+
+        Assert.Null(comp.Mirror);
+
+        using var rojo = new SolidNode(gpu, 1f, 0f, 0f);
+        comp.Root = rojo;
+        comp.RenderOnce(0.0);
+
+        byte[] a = GpuReadback.Read(gpu, principal.Texture, W, H);
+        Assert.True(GpuReadback.MeanLumaBgra8(a) > 10.0);
+    }
+
+    // ------------------------------------------------------------------
     // Salida a pantalla
     // ------------------------------------------------------------------
 

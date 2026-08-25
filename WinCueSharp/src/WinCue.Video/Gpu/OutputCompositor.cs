@@ -71,6 +71,19 @@ public sealed class OutputCompositor : IDisposable
     /// <summary>Color del fondo del lienzo (lo que se ve donde no hay capa).</summary>
     public (float R, float G, float B) Background { get; set; } = (0f, 0f, 0f);
 
+    /// <summary>Sink SECUNDARIO opcional: se dibuja en el MISMO fotograma y en
+    /// el MISMO hilo que el principal. Es lo que hace del PGM un espejo del
+    /// compositor en vez de un segundo decodificador. Dos hilos dibujando los
+    /// mismos nodos serian una carrera sobre la superficie de presentacion;
+    /// en el mismo fotograma no hay nada que sincronizar. No es propiedad
+    /// nuestra: Dispose() no lo libera.</summary>
+    public IOutputSink? Mirror { get; set; }
+
+    /// <summary>Raiz alternativa para el espejo (el PGM en modo LIENZO
+    /// reconstruye el lienzo entero). Si es null, el espejo pinta la raiz
+    /// normal.</summary>
+    public Func<GraphNode?>? MirrorRoot { get; set; }
+
     /// <param name="clock">Reloj maestro: devuelve el instante del show en
     /// segundos. En producción lo pone el motor de cues (y en última instancia
     /// el audio, que es el maestro). Por defecto, un cronómetro propio.</param>
@@ -139,6 +152,7 @@ public sealed class OutputCompositor : IDisposable
                 _frameWatch.Restart();
                 DrawFrame(t);
                 _sink.Present();
+                Mirror?.Present();
                 _frameWatch.Stop();
 
                 double ms = _frameWatch.Elapsed.TotalMilliseconds;
@@ -174,6 +188,30 @@ public sealed class OutputCompositor : IDisposable
         if (_frameStats.Starved > 0)
             Stats.FramesWithStarvation++;
         Stats.RtHighWaterMark = _pool.HighWaterMark;
+
+        // El espejo se dibuja aqui mismo, en el mismo instante y el mismo
+        // hilo: es la unica forma de que el PGM sea un espejo del compositor
+        // y no un segundo decodificador con su propia idea de "ahora".
+        IOutputSink? mirror = Mirror;
+        if (mirror is not null)
+        {
+            _renderer.Clear(mirror.Rtv, Background.R, Background.G, Background.B);
+
+            GraphNode? mirrorRoot = MirrorRoot is not null ? MirrorRoot() : root;
+            if (mirrorRoot is not null)
+            {
+                var mirrorFrame = new GraphFrame(mediaTime, _frameStats)
+                {
+                    Renderer = _renderer,
+                    Pool = _pool,
+                };
+                // Dimensiones del espejo, no las del principal: puede ser un
+                // PGM mas pequeno que la salida de sala.
+                var mirrorTarget = new LayerTarget(mirror.Rtv,
+                    new DestRect(0, 0, mirror.Width, mirror.Height), UvRect.Full, 1f);
+                mirrorRoot.Render(mirrorFrame, mirrorTarget);
+            }
+        }
     }
 
     public void Dispose()
