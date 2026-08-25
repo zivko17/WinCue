@@ -268,7 +268,7 @@ public sealed partial class MainWindow : Window, IShowView
         _canvas = new CanvasLayout(_settings, this);
         _pgm.PedirPlanEspejo = PlanEspejoPgm;
         // Un espejo que no arranca tiene que verse donde el operador mira, no
-        // solo en logsideo-output.log — mismo reparto que el AvisoEnPantalla
+        // solo en logs/video-output.log — mismo reparto que el AvisoEnPantalla
         // de la ventana de salida.
         _pgm.AvisoEnPantalla = FlashStatus;
         ConstruirSelectorPgm();
@@ -2416,7 +2416,7 @@ public sealed partial class MainWindow : Window, IShowView
         var w = new VideoOutputWindow { OutputNumber = output + 1 };
         // Un fallo del compositor de esa salida (un swapchain que no se puede
         // recrear) tiene que verse en la barra de estado, como cualquier otro
-        // aviso del motor — no solo en logsideo-output.log.
+        // aviso del motor — no solo en logs/video-output.log.
         w.AvisoEnPantalla = FlashStatus;
         _videoOutputs[output] = w;
         return w;
@@ -2516,6 +2516,15 @@ public sealed partial class MainWindow : Window, IShowView
         foreach (var w in _videoOutputs)
             w?.SubirCueAlFrente(cueId);
     }
+
+    /// <summary>Desengancha el espejo del PGM. Es lo PRIMERO de todo al apagar
+    /// el compositor en caliente, ANTES incluso de que el motor dispone las
+    /// fuentes: mientras el espejo siga puesto, el hilo del compositor
+    /// anfitrión recorre —hasta medio segundo más— instantáneas de nodos de
+    /// otras salidas, y esos nodos apuntan a fuentes que
+    /// DiscardCompositorPipelines está a punto de liberar. El porqué entero,
+    /// en LiveMonitorControl.SoltarEspejo.</summary>
+    public void SoltarEspejoPgm() => _pgm.SoltarEspejo();
 
     /// <summary>Apaga el compositor GPU de TODAS las salidas (Ajustes → Vídeo
     /// lo desmarcó, ver App.xaml.cs). No basta con quitarle el proveedor al

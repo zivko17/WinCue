@@ -309,6 +309,26 @@ internal sealed class LiveMonitorControl : IDisposable
     /// asignaciones: solo devuelve el campo volatile.</summary>
     private GraphNode? LeerRaizEspejo() => _raizEspejo;
 
+    /// <summary>Desengancha el espejo AHORA MISMO, sin esperar al siguiente tic
+    /// del PGM. Es lo PRIMERO que hay que hacer antes de tocar nada de lo que el
+    /// espejo cuelga.
+    ///
+    /// POR QUÉ EXISTE, y por qué no basta con «apagar el compositor y ya»: en
+    /// modo LIENZO la raíz del espejo lleva INSTANTÁNEAS de los nodos de las
+    /// salidas AJENAS (ver <see cref="Instantanea"/>), y el hilo del compositor
+    /// anfitrión las recorre hasta medio segundo más —lo que tarda el siguiente
+    /// tic—. Si en ese hueco alguien dispone las FUENTES de esas salidas
+    /// (VideoEngine.DiscardCompositorPipelines), ese hilo —que es un hilo que va
+    /// A LA SALA— muestrea un SRV ya liberado: AccessViolation o
+    /// DXGI_ERROR_DEVICE_REMOVED en mitad de una función. Los dos locks son
+    /// distintos, así que no hay nada que lo serialice.
+    ///
+    /// <see cref="Dispose"/> ya hacía esto mismo lo primero, y por eso cerrar la
+    /// aplicación siempre fue seguro; apagar el compositor EN CALIENTE no
+    /// pasaba por aquí. Idempotente: llamarlo sin espejo puesto no hace
+    /// nada.</summary>
+    public void SoltarEspejo() => SalirDelEspejo();
+
     /// <summary>Crea (o recrea, si el hueco cambió de tamaño) el swapchain del
     /// espejo sobre su HWND hijo. Devuelve true si ha quedado uno NUEVO —
     /// entonces hay que volver a dárselo al compositor—. Un fallo deja

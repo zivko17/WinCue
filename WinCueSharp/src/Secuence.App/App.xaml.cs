@@ -193,6 +193,25 @@ public partial class App : Application
             // también hay que soltarlo.
             if (!on)
             {
+                // ORDEN OBLIGATORIO, y la primera línea no es cosmética: el
+                // ESPEJO DEL PGM se suelta ANTES que nada. Mientras siga
+                // enganchado, el hilo del compositor anfitrión —un hilo que va
+                // A LA SALA— recorre una raíz que en modo LIENZO lleva
+                // instantáneas de nodos de OTRAS salidas, y la recorre hasta
+                // medio segundo más (el tic del PGM).
+                // DiscardCompositorPipelines dispone justo esas fuentes: sin
+                // esta línea, ese hilo entra en
+                // SharedSurfaceSource.TryAcquireReadOnly, pasa el chequeo de
+                // _disposed por delante de la liberación —los dos locks son
+                // distintos y no hay nada que los serialice— y muestrea un SRV
+                // ya liberado. AccessViolation o DXGI_ERROR_DEVICE_REMOVED en
+                // el hilo que presenta en sala, con canvas + 2 salidas + PGM
+                // en LIENZO.
+                //
+                // Cerrar la aplicación siempre fue seguro porque
+                // LiveMonitorControl.Dispose() ya suelta el espejo lo primero;
+                // lo que no pasaba por ahí era apagarlo EN CALIENTE.
+                window.SoltarEspejoPgm();
                 video.DiscardCompositorPipelines();
                 window.LiberarCompositoresGpu();
             }

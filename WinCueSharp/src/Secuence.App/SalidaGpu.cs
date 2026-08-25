@@ -420,6 +420,15 @@ internal sealed class SalidaGpu : IDisposable
     {
         if (_dispuesta)
             return;
+        // EL ESPEJO PRIMERO, igual que en LiveMonitorControl.Dispose(). Si esta
+        // salida es la ANFITRIONA del espejo del PGM, su MirrorRoot lleva nodos
+        // de OTRAS salidas, y las salidas se disponen en orden de indice: la
+        // anfitriona no tiene por que ser la 0, asi que para cuando le llega el
+        // turno puede llevar rato recorriendo, en su hilo de render, nodos y
+        // fuentes de salidas YA dispuestas. FijarEspejo entra en Mutate, o sea
+        // que al volver de aqui el hilo de render ya no tiene espejo que pintar.
+        if (_espejo is not null || _espejoRaiz is not null)
+            FijarEspejo(null, null);
         // El grafo se vacia DENTRO de Mutate y con el compositor todavia
         // vivo: es la unica mutacion que quedaba fuera del lock, y no bastaba
         // con hacerla «despues del Dispose» porque ese Dispose hace Join(2 s)
