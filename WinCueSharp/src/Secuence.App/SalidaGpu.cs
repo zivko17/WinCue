@@ -62,6 +62,13 @@ internal sealed class SalidaGpu : IDisposable
 
     private SwapChainSink? _sink;
     private OutputCompositor? _compositor;
+
+    /// <summary>Algun compositor de esta salida NO murio dentro de su Join:
+    /// puede quedar un hilo zombi recorriendo _raiz.Children. Se pega para
+    /// siempre a proposito — despues ya nadie puede certificar que ese hilo
+    /// murio—, y lo unico que cuesta es no vaciar el grafo de una salida que
+    /// de todas formas ya esta rota. Ver VaciarGrafo.</summary>
+    private bool _hiloZombi;
     private int _ancho;
     private int _alto;
     private bool _dispuesta;
@@ -308,7 +315,16 @@ internal sealed class SalidaGpu : IDisposable
         // esta sonando— y desde SubirAlFrente, que exige que la capa ya
         // estuviera dentro. Resultado: negro hasta el siguiente GO de esa
         // pista, con solo mover o redimensionar la ventana de salida.
-        _compositor?.Dispose();
+        //
+        // Se apunta si el hilo de render llego a MORIR de verdad: Dispose()
+        // hace Join(2 s) y no mira el resultado, y del veredicto depende que el
+        // grafo se pueda tocar sin Mutate ahi abajo, en el catch.
+        if (_compositor is { } viejo)
+        {
+            viejo.Dispose();
+            if (!viejo.RenderThreadStopped)
+                _hiloZombi = true;
+        }
         _compositor = null;
         _sink?.Dispose();
         _sink = null;
@@ -321,31 +337,51 @@ internal sealed class SalidaGpu : IDisposable
         {
             // AQUI SI: la salida se ha quedado ROTA, y el grafo tiene que
             // quedar coherente — sin nodos zombis dentro de _raiz.Children ni
-            // capas creyendose dentro de un grafo que ya nadie pinta. Sin
-            // compositor no hay hilo de render con quien competir.
-            VaciarGrafo();
+            // capas creyendose dentro de un grafo que ya nadie pinta.
+            //
+            // Aqui NO hay compositor por construccion (se acaba de poner a
+            // null y Construir ha fallado), asi que VaciarGrafo no puede usar
+            // Mutate: toca la lista a pelo. Eso solo es legitimo si el hilo de
+            // render del compositor VIEJO murio, y por eso se le pregunto
+            // arriba en vez de darlo por hecho. Si no murio, el grafo se deja
+            // como esta: son unos nodos de mas en una salida que ya no pinta
+            // —memoria, hasta el siguiente Construir o el Dispose—, mientras
+            // que vaciarlo bajo los pies de StackNode.Render seria un
+            // IndexOutOfRange en un hilo de fondo, o sea la app entera abajo
+            // en mitad de una funcion.
+            bool vaciado = VaciarGrafo(hiloDeRenderParado: !_hiloZombi);
             // Y hay que decirlo por los tres sitios: al log, a la barra de
             // estado, y —lo importante— a quien pida capa a partir de ahora,
             // que se la encontrara lanzando (Insertar) y caera a la ruta
             // clasica en vez de quedarse en negro para siempre.
             string aviso = $"Compositor GPU de esta salida perdido al recrear el " +
                 $"swapchain a {w}x{h} ({exc.Message}). Los cues nuevos volveran a " +
-                "la ruta clasica.";
+                "la ruta clasica." +
+                (vaciado ? "" : " Ademas, el hilo de render anterior no respondio " +
+                    "al Join: el grafo se deja intacto a proposito.");
             VideoOutputWindow.LogAviso(aviso);
             AvisoEnPantalla?.Invoke($"[AVISO] {aviso}");
         }
     }
 
-    /// <summary>Vacia el grafo SIN carrera con el hilo de render.
+    /// <summary>Vacia el grafo SIN carrera con el hilo de render. Devuelve
+    /// false si NO se ha podido vaciar y el grafo se ha dejado intacto.
     ///
-    /// Con compositor vivo va dentro de Mutate — es la unica forma legal de
-    /// tocar StackNode.Children. Sin compositor no hay hilo que lo recorra, y
-    /// no hay con quien competir. La distincion importa: OutputCompositor.
-    /// Dispose() hace Join(2 s) SIN mirar el resultado, asi que limpiar
-    /// «despues de disponer» no garantiza que el hilo haya muerto — si el Join
-    /// expira, se estaria vaciando la lista mientras StackNode.Render la
-    /// recorre por indice.</summary>
-    private void VaciarGrafo()
+    /// Con compositor vivo va dentro de Mutate — la unica forma legal de tocar
+    /// StackNode.Children — y entonces el parametro sobra.
+    ///
+    /// Sin compositor no hay Mutate con quien serializar, y «ya lo he
+    /// dispuesto» NO es prueba de que su hilo haya muerto: OutputCompositor.
+    /// Dispose() hace Join(2 s) y no mira el resultado (a proposito: colgar la
+    /// app esperando a una GPU atascada seria peor). Por eso el veredicto lo
+    /// trae quien llama, leido de OutputCompositor.RenderThreadStopped justo
+    /// despues de disponer. Con el hilo muerto, tocar la lista a pelo es
+    /// seguro; con el hilo vivo NO se toca — vaciarla mientras StackNode.
+    /// Render la recorre por indice tira la aplicacion.</summary>
+    /// <param name="hiloDeRenderParado">Solo cuenta cuando ya no hay
+    /// compositor. Por defecto false: quien no pueda demostrarlo no vacia.
+    /// </param>
+    private bool VaciarGrafo(bool hiloDeRenderParado = false)
     {
         if (_compositor is { } c)
         {
@@ -355,14 +391,22 @@ internal sealed class SalidaGpu : IDisposable
                 _enElGrafo.Clear();
             });
         }
-        else
+        else if (hiloDeRenderParado)
         {
             _raiz.Children.Clear();
             _enElGrafo.Clear();
         }
+        else
+        {
+            // Un hilo zombi sigue recorriendo esta lista: dejarla como esta es
+            // lo unico seguro. Y coherente: las capas siguen DENTRO, asi que
+            // tampoco se les dice lo contrario.
+            return false;
+        }
         // Las capas ya no estan en el grafo: que no se crean dentro.
         foreach (var capa in _capas)
             capa.OlvidarQueEstaEnElGrafo();
+        return true;
     }
 
     /// <summary>Aviso a disco. Las capas lo usan cuando el puente no se puede
@@ -379,8 +423,10 @@ internal sealed class SalidaGpu : IDisposable
         // El grafo se vacia DENTRO de Mutate y con el compositor todavia
         // vivo: es la unica mutacion que quedaba fuera del lock, y no bastaba
         // con hacerla «despues del Dispose» porque ese Dispose hace Join(2 s)
-        // sin comprobar el resultado (ver VaciarGrafo).
-        VaciarGrafo();
+        // sin comprobar el resultado (ver VaciarGrafo). Si la salida ya venia
+        // rota —sin compositor—, VaciarGrafo devuelve false y no toca nada:
+        // aqui abajo la raiz queda inalcanzable igual.
+        _ = VaciarGrafo();
         _dispuesta = true;
 
         // Mismo orden que en Redimensionar: hilo de render parado antes de

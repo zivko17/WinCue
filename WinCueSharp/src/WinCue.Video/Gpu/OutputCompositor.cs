@@ -112,6 +112,21 @@ public sealed class OutputCompositor : IDisposable
 
     public void Start() => _thread.Start();
 
+    /// <summary>El hilo de render ya NO está corriendo: nadie recorre el grafo.
+    ///
+    /// Existe porque Dispose() hace Join(2 s) y NO mira el resultado, así que
+    /// «he llamado a Dispose» no demuestra que el hilo haya muerto — y hay un
+    /// caso real en el que no muere: quedarse dentro de DrawFrame (una copia
+    /// fenceada esperando a una cola de GPU que ya no avanza), justo con
+    /// _graphLock tomado y recorriendo Children POR ÍNDICE. Quien vaya a tocar
+    /// el grafo «después de disponer» —sin Mutate, porque ya no hay compositor
+    /// con quien serializar— tiene que preguntar esto ANTES: vaciar la lista
+    /// bajo los pies de StackNode.Render tira la aplicación entera.
+    ///
+    /// Antes de Start() también es true, y es correcto: un compositor que nunca
+    /// arrancó no tiene hilo que competir.</summary>
+    public bool RenderThreadStopped => !_thread.IsAlive;
+
     /// <summary>Cambia el grafo de forma segura frente al hilo de render.
     /// Un GO del motor de cues es exactamente esto.</summary>
     public void Mutate(Action<OutputCompositor> mutation)
@@ -214,6 +229,10 @@ public sealed class OutputCompositor : IDisposable
         }
     }
 
+    /// <summary>Para el hilo de render y libera lo suyo. El Join tiene TOPE:
+    /// si expira, este método vuelve igual (colgar la aplicación esperando a un
+    /// hilo de GPU atascado sería peor) y el hilo sigue vivo — quien lo
+    /// necesite saber tiene <see cref="RenderThreadStopped"/>.</summary>
     public void Dispose()
     {
         if (_shutdown)
