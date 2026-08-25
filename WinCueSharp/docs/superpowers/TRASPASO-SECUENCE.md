@@ -52,9 +52,9 @@ buena es la de `claude/…`, que es la que escucha el CI (`claude/**`).
 | Pruebas | **1.227** (se partió de 1.194 al empezar esta tanda) |
 | Build | 0 avisos, 0 errores con `TreatWarningsAsErrors=true` |
 | Guardián de paleta | OK — 74 asignaciones, 94 constantes, 20 alias |
-| `WinCue.App` | 15.352 líneas de C# + 1.338 de XAML |
+| `WinCue.App` | 12.168 líneas de C# + 1.338 de XAML |
 | `Secuence.App` | 12.447 líneas de C# + 952 de XAML |
-| `WinCue.Presentation` | 4.125 líneas · **409 pruebas propias** |
+| `WinCue.Presentation` | 3.989 líneas · **409 pruebas propias** |
 
 ---
 
@@ -107,7 +107,7 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
         └── Secuence.App/          ← Producto 2: Secuence (WinUI 3)
 ```
 
-**`WinCue.Presentation`** (4.125 líneas, 409 pruebas propias) contiene:
+**`WinCue.Presentation`** (3.989 líneas, 409 pruebas propias) contiene:
 `Palette` (94 colores), `Icons` (59 glifos), `UiMetrics` (16 medidas),
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
