@@ -308,30 +308,42 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// Quien sabe si sus superficies han muerto es el anfitrión, no el motor.
     /// Por eso es una llamada explícita y no un efecto secundario.
     ///
-    /// LOS CUES AL AIRE QUEDAN EN STOPPED, no «sonando sin player detrás». Esto
-    /// para de verdad la reproducción —los players mueren aquí—, así que dejar
-    /// el estado como estaba convertía la lista de cues en una mentira: PLAYING
-    /// para siempre, hasta que el operador le diera Stop a mano, después de una
-    /// acción perfectamente normal de Ajustes. Se publica el estado ANTES de
-    /// destruir cada player, igual que <see cref="Stop"/>.
+    /// ══ EL ESTADO NO SE TOCA, Y ES UNA DECISIÓN, NO UN OLVIDO ══
     ///
-    /// CONSECUENCIA, ESCRITA PARA QUE NO SORPRENDA: el anfitrión ve exactamente
-    /// el mismo camino que un fin de reproducción (StateChanged → Stopped), así
-    /// que un cue con AUTO_FOLLOW encadenará al siguiente. Es coherente: su
-    /// acción ha terminado. Lo que no puede pasar es que la lista diga que
-    /// sigue al aire.</summary>
+    /// Esto MATA los players, así que los cues de vídeo que estuvieran al aire
+    /// se quedan marcados como PLAYING SIN PLAYER DETRÁS hasta que el operador
+    /// les dé Stop a mano. Sí: la lista de cues dice que algo suena y no suena
+    /// nada. Es feo y es sabido.
+    ///
+    /// LA ALTERNATIVA OBVIA ES PEOR, Y ESTÁ MEDIDA. Publicar
+    /// <c>Stopped</c> aquí (o llamar a <see cref="Stop"/>) le entrega al
+    /// anfitrión EXACTAMENTE la misma señal que un fin de reproducción, y el
+    /// controlador hace con ella lo que hace siempre: <c>OnVideoStateChanged</c>
+    /// → <c>OnActionEnd</c> → **encadenar el AUTO_FOLLOW**. O sea que desmarcar
+    /// una casilla de Ajustes → Vídeo DISPARARÍA EL SIGUIENTE CUE. En un teatro
+    /// eso es sonido y vídeo saliendo a sala sin que nadie haya dado el GO, y no
+    /// se puede poder. Una etiqueta equivocada confunde al operador; un GO no
+    /// pedido lo deja en evidencia delante del público.
+    ///
+    /// ASÍ QUE NO LO «ARREGLES» POR AHÍ. Si algún día molesta de verdad, lo que
+    /// hace falta es un camino que el CONTROLADOR trate como PARADA MANUAL —lo
+    /// que él mismo hace en EndCue, que saca el cue de <c>_running</c> ANTES de
+    /// llamar al motor, y por eso una parada del operador no encadena—, no una
+    /// señal más del motor. Eso ya no cabe aquí dentro: el motor no conoce
+    /// <c>_running</c> ni debe conocerlo.</summary>
     public void DiscardCompositorPipelines()
     {
         // Los players PRIMERO: los motores propios tienen hilos vivos usando
         // el device D3D de su slot, y destruir el pipeline con esos hilos
         // dentro es un acceso a recursos liberados (misma regla que Cleanup).
+        //
+        // TerminatePlayer y NO Stop(): Stop publica el estado, y publicar el
+        // estado encadena el AUTO_FOLLOW del cue. Ver la cabecera — esto se
+        // probó, se midió la consecuencia y se revirtió a propósito.
         foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
                      .Concat(_proresPlayers.Keys).ToList())
         {
-            // Stop() y no TerminatePlayer() a secas: cancela el fundido que
-            // quedara a medias (su timer apuntaría a un player que ya no
-            // existe) y PUBLICA el estado. Ver el porqué en la cabecera.
-            Stop(cueId);
+            TerminatePlayer(cueId);
         }
         DiscardGpuPools();
     }

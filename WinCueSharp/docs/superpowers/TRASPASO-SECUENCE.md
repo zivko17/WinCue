@@ -429,12 +429,12 @@ mismos informes y en la «PREGUNTA ABIERTA» de arriba):
   blackout e «Identificar» le siguen funcionando sin tocarlos: los dos
   ocultan y muestran ese HWND, y el swapchain se va con él. Se enciende y
   se apaga desde Ajustes → Vídeo, **en caliente** — y apagarlo **para los
-  cues de vídeo que estén al aire** (sus players mueren con los pipelines),
-  así que quedan en `Stopped` en la lista, no «sonando sin nada detrás».
+  cues de vídeo que estén al aire**: sus players mueren con los pipelines.
   El apagado tiene un **orden obligatorio**, escrito en `App.xaml.cs`:
   soltar el espejo del PGM → `DiscardCompositorPipelines()` → soltar los
   compositores. Al revés, el hilo que presenta en sala llega a muestrear
-  fuentes ya liberadas.
+  fuentes ya liberadas. Y deja un estado raro a propósito: ver «apagar el
+  compositor deja cues marcados como sonando», más abajo.
 - **Opacidad real entre pistas y crossfades de vídeo — esto en Secuence no
   había funcionado nunca.** `SetVideoCueOpacity` tenía el cuerpo vacío por
   defecto; ahora la opacidad baja en rampa de verdad (medido sobre la
@@ -527,6 +527,28 @@ control pero no de un tirón como show completo.
     compiten sobre la misma raíz del grafo. No hay forma de arreglarlo sin
     poder matar el hilo (no se puede) o sin cambiar de raíz (que borraría
     el vídeo al aire — el mismo fallo que ya se pagó una vez en la Task 7).
+  - **Apagar el compositor deja cues marcados como sonando.** Desmarcar
+    «Compositor GPU» mata los players, pero **no toca el estado de los
+    cues**: los que estuvieran al aire se quedan en `Playing` sin player
+    detrás hasta que el operador les dé Stop a mano. La lista dice que algo
+    suena y no suena nada. **Está así a sabiendas, y NO se arregla
+    publicando `Stopped`.**
+
+    Se probó y se midió la consecuencia: publicar `Stopped` le entrega al
+    controlador **exactamente la misma señal que un fin de reproducción**
+    (`OnVideoStateChanged` → `OnActionEnd`), y el controlador hace lo que
+    hace siempre, **encadenar el AUTO_FOLLOW**. O sea que desmarcar una
+    casilla de Ajustes dispararía el siguiente cue: sonido y vídeo saliendo
+    a sala sin que nadie haya dado el GO. Una etiqueta equivocada confunde
+    al operador; un GO no pedido lo deja en evidencia delante del público.
+    Entre los dos males, se elige la etiqueta.
+
+    Si algún día molesta de verdad, lo que hace falta **no es otra señal del
+    motor** sino un camino que el CONTROLADOR trate como **parada manual**:
+    lo que él mismo hace en `EndCue`, que saca el cue de `_running` ANTES de
+    llamar al motor, y por eso una parada del operador no encadena. El aviso
+    completo vive en la cabecera de `VideoEngine.DiscardCompositorPipelines`,
+    que es donde lo va a leer quien vaya a «arreglarlo».
 - Verificación de **DPI distinto entre monitores** — sigue sin hacerse. Esta
   tanda tampoco la resuelve (los monitores de prueba de Andrés siguen al
   100 %). Que no se caiga de esta lista.
