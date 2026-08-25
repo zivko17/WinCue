@@ -306,7 +306,20 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     ///     (o después) de soltar los compositores.
     ///
     /// Quien sabe si sus superficies han muerto es el anfitrión, no el motor.
-    /// Por eso es una llamada explícita y no un efecto secundario.</summary>
+    /// Por eso es una llamada explícita y no un efecto secundario.
+    ///
+    /// LOS CUES AL AIRE QUEDAN EN STOPPED, no «sonando sin player detrás». Esto
+    /// para de verdad la reproducción —los players mueren aquí—, así que dejar
+    /// el estado como estaba convertía la lista de cues en una mentira: PLAYING
+    /// para siempre, hasta que el operador le diera Stop a mano, después de una
+    /// acción perfectamente normal de Ajustes. Se publica el estado ANTES de
+    /// destruir cada player, igual que <see cref="Stop"/>.
+    ///
+    /// CONSECUENCIA, ESCRITA PARA QUE NO SORPRENDA: el anfitrión ve exactamente
+    /// el mismo camino que un fin de reproducción (StateChanged → Stopped), así
+    /// que un cue con AUTO_FOLLOW encadenará al siguiente. Es coherente: su
+    /// acción ha terminado. Lo que no puede pasar es que la lista diga que
+    /// sigue al aire.</summary>
     public void DiscardCompositorPipelines()
     {
         // Los players PRIMERO: los motores propios tienen hilos vivos usando
@@ -315,7 +328,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
                      .Concat(_proresPlayers.Keys).ToList())
         {
-            TerminatePlayer(cueId);
+            // Stop() y no TerminatePlayer() a secas: cancela el fundido que
+            // quedara a medias (su timer apuntaría a un player que ya no
+            // existe) y PUBLICA el estado. Ver el porqué en la cabecera.
+            Stop(cueId);
         }
         DiscardGpuPools();
     }
