@@ -736,8 +736,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     }
 
     /// <summary>Desmonta los TRES pools del compositor: pipeline liberado y
-    /// sink desenganchado. Lo usan Cleanup() y el cambio de modo del
-    /// compositor (SetGpuLayerSurfaceProvider).
+    /// sink desenganchado. Lo usan Cleanup() (salida de la aplicación) y
+    /// DiscardCompositorPipelines() (petición EXPLÍCITA del anfitrión).
+    ///
+    /// NO lo llama SetGpuLayerSurfaceProvider, y no debe llamarlo: ver el
+    /// porqué en DiscardCompositorPipelines — hacerlo pararía cues al aire en
+    /// WinCue, que está en producción y no cambia de comportamiento.
     ///
     /// LLAMAR CON LOS PLAYERS YA PARADOS: los motores propios tienen hilos
     /// vivos usando el device D3D de su slot.</summary>
@@ -1637,9 +1641,31 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             };
             _gpuPool.Add(slot);
         }
-        slot.BusyCueId = cueId;
-        foreach (var s in slot.Sinks)
-            s.AssignCue(cueId);
+        // AssignCue TAMBIEN puede lanzar (el anfitrion se encuentra la capa
+        // muerta, o su compositor perdido). Si se escapa de aqui, el `slot`
+        // local del LLAMANTE sigue en null —la asignacion nunca llego a
+        // ejecutarse— y su guarda `if (slot is not null) ReleaseGpuSlot(...)`
+        // no corre: el slot se queda en el pool con BusyCueId puesto para
+        // siempre, no vuelve a casar con la busqueda de slots libres, y su
+        // pipeline no se libera hasta Cleanup(). En mpv lo tapa _gpuFailed,
+        // pero en HAP y ProRes no hay latch y seria una fuga POR CUE — el
+        // mismo modo de fallo que este try venia a eliminar, una linea mas
+        // abajo. Por eso el slot se desmonta ENTERO y se relanza: el llamante
+        // cae a la ruta clasica y el pool queda limpio.
+        try
+        {
+            slot.BusyCueId = cueId;
+            foreach (var s in slot.Sinks)
+                s.AssignCue(cueId);
+        }
+        catch (Exception)
+        {
+            slot.BusyCueId = null;
+            _gpuPool.Remove(slot);
+            DetachSinks(slot.Pipeline, slot.Sinks);
+            slot.Pipeline.Dispose();
+            throw;
+        }
         return slot;
     }
 
@@ -1834,8 +1860,24 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             };
             _hapPool.Add(slot);
         }
-        slot.BusyCueId = cueId;
-        slot.Sink.AssignCue(cueId);
+        // Mismo desmontaje que en AcquireGpuSlot si AssignCue lanza — y aqui
+        // importa mas: sin _gpuFailed que enganche, un slot zombi con su
+        // pipeline (device D3D9Ex, hilo de decodificacion) seria una fuga por
+        // cada cue.
+        try
+        {
+            slot.BusyCueId = cueId;
+            slot.Sink.AssignCue(cueId);
+        }
+        catch (Exception)
+        {
+            slot.BusyCueId = null;
+            _hapPool.Remove(slot);
+            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
+            slot.Sink.ClearSurface();
+            slot.Pipeline.Dispose();
+            throw;
+        }
         return slot;
     }
 
@@ -2073,8 +2115,23 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 $"(salida {screen}, pista {layer})");
         }
 
-        slot.BusyCueId = cueId;
-        slot.Sink.AssignCue(cueId);
+        // Mismo desmontaje que en AcquireGpuSlot/AcquireHapSlot si AssignCue
+        // lanza. La SESION muere antes que su device, como en todas partes.
+        try
+        {
+            slot.BusyCueId = cueId;
+            slot.Sink.AssignCue(cueId);
+        }
+        catch (Exception)
+        {
+            slot.BusyCueId = null;
+            _proresPool.Remove(slot);
+            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
+            slot.Sink.ClearSurface();
+            slot.Session?.Dispose();
+            slot.Pipeline.Dispose();
+            throw;
+        }
         return slot;
     }
 

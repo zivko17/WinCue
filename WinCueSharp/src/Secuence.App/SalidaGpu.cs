@@ -298,7 +298,16 @@ internal sealed class SalidaGpu : IDisposable
         // ORDEN OBLIGATORIO: primero parar el hilo de render (Dispose del
         // compositor lo hace y espera a que termine), y solo despues soltar
         // el sink. Al reves, el hilo estaria pintando en una RTV liberada.
-        VaciarGrafo();
+        //
+        // EL GRAFO NO SE TOCA AQUI. La raiz sobrevive a la recreacion —es lo
+        // que promete la cabecera de este fichero— y el compositor nuevo la
+        // recibe con sus capas donde estaban. Vaciarla antes de Construir
+        // (como llego a hacer este metodo) borraba el video AL AIRE: no queda
+        // ningun camino que vuelva a meter las capas, porque InsertarOrdenado
+        // solo se alcanza desde AssignCue —que no se repite para un cue que ya
+        // esta sonando— y desde SubirAlFrente, que exige que la capa ya
+        // estuviera dentro. Resultado: negro hasta el siguiente GO de esa
+        // pista, con solo mover o redimensionar la ventana de salida.
         _compositor?.Dispose();
         _compositor = null;
         _sink?.Dispose();
@@ -310,12 +319,15 @@ internal sealed class SalidaGpu : IDisposable
         }
         catch (Exception exc)
         {
-            // Salida ROTA, y hay que decirlo por los tres sitios: al log, a la
-            // barra de estado, y —lo importante— a quien pida capa a partir de
-            // ahora, que se la encontrara lanzando (Insertar) y caera a la
-            // ruta clasica en vez de quedarse en negro para siempre.
-            // El grafo ya se vacio arriba: sin esto quedaban nodos zombis
-            // dentro de _raiz.Children y capas creyendose dentro del grafo.
+            // AQUI SI: la salida se ha quedado ROTA, y el grafo tiene que
+            // quedar coherente — sin nodos zombis dentro de _raiz.Children ni
+            // capas creyendose dentro de un grafo que ya nadie pinta. Sin
+            // compositor no hay hilo de render con quien competir.
+            VaciarGrafo();
+            // Y hay que decirlo por los tres sitios: al log, a la barra de
+            // estado, y —lo importante— a quien pida capa a partir de ahora,
+            // que se la encontrara lanzando (Insertar) y caera a la ruta
+            // clasica en vez de quedarse en negro para siempre.
             string aviso = $"Compositor GPU de esta salida perdido al recrear el " +
                 $"swapchain a {w}x{h} ({exc.Message}). Los cues nuevos volveran a " +
                 "la ruta clasica.";
