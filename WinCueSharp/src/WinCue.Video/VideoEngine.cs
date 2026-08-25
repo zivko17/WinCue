@@ -243,6 +243,30 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     public void SetLayerHandleProvider(Func<int, int, nint>? provider) =>
         _getLayerHandle = provider;
 
+    /// <summary>Las superficies de PRESENTACIÓN de los pipelines propios (HAP y
+    /// ProRes) nacen COMPARTIDAS, con handle que se pueda abrir desde otro
+    /// device. POR DEFECTO false, y ese defecto es el contrato:
+    ///
+    ///   · WinCue no la pone NUNCA. Hospeda esa superficie en su propio device
+    ///     D3D9Ex (D3DImage) y no necesita handle ninguno, así que su
+    ///     asignación de recurso se queda EXACTAMENTE donde estaba —la llamada
+    ///     a CreateRenderTarget sin <c>pSharedHandle</c>, byte a byte la de
+    ///     siempre— y no hereda un modo de fallo nuevo: en un entorno donde el
+    ///     render target compartido no se pudiera crear, el constructor
+    ///     lanzaría y HAP/ProRes caerían a mpv en silencio. WinCue está en
+    ///     producción y no cambia de comportamiento.
+    ///   · Secuence SÍ la pone, al instalar su proveedor de superficies (ver
+    ///     Secuence.App.App.xaml.cs): sus capas abren la superficie en D3D11
+    ///     con OpenSharedResource y sin handle no hay puente.
+    ///
+    /// SE LEE AL CONSTRUIR el pipeline, así que solo afecta a los que se creen
+    /// a partir de ahora — que es lo correcto: el pool se descarta al cambiar
+    /// de modo (<see cref="DiscardCompositorPipelines"/>). Si el handle no se
+    /// pidió y alguien lo reclama, <c>PresentSharedHandle</c> devuelve 0 y el
+    /// consumidor falla CLARO (SharedSurfaceSource rechaza el handle 0 y la
+    /// capa relanza), nunca en silencio.</summary>
+    public bool SharePresentSurfaces { get; set; }
+
     /// <summary>Activa el COMPOSITOR GPU (render API → superficies D3D con
     /// opacidad real; una superficie POR CUE, entregada por (salida, pista,
     /// cueId)). null = volver al modo clásico HWND.</summary>
@@ -1885,7 +1909,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             // CA2000: el pipeline pasa al pool (vive toda la sesión).
 #pragma warning disable CA2000
-            var pipeline = new HapGpuPipeline(surfW, surfH);
+            var pipeline = new HapGpuPipeline(surfW, surfH, SharePresentSurfaces);
 #pragma warning restore CA2000
             IVideoLayerSurface sink;
             try
@@ -2138,7 +2162,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             // CA2000: el pipeline pasa al pool (vive toda la sesión).
 #pragma warning disable CA2000
-            var pipeline = new ProResGpuPipeline(surfW, surfH);
+            var pipeline = new ProResGpuPipeline(surfW, surfH, SharePresentSurfaces);
 #pragma warning restore CA2000
             IVideoLayerSurface sink;
             try

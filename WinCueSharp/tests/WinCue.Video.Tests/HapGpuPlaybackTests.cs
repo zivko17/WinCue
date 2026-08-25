@@ -67,11 +67,15 @@ public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
     /// código nuevo del que no se sabía nada (hallazgo de revisión).
     /// _out.WriteLine dice si la máquina tenía GPU/driver utilizable: sin eso
     /// el "sin GPU: return" silencioso podría estar pasando por no afirmar
-    /// nada, no por afirmar algo cierto.</summary>
+    /// nada, no por afirmar algo cierto.
+    ///
+    /// La superficie compartida se PIDE (<c>sharePresentSurface: true</c>): sin
+    /// pedirla nace privada, que es como la usa WinCue y como nació — ver
+    /// VideoEngine.SharePresentSurfaces.</summary>
     [Fact]
     public void PresentSharedHandle_YCopyPresentFenced_FuncionanConLaQueryPersistente()
     {
-        using var pipeline = TryCreatePipeline();
+        using var pipeline = TryCreatePipeline(sharePresentSurface: true);
         if (pipeline is null)
         {
             _out.WriteLine("SALTADA: sin GPU/driver D3D9Ex+D3D11 utilizable en esta máquina.");
@@ -97,9 +101,9 @@ public class HapGpuPlaybackTests : IClassFixture<HapMediaFixture>
 
     /// <summary>CA2000: la creación va en método aparte — devolver el objeto
     /// transfiere la propiedad al llamador (que lo mete en un using).</summary>
-    private static HapGpuPipeline? TryCreatePipeline()
+    private static HapGpuPipeline? TryCreatePipeline(bool sharePresentSurface = false)
     {
-        try { return new HapGpuPipeline(640, 480); }
+        try { return new HapGpuPipeline(640, 480, sharePresentSurface); }
         catch (Exception) { return null; }
     }
 }

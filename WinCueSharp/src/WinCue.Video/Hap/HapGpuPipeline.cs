@@ -217,10 +217,25 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
 
     /// <summary>Handle COMPARTIDO de la superficie de PRESENTACIÓN, para quien
     /// no pueda hospedarla directamente y tenga que abrirla en otro device
-    /// (Secuence: WinUI 3 sin D3DImage).</summary>
+    /// (Secuence: WinUI 3 sin D3DImage).
+    ///
+    /// 0 si el pipeline NO se construyó pidiéndolo (<c>sharePresentSurface</c>
+    /// a false, que es el caso de WinCue). Devolver 0 es a propósito: el
+    /// consumidor tiene que fallar CLARO —SharedSurfaceSource rechaza el handle
+    /// 0 y la capa relanza, así que el cue cae a la ruta clásica— y no
+    /// quedarse esperando fotogramas de una superficie que nadie compartió.
+    /// </summary>
     public nint PresentSharedHandle => _presentSharedHandle;
 
-    public HapGpuPipeline(int surfaceWidth, int surfaceHeight)
+    /// <param name="sharePresentSurface">La superficie de PRESENTACIÓN nace
+    /// COMPARTIDA (se le pide handle al driver). Por defecto NO, que es como
+    /// nació y como la usa WinCue: allí la hospeda su propio device D3D9Ex y
+    /// pedir un render target compartido solo añadiría un modo de fallo —si el
+    /// driver no pudiera crearlo, este constructor lanzaría y el cue caería a
+    /// mpv sin que nadie lo hubiera pedido. Lo pone Secuence, que sí abre esa
+    /// superficie en otro device (ver VideoEngine.SharePresentSurfaces).</param>
+    public HapGpuPipeline(int surfaceWidth, int surfaceHeight,
+        bool sharePresentSurface = false)
     {
         Width = Math.Max(16, surfaceWidth);
         Height = Math.Max(16, surfaceHeight);
@@ -307,16 +322,31 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
             _sharedSurface = _sharedTexture.GetSurfaceLevel(0);
 
             // Superficie de PRESENTACIÓN: el back buffer que ve WPF. Creada UNA
-            // vez, viva toda la sesión (aud. 05). TAMBIÉN pide handle
-            // compartido (Task 5): quien no pueda hospedar el IDirect3DSurface9
-            // directamente (Secuence, WinUI 3 sin D3DImage) la abre por su
-            // cuenta con OpenSharedResource — esto no cambia nada para WPF,
-            // que sigue usando el puntero de PresentSurfacePointer tal cual.
-            nint presentShared = 0;
-            _presentSurface = _d3d9Device.CreateRenderTarget((uint)Width, (uint)Height,
-                Vortice.Direct3D9.Format.A8R8G8B8, MultisampleType.None, 0, lockable: false,
-                ref presentShared);
-            _presentSharedHandle = presentShared;
+            // vez, viva toda la sesión (aud. 05).
+            //
+            // COMPARTIDA SOLO SI ALGUIEN LA VA A ABRIR EN OTRO DEVICE. Quien
+            // hospeda el IDirect3DSurface9 directamente (WPF/WinCue, vía
+            // PresentSurfacePointer) se queda con la creación de SIEMPRE —
+            // superficie PRIVADA, sin pSharedHandle—: pedir un render target
+            // compartido en un producto que se está vendiendo cambia cómo se
+            // asigna el recurso y añade un modo de fallo (si el driver no
+            // pudiera crearlo, el constructor lanzaría y HAP caería a mpv en
+            // silencio). Secuence —WinUI 3, sin D3DImage— sí la pide, porque la
+            // abre con OpenSharedResource desde su device D3D11.
+            if (sharePresentSurface)
+            {
+                nint presentShared = 0;
+                _presentSurface = _d3d9Device.CreateRenderTarget((uint)Width, (uint)Height,
+                    Vortice.Direct3D9.Format.A8R8G8B8, MultisampleType.None, 0, lockable: false,
+                    ref presentShared);
+                _presentSharedHandle = presentShared;
+            }
+            else
+            {
+                _presentSurface = _d3d9Device.CreateRenderTarget((uint)Width, (uint)Height,
+                    Vortice.Direct3D9.Format.A8R8G8B8, MultisampleType.None, 0, lockable: false);
+                _presentSharedHandle = 0;
+            }
 
             // Query de evento PERSISTENTE para CopyPresentFenced (ver el
             // comentario del campo). Si el driver no soporta

@@ -165,6 +165,14 @@ public partial class App : Application
         void ApplyCompositorMode()
         {
             bool on = settings.Get("video_compositor", false);
+            // Las superficies de PRESENTACIÓN de los pipelines propios (HAP,
+            // ProRes) tienen que nacer COMPARTIDAS porque estas capas las abren
+            // en OTRO device (D3D11). Se pide aquí, junto al proveedor, porque
+            // es exactamente la misma decisión: quien instala capas de
+            // Secuence es quien necesita el handle. WinCue no lo pide nunca y
+            // sus superficies se siguen asignando igual que siempre — ver
+            // VideoEngine.SharePresentSurfaces.
+            video.SharePresentSurfaces = on;
             video.SetGpuLayerSurfaceProvider(on
                 ? (screen, layer, slotSeq) =>
                     window.ObtenerSuperficieCompositor(screen, layer, slotSeq)
