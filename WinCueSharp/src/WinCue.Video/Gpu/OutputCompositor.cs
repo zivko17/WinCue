@@ -76,12 +76,23 @@ public sealed class OutputCompositor : IDisposable
     /// compositor en vez de un segundo decodificador. Dos hilos dibujando los
     /// mismos nodos serian una carrera sobre la superficie de presentacion;
     /// en el mismo fotograma no hay nada que sincronizar. No es propiedad
-    /// nuestra: Dispose() no lo libera.</summary>
+    /// nuestra: Dispose() no lo libera.
+    ///
+    /// Tocarla fuera de <see cref="Mutate"/> es una carrera — la misma regla
+    /// que <see cref="Root"/>, y por el mismo motivo: la LEE el hilo de render
+    /// en cada fotograma. Antes de <see cref="Start"/> se puede asignar
+    /// directamente, porque todavia no hay hilo con quien competir.</summary>
     public IOutputSink? Mirror { get; set; }
 
     /// <summary>Raiz alternativa para el espejo (el PGM en modo LIENZO
     /// reconstruye el lienzo entero). Si es null, el espejo pinta la raiz
-    /// normal.</summary>
+    /// normal.
+    ///
+    /// Tocarla fuera de <see cref="Mutate"/> es una carrera, igual que
+    /// <see cref="Mirror"/> y <see cref="Root"/>: el hilo de render la invoca
+    /// una vez por fotograma. Y el DELEGADO tiene la suya propia — lo que
+    /// devuelve se recorre en ese hilo, asi que la raiz se PUBLICA entera de un
+    /// tiron (un arbol nuevo cada vez) y nunca se muta en sitio.</summary>
     public Func<GraphNode?>? MirrorRoot { get; set; }
 
     /// <param name="clock">Reloj maestro: devuelve el instante del show en

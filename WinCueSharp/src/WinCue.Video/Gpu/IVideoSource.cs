@@ -58,9 +58,23 @@ public interface IVideoSource : IDisposable
     /// sala: el espejo mira lo último que el dueño copió y, como mucho, va un
     /// fotograma por detrás — invisible en un monitor.
     ///
-    /// El comportamiento POR DEFECTO es delegar en <see cref="TryAcquire"/>:
-    /// una fuente sin efectos secundarios (anillo con PTS) ya cumple el
-    /// contrato sin escribir nada. Solo lo redefine quien SÍ los tiene.</summary>
+    /// EL COMPORTAMIENTO POR DEFECTO ES DELEGAR en <see cref="TryAcquire"/>, y
+    /// eso NO ES CUMPLIR EL CONTRATO: es lo bastante bueno para las fuentes que
+    /// hay hoy y nada más. Que quede claro, porque este es un contrato
+    /// compartido y la trampa es fácil de pisar:
+    ///
+    ///   · <c>MpvSource</c> y <c>HapSource</c> escriben en su <c>TryAcquire</c>
+    ///     — mueven <see cref="VideoSourceStats"/> y apuntan el PTS del último
+    ///     préstamo—, así que heredando este cuerpo SÍ dejan rastro cuando solo
+    ///     se les está mirando. Hoy es inocuo porque el espejo del PGM solo
+    ///     recorre nodos sobre <c>SharedSurfaceSource</c>, que sí lo redefine;
+    ///     deja de serlo en cuanto la ruta nativa (<c>MpvSource</c>) entre en
+    ///     el grafo, que es el siguiente paso del diseño.
+    ///   · Lo que el defecto evita es OBLIGAR a escribir el método a una fuente
+    ///     nueva antes de que el fallo importe. Quien tenga efectos que le
+    ///     pertenezcan al dueño de la salida —consumir una bandera de fotograma
+    ///     nuevo, disparar una copia, mover contadores— TIENE que redefinirlo.
+    ///     </summary>
     bool TryAcquireReadOnly(double mediaTime, out FrameLease lease) =>
         TryAcquire(mediaTime, out lease);
 

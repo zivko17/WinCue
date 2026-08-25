@@ -132,7 +132,31 @@ public sealed class MpvGpuRenderer : IDisposable
     /// justo después falla de forma no determinista (medido en esta máquina;
     /// ver GlDxInterop.FlushQuery). Reutiliza la query PERSISTENTE del
     /// pipeline — crear/destruir un objeto COM por fotograma es la fuga de
-    /// VRAM de la auditoría 05.</summary>
+    /// VRAM de la auditoría 05.
+    ///
+    /// LO QUE ESTE FENCE ACOPLA, ESCRITO A PROPÓSITO PORQUE NO SE VE. En modo
+    /// CANVAS un solo pipeline sirve las N vistas, repartidas entre N
+    /// compositores de salida, o sea N hilos de render distintos llamando aquí.
+    /// Y comparten dos cosas: este <c>_copySync</c> y UNA sola event query
+    /// (<c>_presentQuery</c>). De ahí salen tres consecuencias reales:
+    ///
+    ///   1. La espera del fence ocurre DENTRO de <c>_copySync</c>: el hilo de
+    ///      sala de una salida puede quedarse esperando detrás del fence de
+    ///      OTRA salida.
+    ///   2. <c>Issue(END)</c> marca TODO lo encolado en el device hasta ese
+    ///      momento, no la copia de esta vista: cada salida acaba esperando la
+    ///      cola entera del device D3D9Ex, con el trabajo de las demás dentro.
+    ///   3. <see cref="RenderThread"/> toma el MISMO <c>_copySync</c> para
+    ///      <c>PresentFrame()</c>, así que el HILO DE RENDER DE MPV puede
+    ///      bloquearse detrás de un fence ajeno. Eso contradice la regla de
+    ///      esta arquitectura de que nada bloquea al hilo de render de mpv, y
+    ///      por eso queda aquí escrito y no dado por bueno en silencio.
+    ///
+    /// MEDIDO en 2,5-3,5 ms por fotograma con dos salidas, o sea que no cuelga
+    /// nada y NO se rediseña por ahora. Quitarlo pediría una query por vista y
+    /// sacar la espera del lock, y eso es una tanda entera. Si algún día el
+    /// peor fotograma del compositor se dispara en modo canvas, este es el
+    /// primer sitio donde mirar.</summary>
     public void CopyPresentFenced(int i)
     {
         lock (_copySync)
