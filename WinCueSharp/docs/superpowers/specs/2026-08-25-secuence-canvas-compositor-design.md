@@ -105,7 +105,7 @@ nada**.
 | Una instancia de mpv por salida | **Descartado** | Cada salida decodificaría por su cuenta: dos proyectores fuera de sincronía. En teatro se ve |
 | «Salidas a pantalla completa» | **Fuera** | Esta ventana no tiene modo ventana, por diseño |
 | «Fundido del blackout» | **Fuera** | El compositor lo haría posible por primera vez; Andrés prefiere no meterlo en esta tanda |
-| PGM | **Espeja el compositor** | Hoy decodifica el archivo por segunda vez y no enseña lo que sale de verdad |
+| PGM | **Espeja el compositor, con selector** | Hoy decodifica el archivo por segunda vez y no enseña lo que sale de verdad. Con varias salidas no existe «lo que sale» en singular, así que lo elige quien mira |
 
 ---
 
@@ -244,14 +244,42 @@ forzando `CanvasOutputs = null`, igual que en WinCue.
 
 ### El PGM
 
-Pasa a espejar el compositor. `OutputCompositor` gana un **sink secundario
-opcional**, presentado en el mismo hilo y en el mismo fotograma que el
-principal: cero carreras, cero decodificación extra, un dibujado más de
-texturas que ya están en memoria.
+Pasa a espejar el compositor, **con un selector de qué mira**: `LIENZO`,
+`SALIDA 1`, `2`, `3`, `4`. Va en la cabecera de color que el monitor ya tiene
+(`PgmHeader`), así que no hay disposición nueva que inventar. Solo se ofrecen
+las salidas **habilitadas**, y `LIENZO` solo cuando el modo canvas está
+puesto — con una sola salida, lienzo y Salida 1 son la misma imagen. Por
+defecto: `LIENZO` en modo canvas, `SALIDA 1` si no. La elección **se guarda**
+(`pgm_monitor_source`), como el alto del panel inferior.
 
-Espeja **la Salida 1**. Con el canvas puesto eso es el recorte de la salida 1,
-no el lienzo entero: con cuatro salidas no existe «lo que sale» en singular.
-**Límite conocido**, anotado a propósito.
+Esto es interfaz que WinCue **no** tiene. Es la única desviación deliberada de
+la paridad en toda la tanda, y sale de que Secuence puede tener cuatro salidas
+y un lienzo, donde el PGM de WinCue solo tenía una imagen que espejar.
+
+**Y esto es lo que gobierna los hilos.** Un mismo device D3D11 para toda la
+app (es el sentido de `GpuDevice`), y **un compositor con su hilo y su
+swapchain por salida**. El PGM no tiene hilo propio: dibuja **dentro del
+fotograma del compositor de la Salida 1**, como sink secundario.
+
+- Con una salida seleccionada, muestrea la textura de esa salida.
+- Con `LIENZO`, coloca cada vista en su sitio (`v.X, v.Y, v.W, v.H`)
+  reescalado al hueco del monitor. **Cada vista ya llega recortada** —
+  `MpvGpuRenderer` renderiza el recorte de cada salida en su propia
+  superficie—, así que el lienzo se reconstruye sin decodificar ni renderizar
+  nada extra: donde no cubre ninguna región, negro.
+
+**El copiador lo llama SIEMPRE el compositor dueño de esa salida**, nunca el
+PGM. El PGM solo muestrea, en lectura. Eso deja una ventana de tearing
+teórica al mirar salidas que no son la 1, mientras su dueño hace el
+`StretchRect`. Se acepta a propósito: **es un monitor, no la sala** — y el
+precio de evitarlo sería sincronizar los hilos de las salidas entre sí, que es
+justo lo que no se debe hacer en el camino que va a pantalla.
+
+`LiveMonitorControl` recupera así la rama que su propia cabecera dejó anotada:
+«si el compositor llega a Secuence, esa rama sube entonces». Cuando el cue en
+pantalla no tiene superficie de compositor (ruta clásica, HAP y ProRes
+aparte), el PGM sigue decodificando su copia muda, exactamente como hace
+WinCue en ese caso.
 
 ---
 
@@ -284,7 +312,8 @@ Lo que ninguna máquina ve:
 - Un **crossfade con opacidad real**, que en Secuence no ha existido nunca.
 - **Blackout y PANIC** con el swapchain vivo.
 - **Identificar salida** (el rótulo XAML sobre el HWND oculto).
-- El **PGM espejando** lo que sale.
+- El **PGM espejando**, y su selector: `LIENZO` con el canvas puesto (que el
+  lienzo se reconstruya entero y encaje), y cada salida por separado.
 - **Apagar el compositor** y comprobar que se vuelve a la ruta clásica de
   siempre.
 - Y en WinCue, tras el refactor del editor: que la pestaña Vídeo sigue
