@@ -534,3 +534,94 @@ public class VideoEnginePoolTeardownTests
         }
     }
 }
+
+// =============================================================================
+// El copiador de presentacion: CON fence solo para quien lo pida
+// =============================================================================
+// POR QUE EXISTE ESTA CLASE. WinCue esta en produccion y hospeda la superficie
+// de presentacion en SU device D3D9Ex: no necesita fence, y no debe pagarlo.
+// CopyPresentFenced BLOQUEA esperando a la GPU, una vez por fotograma NUEVO y
+// por capa, dentro del lock del grafo. Meterselo a WinCue seria una regresion
+// de rendimiento invisible en el diff —una linea, tres sitios— y visible en
+// sala; hasta ahora NADA en la suite lo afirmaba.
+//
+// Se prueba la REGLA (VideoEngine.FrameCopierFor), que es por donde pasan los
+// tres pools. Entrar por la puerta principal no sirve: el cableado del copiador
+// solo ocurre al CREAR el slot, y crear un slot construye un pipeline de verdad
+// (device D3D9Ex, interop GL, superficies) que exige GPU — y esto tiene que
+// correr en el CI, que es justo donde no hay ninguna.
+// =============================================================================
+
+public class VideoEngineFrameCopierTests
+{
+    /// <summary>El sink de WINCUE: implementa el interfaz y NO redefine
+    /// NeedsCrossDeviceFence, o sea que se queda con el false por defecto del
+    /// contrato. Igual que CompositorLayerControl.</summary>
+    private sealed class SinkPorDefecto : IVideoLayerSurface
+    {
+        public void SetSurface(nint d3d9Surface, int width, int height) { }
+
+        public void InvalidateFrame() { }
+
+        public void AssignCue(int cueId) { }
+
+        public void ReleaseCue(int cueId) { }
+
+        public void ClearSurface() { }
+    }
+
+    /// <summary>El sink de SECUENCE: abre la superficie en otro device (D3D11)
+    /// y por eso pide la barrera. Igual que CapaCompositor.</summary>
+    private sealed class SinkQuePideFence : IVideoLayerSurface
+    {
+        public bool NeedsCrossDeviceFence => true;
+
+        public void SetSurface(nint d3d9Surface, int width, int height) { }
+
+        public void InvalidateFrame() { }
+
+        public void AssignCue(int cueId) { }
+
+        public void ReleaseCue(int cueId) { }
+
+        public void ClearSurface() { }
+    }
+
+    [Fact]
+    public void SinkPorDefecto_RecibeElCopiadorSINFence()
+    {
+        bool sinFence = false;
+        bool conFence = false;
+        Action copiador = VideoEngine.FrameCopierFor(new SinkPorDefecto(),
+            sinFence: () => sinFence = true,
+            conFence: () => conFence = true);
+
+        copiador();
+
+        Assert.True(sinFence,
+            "el sink por defecto (WinCue) no recibio CopyPresent: si le llega el " +
+            "fenceado, paga un bloqueo de GPU por fotograma y por capa");
+        Assert.False(conFence,
+            "el sink por defecto (WinCue) recibio el copiador FENCEADO");
+    }
+
+    [Fact]
+    public void SinkQuePideFence_RecibeElCopiadorCONFence()
+    {
+        bool sinFence = false;
+        bool conFence = false;
+        Action copiador = VideoEngine.FrameCopierFor(new SinkQuePideFence(),
+            sinFence: () => sinFence = true,
+            conFence: () => conFence = true);
+
+        copiador();
+
+        // El simetrico, para que la prueba de arriba no pueda salir verde
+        // porque el metodo devuelva SIEMPRE el mismo copiador.
+        Assert.True(conFence,
+            "el sink de Secuence no recibio CopyPresentFenced: sin la barrera " +
+            "entre devices, D3D11 lee negro de forma no determinista");
+        Assert.False(sinFence,
+            "el sink de Secuence recibio el copiador sin fence");
+    }
+}

@@ -811,6 +811,31 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         _proresPool.Clear();
     }
 
+    /// <summary>El copiador interop→presentación que le toca a un sink: CON
+    /// fence SOLO si va a abrir la superficie en OTRO device.
+    ///
+    /// Es la misma decisión en los TRES pools (mpv, HAP, ProRes) y vive aquí
+    /// porque es una REGLA, no un detalle de cada uno:
+    ///
+    ///   · Secuence (<c>NeedsCrossDeviceFence</c> = true) abre la superficie
+    ///     compartida D3D9Ex desde D3D11, y ahí no hay sincronización implícita
+    ///     entre colas: sin la barrera se lee negro de forma no determinista
+    ///     (demostrado en la Tarea 4, quitando el fence la prueba por píxel
+    ///     vuelve a rojo).
+    ///   · WinCue NO lo implementa —el miembro es una implementación por
+    ///     defecto del interfaz, false— porque hospeda esa misma superficie en
+    ///     SU device D3D9Ex. Se queda con <c>CopyPresent</c> a secas y no paga
+    ///     un bloqueo de GPU por fotograma y por capa. Es un producto que se
+    ///     está vendiendo: meterle ese bloqueo sería una regresión de
+    ///     rendimiento invisible en el código y visible en sala, y por eso hay
+    ///     una prueba (SIN GPU) que afirma justo esto.</summary>
+    internal static Action FrameCopierFor(IVideoLayerSurface sink,
+        Action sinFence, Action conFence)
+    {
+        ArgumentNullException.ThrowIfNull(sink);
+        return sink.NeedsCrossDeviceFence ? conFence : sinFence;
+    }
+
     /// <summary>Desengancha los sinks de un pipeline mpv: PRIMERO la
     /// suscripción a FrameRendered y después ClearSurface.
     ///
@@ -1696,15 +1721,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                     sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
                     sink.SetSharedHandle(pipeline.ViewSharedHandle(i));
                     int viewIndex = i;
-                    // FENCEADO solo para quien abra el handle en otro device
-                    // (Secuence, D3D11): sin la barrera entre las dos colas lee
-                    // negro de forma no determinista. WinCue hospeda la
-                    // superficie en su propio device D3D9Ex y sigue con
-                    // CopyPresent a secas, sin pagar un bloqueo por fotograma
-                    // y por capa.
-                    sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                        ? () => pipeline.CopyPresentFenced(viewIndex)
-                        : () => pipeline.CopyPresent(viewIndex));
+                    sink.SetFrameCopier(FrameCopierFor(sink,
+                        sinFence: () => pipeline.CopyPresent(viewIndex),
+                        conFence: () => pipeline.CopyPresentFenced(viewIndex)));
                     pipeline.FrameRendered += sink.InvalidateFrame;
                     sinks.Add(sink);
                 }
@@ -1933,10 +1952,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
                 sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
                 sink.SetSharedHandle(pipeline.PresentSharedHandle);
-                // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
-                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                    ? pipeline.CopyPresentFenced
-                    : pipeline.CopyPresent);
+                sink.SetFrameCopier(FrameCopierFor(sink,
+                    sinFence: pipeline.CopyPresent,
+                    conFence: pipeline.CopyPresentFenced));
                 pipeline.FrameRendered += sink.InvalidateFrame;
             }
             catch (Exception)
@@ -2186,10 +2204,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
                 sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
                 sink.SetSharedHandle(pipeline.PresentSharedHandle);
-                // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
-                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                    ? pipeline.CopyPresentFenced
-                    : pipeline.CopyPresent);
+                sink.SetFrameCopier(FrameCopierFor(sink,
+                    sinFence: pipeline.CopyPresent,
+                    conFence: pipeline.CopyPresentFenced));
                 pipeline.FrameRendered += sink.InvalidateFrame;
             }
             catch (Exception)
