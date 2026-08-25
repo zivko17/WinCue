@@ -169,10 +169,15 @@ public sealed partial class MainWindow : Window, IShowView
         // Close() se llama una segunda vez desde dentro del propio handler).
         WireSplitters();
 
-        // handledEventsToo: true — si no, la tabla se come las letras con su
-        // type-ahead y los hotkeys por cue no llegarían nunca.
-        RootGrid.AddHandler(UIElement.KeyDownEvent,
-            new KeyEventHandler(OnKeyDownGlobal), handledEventsToo: true);
+        // EL DESPACHADOR ÚNICO DE TECLADO. Va en el evento TÚNEL
+        // (PreviewKeyDown) del Grid raíz, no en KeyDown, y ése es todo el
+        // arreglo — ver OnPreviewKeyDownGlobal para el porqué medido.
+        //
+        // handledEventsToo: true por si algún día alguien marca la tecla más
+        // arriba; aquí, siendo el preview de la raíz, en la práctica siempre
+        // llega sin marcar.
+        RootGrid.AddHandler(UIElement.PreviewKeyDownEvent,
+            new KeyEventHandler(OnPreviewKeyDownGlobal), handledEventsToo: true);
 
         _appWindow.Closing += async (_, args) =>
         {
@@ -1054,18 +1059,6 @@ public sealed partial class MainWindow : Window, IShowView
         FlashStatus(_blackout
             ? $"{Icons.BlackFrame} Blackout activado."
             : "Blackout levantado.");
-    }
-
-    private void OnGoAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        _controller?.OnGoPressed();
-        args.Handled = true;
-    }
-
-    private void OnStopAllAccelerator(KeyboardAccelerator sender, KeyboardAcceleratorInvokedEventArgs args)
-    {
-        _controller?.OnStopPressed();
-        args.Handled = true;
     }
 
     // ==================================================================
@@ -2274,31 +2267,100 @@ public sealed partial class MainWindow : Window, IShowView
         }
     }
 
-    /// <summary>Los hotkeys por cue. Va por AddHandler con
-    /// handledEventsToo, y NO como KeyboardAccelerator, por dos motivos:
-    /// hay que ver la tecla aunque la haya consumido quien tenga el foco (la
-    /// tabla se come las letras haciendo type-ahead), y hace falta poder
-    /// CALLARSE mientras se escribe.
+    /// <summary>EL DESPACHADOR DE TECLADO — uno solo, y en el evento TÚNEL.
+    /// Equivalente WinUI 3 del <c>PreviewKeyDown += OnKeyDownGlobal</c> de
+    /// WinCue (WinCue.App/MainWindow.xaml.cs:72), portado con su guardián de
+    /// escritura por delante.
     ///
-    /// Ese silencio es la parte importante: sin él, teclear el nombre de un
-    /// cue en el inspector dispararía los cues cuyas teclas coincidan con las
-    /// letras que escribes. WinCue se planta igual (OnKeyDownGlobal sale
-    /// entero si el foco está en un TextBox o un ComboBox).</summary>
-    private void OnKeyDownGlobal(object sender, KeyRoutedEventArgs e)
+    /// POR QUÉ EN <c>PreviewKeyDown</c> Y NO EN <c>KeyDown</c> NI EN UN
+    /// <c>KeyboardAccelerator</c> — está medido, no supuesto:
+    ///
+    /// En WinUI 3 los aceleradores de un ANCESTRO se procesan DESPUÉS del
+    /// <c>OnKeyDown</c> interno del control con foco. <c>ButtonBase</c> atiende
+    /// Espacio y Enter (es su forma nativa de pulsarse) y marca
+    /// <c>Handled</c>; <c>ListView</c> atiende Espacio y las flechas. Con los
+    /// dos atajos declarados como acelerador del Grid raíz, el GO no llegaba
+    /// nunca mientras el foco estuviera en un botón o en la tabla: la barra
+    /// pulsaba lo último que hubiera tocado el operador (BLACKOUT, PANIC, el
+    /// interruptor de MODO…). Y por el mismo mecanismo al revés, el
+    /// <c>TextBox</c> NO marca el Espacio como Handled, así que ahí el
+    /// acelerador SÍ llegaba: escribir un espacio en el nombre de un cue
+    /// disparaba el GO del show, y Escape dentro de un campo lo paraba entero.
+    ///
+    /// El evento túnel viaja de la RAÍZ hacia el elemento con foco, así que
+    /// este método ve la tecla antes que nadie y, al marcar <c>Handled</c>, el
+    /// control con foco ni se entera. Comprobado empíricamente antes de
+    /// escribir esto, en <c>tools/winui3-lab/SpikeTeclado.cs</c>: con el foco
+    /// en un Button y el preview marcando Handled, el <c>Click</c> del botón
+    /// NO llega; con el preview callado, la tecla sigue su curso normal y el
+    /// espacio se escribe en el TextBox.
+    ///
+    /// ENTER SE QUEDA FUERA A PROPÓSITO. Interceptar Espacio le quita al
+    /// usuario de teclado la forma nativa de activar el botón enfocado — es el
+    /// precio que WinCue ya paga hoy—, y dejar Enter fuera mantiene Tab+Enter
+    /// como ruta de activación accesible.
+    ///
+    /// ALCANCE: esta tanda solo arregla Espacio y Escape (y de paso arregla los
+    /// hotkeys por cue, que sufrían el mismo fallo, ver más abajo). Los otros
+    /// 18 atajos de WinCue que faltan —S, flechas, B, P, Supr, F2, ir a cue por
+    /// número, Ctrl+Z/Y/C/V/D/P/F— son de la tanda siguiente y NO están aquí.
+    ///
+    /// Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+G siguen siendo
+    /// <c>KeyboardAccelerator</c> (ver el constructor): ningún control se come
+    /// esas combinaciones, así que la fase tardía les llega igual de bien.</summary>
+    private void OnPreviewKeyDownGlobal(object sender, KeyRoutedEventArgs e)
     {
-        if (_controller is null || e.Handled)
+        if (_controller is null)
             return;
 
-        var focused = FocusManager.GetFocusedElement(Content.XamlRoot);
-        if (focused is TextBox or ComboBox or ComboBoxItem)
+        // ── 1 · GUARDIÁN DE ESCRITURA. VA PRIMERO, Y NO ES NEGOCIABLE ──
+        // Si el foco está en un campo de texto o en un desplegable, este
+        // despachador sale ENTERO: en un preview que marca Handled, el
+        // carácter no llega a escribirse (medido en el spike, caso C). Sin
+        // esto el problema se invierte y la app se come la escritura.
+        //
+        // Escape es la única excepción, y hace lo MISMO que en WinCue: devolver
+        // el foco a la tabla. NO para el show — que es justo lo que hacía
+        // Secuence hasta ahora desde dentro de un TextBox. No se marca
+        // Handled, igual que WinCue: quien tenga el foco puede seguir usando su
+        // Escape (el inspector lo usa para revertir un campo).
+        if (EsCampoDeEscritura(FocusManager.GetFocusedElement(Content.XamlRoot)))
+        {
+            if (e.Key == Windows.System.VirtualKey.Escape)
+                CueList.Focus(FocusState.Programmatic);
             return;
+        }
 
-        // Sin modificadores: un Ctrl+S no puede disparar el cue de la «S».
+        // ── 2 · Sin modificadores ──
+        // Un Ctrl+S no puede disparar el cue de la «S», y Ctrl+O/S/G tienen que
+        // seguir llegando a sus aceleradores.
         if (IsDown(Windows.System.VirtualKey.Control)
             || IsDown(Windows.System.VirtualKey.Menu)
             || IsDown(Windows.System.VirtualKey.Shift))
             return;
 
+        // ── 3 · Los dos atajos de directo ──
+        switch (e.Key)
+        {
+            case Windows.System.VirtualKey.Space:
+                _controller.OnGoPressed();
+                e.Handled = true;
+                return;
+            case Windows.System.VirtualKey.Escape:
+                _controller.OnStopPressed();
+                e.Handled = true;
+                return;
+        }
+
+        // ── 4 · Hotkeys por cue (Disparadores → Hotkey) ──
+        // Vivían en un manejador aparte sobre KeyDown, registrado con
+        // handledEventsToo: true PRECISAMENTE para ver teclas que el control
+        // con foco ya hubiera consumido… y cuya primera línea era
+        // `if (e.Handled) return`, que anulaba exactamente eso. Medido: un
+        // hotkey en la flecha ↓ disparaba con el foco en un botón y NO con el
+        // foco en la tabla, porque el ListView se comía la flecha. Aquí, en el
+        // preview, nadie ha podido marcar nada todavía: la contradicción
+        // desaparece con el manejador que la tenía.
         if (_cueHotkeys.TryGetValue(e.Key, out int cueId))
         {
             // Dispara SIN mover el playhead, igual que en WinCue.
@@ -2306,6 +2368,17 @@ public sealed partial class MainWindow : Window, IShowView
             e.Handled = true;
         }
     }
+
+    /// <summary>¿El foco está donde se ESCRIBE? Se mira el TIPO del elemento
+    /// con foco, no una lista de teclas — mismo criterio que WinCue.
+    /// <c>NumberBox</c> y <c>AutoSuggestBox</c> no hacen falta por separado:
+    /// envuelven un <c>TextBox</c>, y el que tiene el foco es el de dentro.
+    /// Van igualmente en la lista por si algún día el foco cae en el envoltorio
+    /// (y <c>RichEditBox</c>/<c>PasswordBox</c>, que hoy no existen en
+    /// Secuence, para que aparecer no cueste otra auditoría).</summary>
+    private static bool EsCampoDeEscritura(object? foco) =>
+        foco is TextBox or ComboBox or ComboBoxItem
+             or AutoSuggestBox or RichEditBox or PasswordBox or NumberBox;
 
     private static bool IsDown(Windows.System.VirtualKey key) =>
         Microsoft.UI.Input.InputKeyboardSource

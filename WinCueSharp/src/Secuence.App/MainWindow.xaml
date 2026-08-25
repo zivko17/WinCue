@@ -22,10 +22,28 @@
          cada elemento (Theme.cs, comentario junto a cada campo nuevo señala de
          qué botón/caja de WinCue viene).
 
-         ATAJOS: Espacio = GO, Esc = STOP ALL. Van como KeyboardAccelerator en
-         el Grid raíz (WinUI 3 no tiene PreviewKeyDown de ventana como WPF) —
-         funcionan tenga el foco quien lo tenga, sin pisar el espacio nativo de
-         los botones (ninguno se declara aquí en el propio GoButton).
+         ATAJOS: Espacio = GO, Esc = STOP ALL. Ya NO van aquí como
+         KeyboardAccelerator, y el comentario que decía que así «funcionan
+         tenga el foco quien lo tenga, sin pisar el espacio nativo de los
+         botones» era falso en las dos mitades: en WinUI 3 los aceleradores de
+         un ANCESTRO se procesan DESPUÉS del OnKeyDown del control con foco,
+         así que Button/ToggleButton/ListView se comían el Espacio (la barra
+         pulsaba lo último que hubiera tocado el operador) y, al revés, el
+         TextBox —que NO marca el Espacio como Handled— dejaba pasar el
+         acelerador: escribir un espacio en el nombre de un cue disparaba el
+         GO del show, y Escape dentro de un campo paraba el show entero.
+
+         Ahora hay UN despachador en el PreviewKeyDown del Grid raíz
+         (MainWindow.xaml.cs, OnPreviewKeyDownGlobal), que es el equivalente
+         WinUI 3 del PreviewKeyDown de ventana de WinCue: el evento TÚNEL viaja
+         de la raíz hacia el foco, así que se ve la tecla ANTES que nadie.
+         Medido en tools/winui3-lab/SpikeTeclado.cs antes de escribir una línea
+         de esto. Los dos aceleradores TIENEN que estar fuera: si se quedan,
+         siguen disparando desde dentro de un TextBox por la vía de siempre.
+
+         Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+G sí siguen siendo
+         KeyboardAccelerator (en código, ver el constructor): ningún control se
+         come esas combinaciones, así que llegan igual.
          ========================================================================== -->
 
     <!-- ==========================================================================
@@ -252,10 +270,6 @@
                 </Setter>
             </Style>
         </Grid.Resources>
-        <Grid.KeyboardAccelerators>
-            <KeyboardAccelerator Key="Space" Invoked="OnGoAccelerator"/>
-            <KeyboardAccelerator Key="Escape" Invoked="OnStopAllAccelerator"/>
-        </Grid.KeyboardAccelerators>
 
         <!-- Columna 0: previos PGM/PVW + EN REPRODUCCIÓN (equivalente al panel
              izquierdo de WinCue, MonitorHost + ActiveList). Columna 1: el

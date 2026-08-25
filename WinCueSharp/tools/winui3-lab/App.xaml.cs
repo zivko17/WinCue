@@ -14,7 +14,12 @@ public partial class App : Application
 
     protected override void OnLaunched(LaunchActivatedEventArgs args)
     {
-        _window = new MainWindow();
+        // LAB_SPIKE_TECLADO=1 → el spike de SpikeTeclado.cs en vez del banco de
+        // mpv: mide si el PreviewKeyDown de un ANCESTRO le gana la tecla al
+        // control con foco (ver la cabecera de ese archivo).
+        _window = Environment.GetEnvironmentVariable("LAB_SPIKE_TECLADO") == "1"
+            ? new SpikeTecladoWindow()
+            : new MainWindow();
         _window.Activate();
     }
 }

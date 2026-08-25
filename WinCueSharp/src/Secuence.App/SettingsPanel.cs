@@ -52,12 +52,28 @@
 // arrastre con imanes— ya funciona y escribe en los mismos settings que lee
 // WinCue.Controller.CanvasLayout, así que dejarlo fuera del formulario ya no
 // tenía motivo.
+// LO QUE SIGUE FUERA, Y LA CORRECCIÓN DE UNA AFIRMACIÓN FALSA QUE ESTUVO AQUÍ
+// (auditoria-teclado.md §5): este bloque decía que
 // video_default_volume/video_loop_default/audio_buffer_size/
 // default_show_path/default_media_path/show_latency_column/
-// show_next_cue_label/confirm_last_cue/ui_font_scale/keyboard_* — ninguno de
-// estos lo lee NADA fuera de la propia ventana de Ajustes de WPF (ni
-// siquiera WinCue.App los aplica en otro sitio): son decorativos en los dos
-// productos, y esta pasada no los añade aquí tampoco.
+// show_next_cue_label/confirm_last_cue/ui_font_scale/keyboard_* «no lo lee
+// NADA fuera de la propia ventana de Ajustes de WPF (ni siquiera WinCue.App
+// los aplica en otro sitio)». ES FALSO, y probablemente es la razón por la que
+// la paridad de teclado no se cerró en su día. La verdad, comprobada con grep
+// sobre todo src/:
+//   · keyboard_go / keyboard_stop / keyboard_prev — WinCue.App SÍ los lee y
+//     los aplica: MainWindow.xaml.cs:382-387 (LoadKeyBindings), con sus
+//     valores por defecto en WinCue.Core/SettingsManager.cs:131-133. En
+//     Secuence, en cambio, Espacio y Escape están clavados en el despachador
+//     (MainWindow.xaml.cs, OnPreviewKeyDownGlobal) y todavía no son
+//     configurables: hacerlos configurables es de la tanda de teclado
+//     siguiente, la que porta los 18 atajos que faltan.
+//   · show_next_cue_label (WinCue MainWindow.xaml.cs:269), confirm_last_cue
+//     (:312) y ui_font_scale (:273) — también los lee WinCue.
+//   · video_default_volume / video_loop_default / audio_buffer_size /
+//     default_show_path / default_media_path / show_latency_column — de éstos
+//     sí es cierto: no los lee nadie fuera de la ventana de Ajustes.
+// Ninguno se añade en esta pasada; lo que se corrige aquí es el porqué.
 // =============================================================================
 
 using System.Net;
