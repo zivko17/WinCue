@@ -162,9 +162,50 @@ public partial class App : Application
         // Secuence no ha existido nunca. El interruptor ya estaba en Ajustes
         // desde la tarea del canvas, pero nadie leía el ajuste: esta línea es
         // la que faltaba (mismo reparto que WinCue.App.App.xaml.cs).
+        //
+        // LA GUARDA DE ABAJO — POR QUÉ EXISTE, Y POR QUÉ NO SE PUEDE PERDER
+        // OTRA VEZ (ya se perdió dos):
+        //
+        // Este método NO se llama solo al arrancar: cuelga de
+        // window.ApplyEngineSettings, que MainWindow.OnSettingsClick invoca
+        // CADA VEZ que el operador pulsa Guardar en Ajustes, haya tocado lo
+        // que haya tocado (el volumen master, el dispositivo MIDI, la ruta de
+        // ffmpeg…). Y el valor de fábrica de video_compositor es FALSE.
+        //
+        // Sin guarda, la rama de apagado de más abajo se ejecutaba en CADA
+        // guardado, con la configuración de fábrica y sin que nadie hubiera
+        // tocado el interruptor. Esa rama llama a DiscardCompositorPipelines,
+        // que NO limpia solo pipelines de compositor: termina TODOS los
+        // MpvPlayer (_players incluye la ruta clásica por HWND, más HAP y
+        // ProRes). O sea que pulsar Guardar CORTABA A NEGRO TODO EL VÍDEO AL
+        // AIRE. En un teatro, en mitad de una función. Medido y descrito en
+        // auditoria-interfaz.md, hallazgo S-72.
+        //
+        // La guarda ya existió una vez —acotada a los cambios de modo reales,
+        // pero dentro de VideoEngine.SetGpuLayerSurfaceProvider— y se PERDIÓ
+        // al mover la limpieza a la llamada explícita DiscardCompositorPipelines
+        // (commit 52dd0f5d, "la limpieza de pools la pide Secuence"). Vive
+        // aquí, en el anfitrión, porque es el anfitrión quien sabe si sus
+        // superficies han muerto; el motor no puede adivinarlo (ver la
+        // cabecera de VideoEngine.DiscardCompositorPipelines).
+        //
+        // Lo que NO entra en la guarda: SharePresentSurfaces y el proveedor de
+        // superficies se fijan en TODOS los caminos, también en el arranque y
+        // también cuando el modo no ha cambiado. Son idempotentes y baratos, y
+        // dejarlos dentro del "if" volvería a dejar el motor sin proveedor
+        // después de un ciclo — que es el otro fallo, el simétrico.
+        bool? modoCompositorAplicado = null;   // null = todavía no se aplicó ninguno
         void ApplyCompositorMode()
         {
             bool on = settings.Get("video_compositor", false);
+            // ¿Es esto un APAGADO DE VERDAD? Solo si el modo que ya estaba
+            // aplicado era el encendido. En el arranque (modoAplicado == null)
+            // no hay nada que soltar todavía: ni compositores, ni espejo, ni
+            // players — pero el proveedor y SharePresentSurfaces de abajo sí se
+            // aplican igual, que es lo que el arranque necesita.
+            bool seAcabaDeApagar = modoCompositorAplicado == true && !on;
+            modoCompositorAplicado = on;
+
             // Las superficies de PRESENTACIÓN de los pipelines propios (HAP,
             // ProRes) tienen que nacer COMPARTIDAS porque estas capas las abren
             // en OTRO device (D3D11). Se pide aquí, junto al proveedor, porque
@@ -191,7 +232,7 @@ public partial class App : Application
             // Y el swapchain de cada salida está sobre el HWND hijo que la
             // ruta clásica va a volver a darle a mpv como wid, así que
             // también hay que soltarlo.
-            if (!on)
+            if (seAcabaDeApagar)
             {
                 // ORDEN OBLIGATORIO, y la primera línea no es cosmética: el
                 // ESPEJO DEL PGM se suelta ANTES que nada. Mientras siga
