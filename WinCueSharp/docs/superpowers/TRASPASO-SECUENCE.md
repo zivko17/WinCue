@@ -39,17 +39,22 @@ compositor GPU. Los números de antes —86 commits, 1.160 pruebas— eran los d
 la tanda anterior.)*
 
 Rama **`claude/secuence-hitos-0-1-1occ8p`**, salida de `pruebas-v2` @
-`6caa1580`. **124 commits**, árbol limpio, CI en verde sobre `windows-latest`
-en la última pasada. **Ojo: local va 28 commits por delante de `origin` — el
+`6caa1580`. **133 commits**, árbol limpio, CI en verde sobre `windows-latest`
+en la última pasada. **Ojo: local va 37 commits por delante de `origin` — el
 push de esta tanda queda pendiente, es decisión de Andrés, no la hagas tú
 sin que te lo pida.**
+
+*(Las dos cifras se cuentan, no se copian: `git rev-list --count
+6caa1580..HEAD` y `git rev-list --count
+origin/claude/secuence-hitos-0-1-1occ8p..HEAD`. Estaban en 124 y 28 porque
+se midieron antes de cerrar la propia tanda que las cambiaba.)*
 
 **Ojo con el nombre de la rama:** `secuence/hitos-0-1` se quedó atrás. La
 buena es la de `claude/…`, que es la que escucha el CI (`claude/**`).
 
 | | |
 |---|---|
-| Pruebas | **1.227** (se partió de 1.194 al empezar esta tanda) |
+| Pruebas | **1.229** con el filtro `Requiere!=libmpv` de más abajo, que es el comando de la casa (**1.230** contando la que exige libmpv y por eso no corre en el CI). Se partió de 1.194 al empezar esta tanda |
 | Build | 0 avisos, 0 errores con `TreatWarningsAsErrors=true` |
 | Guardián de paleta | OK — 74 asignaciones, 94 constantes, 20 alias |
 | `WinCue.App` | 12.168 líneas de C# + 1.338 de XAML |
@@ -423,7 +428,13 @@ mismos informes y en la «PREGUNTA ABIERTA» de arriba):
   `SwapChainSink` por salida, sobre el HWND hijo que ya existía — por eso
   blackout e «Identificar» le siguen funcionando sin tocarlos: los dos
   ocultan y muestran ese HWND, y el swapchain se va con él. Se enciende y
-  se apaga desde Ajustes → Vídeo, en caliente.
+  se apaga desde Ajustes → Vídeo, **en caliente** — y apagarlo **para los
+  cues de vídeo que estén al aire** (sus players mueren con los pipelines),
+  así que quedan en `Stopped` en la lista, no «sonando sin nada detrás».
+  El apagado tiene un **orden obligatorio**, escrito en `App.xaml.cs`:
+  soltar el espejo del PGM → `DiscardCompositorPipelines()` → soltar los
+  compositores. Al revés, el hilo que presenta en sala llega a muestrear
+  fuentes ya liberadas.
 - **Opacidad real entre pistas y crossfades de vídeo — esto en Secuence no
   había funcionado nunca.** `SetVideoCueOpacity` tenía el cuerpo vacío por
   defecto; ahora la opacidad baja en rampa de verdad (medido sobre la
@@ -472,6 +483,32 @@ control pero no de un tirón como show completo.
   - **Genlock entre salidas.** Cada salida presenta a su propio vsync, sin
     reloj común entre ellas; en modo canvas, un vídeo que cruza dos
     proyectores puede desincronizarse hasta **±1 fotograma** entre los dos.
+
+    **Ojo con la lectura fácil de esa frase: «cada salida va por su cuenta»
+    es cierto para el RELOJ y falso para el RESTO.** En modo canvas hay UN
+    solo `MpvGpuRenderer` sirviendo las N vistas, y esas N vistas están
+    repartidas entre N `SalidaGpu`, o sea **N hilos de compositor llamando
+    al mismo pipeline**. Comparten el lock de copia (`_copySync`) y **una
+    sola** event query (`_presentQuery`). De ahí, tres acoplamientos reales
+    que no se ven en el código de las salidas:
+
+    1. `CopyPresentFenced` mantiene `_copySync` **durante toda la espera
+       del fence**, así que el hilo de sala de una salida puede esperar
+       detrás del fence de otra.
+    2. `Issue(END)` marca **todo lo encolado** en el device, no la copia de
+       esa vista: cada salida espera la cola entera, trabajo de las demás
+       incluido.
+    3. `PresentFrame()` toma ese mismo `_copySync` en el **hilo de render
+       de mpv**, así que ese hilo puede bloquearse detrás de un fence
+       ajeno — y la regla de esta arquitectura es que nada bloquea al hilo
+       de render.
+
+    **Medido en 2,5-3,5 ms por fotograma con dos salidas: no cuelga nada y
+    NO se rediseña por ahora.** Queda escrito porque el día que el peor
+    fotograma se dispare en modo canvas, este es el primer sitio donde
+    mirar; el detalle vive en la cabecera de
+    `MpvGpuRenderer.CopyPresentFenced`. Arreglarlo pediría una query por
+    vista y sacar la espera del lock: una tanda entera.
   - **La ruta nativa `MpvSource`** — la fase 2b de verdad (mpv renderizando
     directamente a una textura D3D11, sin el puente D3D9Ex de por medio).
     Lo que hay hoy, `SharedSurfaceSource`, funciona y está verificado por

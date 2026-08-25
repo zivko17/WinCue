@@ -140,9 +140,40 @@ contestar, porque si es cierta en tu máquina afecta a todo lo demás (el
 hueco del PGM saldría negro en las dos ramas, no solo en la nueva).
 
 Después, la lista completa con el comando exacto y qué mirar está en el
-`## PENDIENTE — verificación en pantalla (Andrés)` de `task-7-report.md` y
-`task-8-report.md`
+`## PENDIENTE — verificación en pantalla (Andrés)` de `task-2-report.md`,
+`task-7-report.md` y `task-8-report.md`
 (`.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`). En corto:
+
+**WinCue — y esta es la primera, no la última.** El editor de canvas de
+WinCue se refactorizó para usar el cálculo compartido
+(`CanvasEditorLayout`), y **esa tarea NO lleva pruebas a propósito**: es un
+cambio de quién hace la cuenta, no de qué cuenta se hace, y añadir pruebas
+de WPF a un producto que se está vendiendo no compensaba. Esta casilla es
+**la única red** que tiene ese refactor. El detalle punto por punto está en
+`task-2-report.md`.
+
+```powershell
+Start-Process "src\WinCue.App\bin\Release\net8.0-windows\WinCue.App.exe"
+```
+
+- [ ] **WinCue → Ajustes → Vídeo, grupo CANVAS exactamente igual que antes:**
+      - colores de S1 (verde), S2 (azul), S3 (ámbar) y S4 (magenta) en el
+        recorte, la etiqueta y la casilla;
+      - los 5 presets del combo (1920×1080, 3840×1080, 5760×1080,
+        1920×2160, 3840×2160) con sus etiquetas exactas;
+      - arrastrar una salida con los **mismos imanes** (bordes y mitades del
+        lienzo, y bordes de las otras salidas habilitadas, 10 px de
+        pantalla);
+      - redimensionar desde la esquina: sin bajar de 16 px de canvas ni
+        salirse del lienzo;
+      - escribir a mano en X / Y / An / Al y en Canvas W/H: mismo recorte al
+        meter un valor fuera de rango.
+- [ ] **WinCue, los dos sitios de fuera del editor** que se tocaron por
+      efecto colateral: el **menú del botón de salida** y el overlay
+      **«Identificar»** (la letra grande sobre el monitor de salida) tienen
+      que seguir con el mismo verde/azul/ámbar/magenta de S1-S4.
+
+**Secuence:**
 
 - [ ] Compositor APAGADO: la ruta clásica sigue igual que siempre.
 - [ ] Compositor ENCENDIDO: un cue de vídeo sale igual (escala, letterbox,
