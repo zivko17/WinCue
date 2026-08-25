@@ -39,8 +39,8 @@ compositor GPU. Los números de antes —86 commits, 1.160 pruebas— eran los d
 la tanda anterior.)*
 
 Rama **`claude/secuence-hitos-0-1-1occ8p`**, salida de `pruebas-v2` @
-`6caa1580`. **133 commits**, árbol limpio, CI en verde sobre `windows-latest`
-en la última pasada. **Ojo: local va 37 commits por delante de `origin` — el
+`6caa1580`. **135 commits**, árbol limpio, CI en verde sobre `windows-latest`
+en la última pasada. **Ojo: local va 39 commits por delante de `origin` — el
 push de esta tanda queda pendiente, es decisión de Andrés, no la hagas tú
 sin que te lo pida.**
 
