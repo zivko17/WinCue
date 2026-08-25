@@ -59,6 +59,14 @@ public sealed class MpvGpuRenderer : IDisposable
     private readonly IReadOnlyList<CanvasView> _viewSpecs;
     private readonly nint[] _viewSurfaces;
     private readonly nint[] _presentSurfaces;
+    private readonly nint[] _presentShared;
+
+    // Query de evento PERSISTENTE del device (auditoría 05: crear/destruir un
+    // objeto COM por fotograma fuga VRAM — se crea UNA vez con el pipeline y
+    // se reutiliza en cada CopyPresentFenced). Una sola query fencea TODO lo
+    // encolado hasta el momento del Issue, así que vale para cualquier vista:
+    // no hace falta una por vista.
+    private nint _presentQuery;
 
     // Delegados nativos: deben permanecer vivos mientras mpv los use
     private readonly GetProcAddressFn _getProc;
@@ -74,6 +82,16 @@ public sealed class MpvGpuRenderer : IDisposable
     /// <summary>Superficie de PRESENTACIÓN de la vista i (mismo orden que las
     /// vistas pasadas al constructor). Nunca la registrada en el interop.</summary>
     public nint ViewSurface(int i) => _presentSurfaces[i];
+
+    /// <summary>Handle COMPARTIDO de la superficie de presentacion de la vista
+    /// i. Es lo que permite abrirla desde otro device (D3D11) sin tocar la del
+    /// interop — la del interop es de GL mientras tiene el lock, y mirarla
+    /// fugaba VRAM (auditoria 05).</summary>
+    public nint ViewSharedHandle(int i) => _presentShared[i];
+
+    /// <summary>Handle compartido de la primera vista (modo clásico de una
+    /// sola salida), gemelo de <see cref="Surface"/>.</summary>
+    public nint PresentSharedHandle => ViewSharedHandle(0);
 
     public IReadOnlyList<CanvasView> Views => _viewSpecs;
 
@@ -102,6 +120,30 @@ public sealed class MpvGpuRenderer : IDisposable
         }
     }
 
+    /// <summary>CopyPresent(i) MAS el fence entre devices D3D9Ex y D3D11.
+    /// Variante SEPARADA a propósito: la usa quien vaya a anunciar el
+    /// fotograma a un consumidor D3D11 (SharedSurfaceSource, Secuence) sobre
+    /// el handle de <see cref="ViewSharedHandle"/> — WinCue sigue llamando
+    /// CopyPresent tal cual, sin fence y sin enterarse de que esto existe.
+    ///
+    /// Una superficie compartida D3D9Ex NO trae sincronización implícita
+    /// entre devices: que StretchRect devuelva S_OK solo dice que el comando
+    /// se encoló, no que la GPU ya lo ejecutó. Sin este flush, leer por D3D11
+    /// justo después falla de forma no determinista (medido en esta máquina;
+    /// ver GlDxInterop.FlushQuery). Reutiliza la query PERSISTENTE del
+    /// pipeline — crear/destruir un objeto COM por fotograma es la fuga de
+    /// VRAM de la auditoría 05.</summary>
+    public void CopyPresentFenced(int i)
+    {
+        lock (_copySync)
+        {
+            if (_shutdown || _viewSurfaces[i] == 0 || _presentSurfaces[i] == 0)
+                return;
+            _ = D3D9Minimal.StretchRect(_d3dDevice, _viewSurfaces[i], _presentSurfaces[i]);
+            D3D9Minimal.FlushQuery(_presentQuery);
+        }
+    }
+
     /// <param name="views">Recortes del canvas por salida (modo canvas);
     /// null = una única vista con el canvas completo (modo clásico).</param>
     public MpvGpuRenderer(int width, int height,
@@ -114,6 +156,7 @@ public sealed class MpvGpuRenderer : IDisposable
             : new[] { new CanvasView(0, 0, 0, _width, _height) };
         _viewSurfaces = new nint[_viewSpecs.Count];
         _presentSurfaces = new nint[_viewSpecs.Count];
+        _presentShared = new nint[_viewSpecs.Count];
         _getProc = OnGetProcAddress;
         _updateCb = _ => _wake.Set();
 
@@ -213,10 +256,15 @@ public sealed class MpvGpuRenderer : IDisposable
                 _gl.AddView(_d3dDevice, surface, shared, v.W, v.H, v.X, v.Y);
                 // Superficie de PRESENTACIÓN (sin registro GL): es la única
                 // que ve WPF — tocar la del interop fugaba VRAM (auditoría 05)
-                var (present, _) =
+                var (present, presentShared) =
                     D3D9Minimal.CreateSharedRenderTarget(_d3dDevice, v.W, v.H);
                 _presentSurfaces[i] = present;
+                _presentShared[i] = presentShared;
             }
+            // Query de evento PERSISTENTE (auditoría 05: ver el comentario del
+            // campo). 0 si el driver no la soporta — CopyPresentFenced/
+            // FlushQuery lo tratan como "sin barrera que esperar".
+            _presentQuery = D3D9Minimal.CreateEventQuery(_d3dDevice);
             _gl.CreatePrivateFbo(_width, _height);
             _ready.Set();
         }
@@ -343,12 +391,15 @@ public sealed class MpvGpuRenderer : IDisposable
         FreeMpvContext();
         _gl?.Dispose();
         _gl = null;
+        D3D9Minimal.Release(_presentQuery);
+        _presentQuery = 0;
         for (int i = 0; i < _viewSurfaces.Length; i++)
         {
             D3D9Minimal.Release(_viewSurfaces[i]);
             _viewSurfaces[i] = 0;
             D3D9Minimal.Release(_presentSurfaces[i]);
             _presentSurfaces[i] = 0;
+            _presentShared[i] = 0;
         }
         D3D9Minimal.Release(_d3dDevice);
         _d3dDevice = 0;

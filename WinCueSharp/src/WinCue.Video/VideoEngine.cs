@@ -1527,6 +1527,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 int sinkScreen = views is not null ? v.Screen : Math.Max(0, screen);
                 var sink = _gpuSurfaces!(sinkScreen, layer, _gpuSlotSeq++);
                 sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
+                sink.SetSharedHandle(pipeline.ViewSharedHandle(i));
                 int viewIndex = i;
                 sink.SetFrameCopier(() => pipeline.CopyPresent(viewIndex));
                 pipeline.FrameRendered += sink.InvalidateFrame;
@@ -1709,6 +1710,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 #pragma warning restore CA2000
             var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
             sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+            sink.SetSharedHandle(pipeline.PresentSharedHandle);
             sink.SetFrameCopier(pipeline.CopyPresent);
             pipeline.FrameRendered += sink.InvalidateFrame;
             slot = new HapSlot
@@ -1918,6 +1920,7 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 #pragma warning restore CA2000
             var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
             sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+            sink.SetSharedHandle(pipeline.PresentSharedHandle);
             sink.SetFrameCopier(pipeline.CopyPresent);
             pipeline.FrameRendered += sink.InvalidateFrame;
             slot = new ProResSlot

@@ -241,6 +241,12 @@ public interface IVideoLayerSurface
     /// back buffer sin el Lock provoca renaming del driver = fuga de VRAM por
     /// frame — auditoría 05).</summary>
     void SetFrameCopier(Action copyFrame) { }
+
+    /// <summary>Handle COMPARTIDO de la superficie, para quien no pueda
+    /// hospedarla directamente y tenga que abrirla en otro device (Secuence:
+    /// WinUI 3 no tiene D3DImage). Cuerpo vacio a proposito: el control de
+    /// WinCue no lo necesita y no debe enterarse de que esto existe.</summary>
+    void SetSharedHandle(nint sharedHandle) { }
 }
 
 /// <summary>Motor de vídeo (implementado por WinCue.Video sobre libmpv).</summary>

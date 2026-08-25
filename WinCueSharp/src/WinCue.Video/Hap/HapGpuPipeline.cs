@@ -190,7 +190,14 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
     private readonly IDirect3DTexture9 _sharedTexture;   // el RT de D3D11 visto desde D3D9
     private readonly IDirect3DSurface9 _sharedSurface;
     private readonly IDirect3DSurface9 _presentSurface;  // la ÚNICA que ve WPF
+    private readonly nint _presentSharedHandle;
     private readonly Rect _fullRect;
+
+    // Query de evento PERSISTENTE (auditoría 05: crear/destruir un objeto COM
+    // por fotograma fuga VRAM — se crea UNA vez con el pipeline y la reutiliza
+    // CopyPresentFenced). Null si el driver no soporta D3DQUERYTYPE_EVENT:
+    // el llamante trata "sin query" igual que "sin barrera que esperar".
+    private readonly IDirect3DQuery9? _presentQuery;
 
     // Serializa el draw del hilo de presentación con la copia de presentación
     // del hilo de UI (dentro del Lock del D3DImage)
@@ -207,6 +214,11 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
     /// <summary>Puntero IDirect3DSurface9 de PRESENTACIÓN para
     /// IVideoLayerSurface.SetSurface (binding único por vida del pipeline).</summary>
     public nint PresentSurfacePointer => _presentSurface.NativePointer;
+
+    /// <summary>Handle COMPARTIDO de la superficie de PRESENTACIÓN, para quien
+    /// no pueda hospedarla directamente y tenga que abrirla en otro device
+    /// (Secuence: WinUI 3 sin D3DImage).</summary>
+    public nint PresentSharedHandle => _presentSharedHandle;
 
     public HapGpuPipeline(int surfaceWidth, int surfaceHeight)
     {
@@ -294,10 +306,30 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
                 Pool.Default, ref shared);
             _sharedSurface = _sharedTexture.GetSurfaceLevel(0);
 
-            // Superficie de PRESENTACIÓN separada (no compartida): el back
-            // buffer que ve WPF. Creada UNA vez, viva toda la sesión (aud. 05).
+            // Superficie de PRESENTACIÓN: el back buffer que ve WPF. Creada UNA
+            // vez, viva toda la sesión (aud. 05). TAMBIÉN pide handle
+            // compartido (Task 5): quien no pueda hospedar el IDirect3DSurface9
+            // directamente (Secuence, WinUI 3 sin D3DImage) la abre por su
+            // cuenta con OpenSharedResource — esto no cambia nada para WPF,
+            // que sigue usando el puntero de PresentSurfacePointer tal cual.
+            nint presentShared = 0;
             _presentSurface = _d3d9Device.CreateRenderTarget((uint)Width, (uint)Height,
-                Vortice.Direct3D9.Format.A8R8G8B8, MultisampleType.None, 0, lockable: false);
+                Vortice.Direct3D9.Format.A8R8G8B8, MultisampleType.None, 0, lockable: false,
+                ref presentShared);
+            _presentSharedHandle = presentShared;
+
+            // Query de evento PERSISTENTE para CopyPresentFenced (ver el
+            // comentario del campo). Si el driver no soporta
+            // D3DQUERYTYPE_EVENT, CreateQuery lanza: se trata igual que la
+            // ausencia de query — no hay barrera que esperar.
+            try
+            {
+                _presentQuery = _d3d9Device.CreateQuery(Vortice.Direct3D9.QueryType.Event);
+            }
+            catch (SharpGenException)
+            {
+                _presentQuery = null;
+            }
         }
         catch
         {
@@ -358,6 +390,54 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
         }
     }
 
+    /// <summary>CopyPresent() MAS el fence entre devices D3D9Ex y D3D11.
+    /// Variante SEPARADA a propósito: la usa quien vaya a anunciar el
+    /// fotograma a un consumidor D3D11 (SharedSurfaceSource, Secuence) sobre
+    /// <see cref="PresentSharedHandle"/> — WinCue sigue llamando CopyPresent
+    /// tal cual, sin fence. Ver el porqué del fence en GlDxInterop.FlushQuery:
+    /// una superficie D3D9Ex compartida no trae sincronización implícita
+    /// entre devices.</summary>
+    public void CopyPresentFenced()
+    {
+        lock (_sync)
+        {
+            if (_disposed)
+                return;
+            _d3d9Device.StretchRect(_sharedSurface, _fullRect, _presentSurface, _fullRect,
+                TextureFilter.None);
+            FlushPresentQuery();
+        }
+    }
+
+    /// <summary>Issue(END) + espera ACOTADA (nunca indefinida) sobre la query
+    /// persistente del pipeline. Mismo contrato que GlDxInterop.FlushQuery:
+    /// si Issue falla, si no hay query, o si el plazo expira, se vuelve sin
+    /// más — un fotograma repetido es preferible a colgar el hilo que
+    /// presenta.</summary>
+    private void FlushPresentQuery(int timeoutMs = 100)
+    {
+        if (_presentQuery is null)
+            return;
+        try
+        {
+            if (_presentQuery.Issue(Issue.End).Failure)
+                return;
+
+            long deadline = Environment.TickCount64 + timeoutMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                if (_presentQuery.GetData(out bool _, true))
+                    return;   // dato disponible: la GPU ya vació la cola hasta aquí
+                Thread.Yield();
+            }
+        }
+        catch (SharpGenException)
+        {
+            // Device lost u otro fallo real del driver: no hay barrera que
+            // esperar, igual que "sin query" — el llamante decide si publica.
+        }
+    }
+
     /// <summary>El player terminó de dibujar un frame: avisar a los sinks.
     /// El PTS se ignora en esta ruta — la mezcla la hace el DWM, que no
     /// sincroniza por tiempo (justo la carencia que arregla el motor nuevo).
@@ -378,6 +458,7 @@ internal sealed class HapGpuPipeline : IHapRenderTarget, IDisposable
                 return;
             _disposed = true;
         }
+        _presentQuery?.Dispose();
         _presentSurface?.Dispose();
         _sharedSurface?.Dispose();
         _sharedTexture?.Dispose();
