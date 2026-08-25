@@ -754,10 +754,12 @@
                 </ListView.ItemContainerStyle>
                 <ListView.ItemTemplate>
                     <DataTemplate x:DataType="local:CueRow">
-                        <!-- Fondo de la fila: RowBrush, Mode=OneWay porque CueRow
-                             SÍ implementa INotifyPropertyChanged ahora (playhead) -
-                             un x:Bind normal (OneTime) no repintaría al moverse. -->
-                        <Grid MinHeight="28" Padding="0,2" Background="{x:Bind RowBrush, Mode=OneWay}">
+                        <!-- El fondo de la fila ya NO se liga a CueRow: esa capa es
+                             ahora del ListView (resaltado de SELECCIÓN). El playhead
+                             se marca aparte, en el borde izquierdo (ver el Rectangle
+                             de abajo) para que los dos se puedan leer a la vez cuando
+                             caen en filas distintas. -->
+                        <Grid MinHeight="28" Padding="0,2">
                             <Grid.ColumnDefinitions>
                                 <ColumnDefinition Width="26"/>
                                 <ColumnDefinition Width="68"/>
@@ -771,14 +773,26 @@
                                 <ColumnDefinition Width="28"/>
                             </Grid.ColumnDefinitions>
 
+                            <!-- Barra del playhead: pegada al borde izquierdo de la
+                                 fila, DENTRO de la columna 0 que ya existe (no se
+                                 añade columna ni margen nuevos, así que no desplaza
+                                 el resto del contenido). Mode=OneWay porque CueRow
+                                 SÍ implementa INotifyPropertyChanged (playhead) - un
+                                 x:Bind de una sola vez no repintaría al moverse. -->
+                            <Rectangle Grid.Column="0" Width="3" HorizontalAlignment="Left"
+                                       VerticalAlignment="Stretch"
+                                       Fill="{x:Bind PlayheadBarBrush, Mode=OneWay}"/>
+
                             <!-- Punto de estado -->
                             <Ellipse Grid.Column="0" Width="9" Height="9" Fill="{x:Bind StateBrush}"
                                      HorizontalAlignment="Center" VerticalAlignment="Center"/>
 
-                            <!-- Nº: pastilla del color de etiqueta -->
+                            <!-- Nº: pastilla del color de etiqueta. Negrita cuando es
+                                 el playhead, como segunda pista además del borde. -->
                             <Border Grid.Column="1" Background="{x:Bind LabelBrush}" CornerRadius="3"
                                     Padding="5,1" Margin="0,0,6,0" HorizontalAlignment="Left" VerticalAlignment="Center">
                                 <TextBlock Text="{x:Bind Number}" Foreground="{x:Bind local:Theme.TextPrimaryBrush}"
+                                           FontWeight="{x:Bind NumberWeight, Mode=OneWay}"
                                            VerticalAlignment="Center"/>
                             </Border>
 

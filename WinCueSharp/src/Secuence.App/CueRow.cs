@@ -16,6 +16,7 @@
 // =============================================================================
 
 using System.ComponentModel;
+using Microsoft.UI.Text;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Media;
 using WinCue.Core;
@@ -117,13 +118,25 @@ public sealed class CueRow : INotifyPropertyChanged
                 return;
             _isPlayhead = value;
             PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(IsPlayhead)));
-            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(RowBrush)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(PlayheadBarBrush)));
+            PropertyChanged?.Invoke(this, new PropertyChangedEventArgs(nameof(NumberWeight)));
         }
     }
 
-    /// <summary>Fondo de la fila: resaltado en el cian-azulado del playhead
-    /// (Palette.PlayheadRow) cuando le toca a este cue, transparente si no.</summary>
-    public SolidColorBrush RowBrush => _isPlayhead ? Theme.PlayheadRowBrush : Theme.TransparentBrush;
+    /// <summary>Marca del playhead: una barra en el BORDE IZQUIERDO de la fila.
+    /// No es cosmética la elección del eje. Antes esto teñía el FONDO
+    /// (RowBrush), y el resaltado de selección del ListView también es fondo:
+    /// mientras seleccionar movía el playhead los dos estados coincidían
+    /// siempre y la colisión no se veía. Desde que son independientes —mirar un
+    /// cue ya no cambia lo que disparará el GO— hay que poder leer los dos a la
+    /// vez en la misma fila, y por eso uno usa borde y el otro fondo.</summary>
+    public SolidColorBrush PlayheadBarBrush =>
+        _isPlayhead ? Theme.PlayheadRowBrush : Theme.TransparentBrush;
+
+    /// <summary>El número del cue del playhead va en negrita: segunda pista,
+    /// para quien mire la tabla de lejos o no distinga bien el color.</summary>
+    public Windows.UI.Text.FontWeight NumberWeight =>
+        _isPlayhead ? FontWeights.Bold : FontWeights.Normal;
 
     private static string TypeIconFor(CueType type) => type switch
     {
