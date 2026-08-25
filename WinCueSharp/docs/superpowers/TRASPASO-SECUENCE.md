@@ -10,6 +10,14 @@ la de lo que falta y la de trampas de WinUI 3. Para arrancar una sesión en la
 máquina de Andrés, empieza por `ARRANQUE-SESION-LOCAL.md`, que trae además
 cómo capturar la pantalla y cómo pilotar la interfaz sin manos.*
 
+*Puesto al día el 2026-08-25 tras la tanda del editor de canvas y el
+compositor GPU (`.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`).
+Secuence tiene por primera vez opacidad real entre pistas, crossfades de
+vídeo y un PGM que espeja de verdad lo que sale a sala — nada de esto había
+funcionado antes en este producto. Cambian el estado, «Lo que Secuence hace
+ya», «Lo que falta» y las trampas. Y hay una **pregunta abierta para Andrés**
+justo debajo del estado: léela antes que el resto.*
+
 ---
 
 ## Qué es esto en una frase
@@ -26,24 +34,59 @@ futuro.
 
 ## Estado a día de hoy
 
-*(Puesto al día el 2026-08-24 al final de la primera sesión LOCAL. Los
-números de antes —56 commits, 1.057 pruebas— eran los del día anterior.)*
+*(Puesto al día el 2026-08-25 tras la tanda del editor de canvas y el
+compositor GPU. Los números de antes —86 commits, 1.160 pruebas— eran los de
+la tanda anterior.)*
 
 Rama **`claude/secuence-hitos-0-1-1occ8p`**, salida de `pruebas-v2` @
-`6caa1580`. **86 commits**, árbol limpio y **subida a `origin`**, con el CI en
-verde sobre `windows-latest`.
+`6caa1580`. **124 commits**, árbol limpio, CI en verde sobre `windows-latest`
+en la última pasada. **Ojo: local va 28 commits por delante de `origin` — el
+push de esta tanda queda pendiente, es decisión de Andrés, no la hagas tú
+sin que te lo pida.**
 
 **Ojo con el nombre de la rama:** `secuence/hitos-0-1` se quedó atrás. La
 buena es la de `claude/…`, que es la que escucha el CI (`claude/**`).
 
 | | |
 |---|---|
-| Pruebas | **1.160** (se partió de 752) |
+| Pruebas | **1.227** (se partió de 1.194 al empezar esta tanda) |
 | Build | 0 avisos, 0 errores con `TreatWarningsAsErrors=true` |
 | Guardián de paleta | OK — 74 asignaciones, 94 constantes, 20 alias |
-| `WinCue.App` | 12.312 líneas de C# + 1.338 de XAML |
-| `Secuence.App` | 9.639 líneas de C# + 917 de XAML |
-| `WinCue.Presentation` | 3.643 líneas · **366 pruebas propias** |
+| `WinCue.App` | 15.352 líneas de C# + 1.338 de XAML |
+| `Secuence.App` | 12.447 líneas de C# + 952 de XAML |
+| `WinCue.Presentation` | 4.125 líneas · **409 pruebas propias** |
+
+---
+
+## PREGUNTA ABIERTA PARA ANDRÉS — mira esto antes que nada
+
+La Task 8 (el PGM que espeja el compositor) midió algo que **contradice a
+este mismo documento**: en la máquina donde se ejecutó, el hueco del PGM sale
+NEGRO — con el compositor encendido **y** con el compositor APAGADO (la rama
+clásica de mpv, la de siempre). En las DOS ramas, no solo en la nueva.
+
+La causa medida: el puente XAML de WinUI 3
+(`Microsoft.UI.Content.DesktopChildSiteBridge`) queda **por encima** de los
+HWND hijos en el orden Z y los tapa — al revés de lo que dice la cabecera de
+`HwndHijo.cs` («esta ventana se pinta SIEMPRE por encima del XAML de su
+padre, confirmado a ojo por Andrés en el hito 0»), y al revés de lo que dice
+este traspaso más abajo: que los previos PGM/PVW en vivo están **verificados
+en pantalla** por Andrés. Subiendo a mano el HWND del PGM por encima del
+puente (`SetWindowPos(HWND_TOP)`, desde fuera del proceso) la imagen aparece
+al instante — así que no es que el vídeo no llegue, es que algo lo tapa.
+
+**No se ha tocado nada.** Puede ser un defecto real y anterior a esta tanda
+(el hito 0 verificó el orden Z en `tools/winui3-lab`, un laboratorio aislado,
+no en la app final), o puede ser un fallo de la propia automatización que lo
+midió, no del código — en este proyecto ya se ha culpado tres veces al
+código de fallos de la automatización (ver «Cómo se ha trabajado», al
+final del documento). El método completo y la medición están en el
+`## PENDIENTE` de `task-8-report.md` (§5), en
+`.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`.
+
+**Lo primero que hay que contestar, antes que cualquier otra cosa de esta
+tanda:** con el compositor APAGADO (la ruta clásica) y un cue de vídeo al
+aire, ¿el hueco del PGM enseña el vídeo en tu máquina, o está negro?
 
 ---
 
@@ -64,7 +107,7 @@ C:/Proyectos/ffmpeg-gui/          ← RAÍZ GIT (ojo: no es WinCueSharp/)
         └── Secuence.App/          ← Producto 2: Secuence (WinUI 3)
 ```
 
-**`WinCue.Presentation`** (3.643 líneas, 366 pruebas propias) contiene:
+**`WinCue.Presentation`** (4.125 líneas, 409 pruebas propias) contiene:
 `Palette` (94 colores), `Icons` (59 glifos), `UiMetrics` (16 medidas),
 `BevelVeil`/`BevelPalette` (el relieve), `CueTimeField`, `MonitorClockFormat`,
 y el cálculo de los siete controles: `VuMeterLayout`, `TimelineLayout`,
@@ -95,6 +138,17 @@ Y en **`WinCue.Audio`**, que no es presentación pero también se comparte:
 idéntica en cada producto. Partida en dos: `ParseDuration` es pura y tiene
 pruebas, `DurationSeconds` lanza el proceso y no se puede probar sin ffprobe
 instalado.
+
+Añadido el 2026-08-25, misma regla (cálculo compartido primero, con pruebas,
+y WinCue pasa a usarlo):
+
+- **`CanvasEditorLayout`** — el cálculo entero del editor de canvas de
+  Ajustes → Vídeo: escala/origen del lienzo, imán a bordes y a las otras
+  salidas, mover, redimensionar, presets de tamaño. **16 pruebas puras.**
+  Portado formula a formula desde el `CanvasEditorControl.cs` de WinCue (se
+  verificó que no había ninguna discrepancia antes de mover una sola línea);
+  WinCue **pasa a usarlo** — perdió su cálculo propio de escala/imán/clamp,
+  que ahora vive una sola vez.
 
 ---
 
@@ -189,6 +243,72 @@ Estas costaron tiempo. **No las redescubras:**
   (4,2) en WPF. Con el de WinUI las filas del inspector salían más altas y el
   panel entero se leía más suelto que el de WinCue.
 
+## Trampas del compositor GPU (D3D9Ex ↔ D3D11), pagadas en la Task 4 y la Task 7
+
+Estas no son de WinUI 3 sino de interop D3D y de compilación, pero costaron
+tanto tiempo como las de arriba y por el mismo motivo: fallan **en
+silencio**, no en el compilador.
+
+- **`ColorFill` está en el índice 35 de la vtbl de `IDirect3DDevice9`, no en
+  el 42** (42 es `EndScene`, que no lleva argumentos). Contar mal un método
+  COM por vtbl **no falla al compilar**: llama a otro método con otra firma,
+  corrompe la pila o devuelve basura, y el fallo aparece lejos de la causa.
+  Se recontó y se confirmó contra vecinos que ya funcionan en producción en
+  el mismo fichero (`CreateRenderTarget = 28`, `StretchRect = 34`) — si el
+  recuento estuviera desplazado, esos dos también estarían mal, y no lo
+  están. Regla: **antes de fiarte de un índice de vtbl nuevo, recuéntalo
+  contra uno vecino que ya esté en producción.**
+- **Una superficie compartida D3D9Ex abierta en D3D11 NO trae sincronización
+  implícita entre devices.** Son dos colas de comandos distintas sobre la
+  misma GPU física: que `ColorFill` (o `StretchRect`) devuelva `S_OK` solo
+  dice que el driver **encoló** el trabajo, no que la GPU ya lo **ejecutó**.
+  Sin una barrera explícita (`CreateQuery(D3DQUERYTYPE_EVENT)` → `Issue` →
+  `GetData` en bucle), D3D11 puede leer memoria todavía sin escribir: negro
+  no determinista, intermitente, sin excepción ni HRESULT de error. **Y
+  falla también con un `Thread.Sleep(100)` de por medio** — ese es el dato
+  que mata la explicación fácil de «es cuestión de darle tiempo»: no es una
+  carrera de temporización que un margen resuelva, es la ausencia total de
+  la barrera. La fencea SIEMPRE el productor (quien escribió), nunca el
+  consumidor, y nunca desde el hilo de render de mpv (no puede bloquearse).
+  Ver `WinCue.Video/Gpu/SharedSurfaceSource.cs` y
+  `D3D9Minimal.FlushAndWait` en `GlDxInterop.cs`.
+- **Compilar con `dotnet build src\Secuence.App\Secuence.App.csproj` escribe
+  en `bin\Release\...`, pero el exe que de verdad se lanza vive en
+  `bin\x64\Release\...`.** Los dos árboles de salida coexisten y **el
+  lanzador (`Get-ChildItem ... -Recurse`) puede coger el viejo** si el nuevo
+  no se generó. Esto hizo que una medición saliera en verde con un fallo
+  puesto A PROPÓSITO, porque se estaba midiendo el binario antiguo — se cazó
+  comparando las marcas de tiempo de los dos `Secuence.dll`. **Compila
+  SIEMPRE con `dotnet build WinCueSharp.sln`**, que es el único comando que
+  llena la salida x64 de verdad.
+
+## La lección que se repitió tres veces: un verde no siempre sostiene lo que dice sostener
+
+En esta tanda, tres pruebas distintas salieron **verdes por el motivo
+equivocado** — no estaban rotas, pero tampoco estaban demostrando lo que
+afirmaban:
+
+1. El primer fence «que fenceaba» (antes de corregir `D3DISSUE_END`) pasaba
+   porque el trabajo incidental del test —compilar shaders, montar
+   `TextureSink`/`OutputCompositor`— daba de sobra el tiempo que el fence
+   debía garantizar. El fence no hacía nada; el verde venía de otro sitio.
+2. Una prueba del espejo del PGM no habría cazado el fallo que decía cazar
+   porque, en el escenario con el que se probó, los dos sinks (sala y
+   espejo) medían exactamente igual — no había diferencia que la prueba
+   pudiera detectar aunque el mecanismo estuviera roto.
+3. Una medida de arrastre de ventana (para probar que redimensionar no
+   borra el vídeo al aire) no llegó a ejercitar el camino roto porque el
+   arrastre simulado terminaba en el mismo tamaño de salida por el que ya
+   había pasado: el código tomaba un atajo (`early-return`) que el test ni
+   se enteraba de estar evitando.
+
+**El control que hace falta es siempre el simétrico: romper a propósito la
+pieza que dices que sostiene el verde, y comprobar que asoma el rojo.** No
+basta con sabotear la aserción (eso solo confirma que el test corre de
+verdad); hay que sabotear el MECANISMO. Las tres pruebas de esta tanda que
+sobrevivieron a revisión llevan ese sabotaje documentado en su informe, con
+la salida literal en rojo antes de revertirlo.
+
 ## Trampas de licencia — el producto se distribuye CERRADO
 
 Tres sorpresas, las tres por abrir el paquete en vez de fiarse del repo:
@@ -230,7 +350,10 @@ Todo verificado por Andrés en pantalla, paso a paso:
   faders, waveform (con trim arrastrable), canvas de geometría (**conectado a
   la salida en vivo**), EQ y compresor
 - Disposición igual a la de WinCue, con el mismo lenguaje de relieve
-- Previos **PGM/PVW en vivo** (mpv embebido)
+- Previos **PGM/PVW en vivo** (mpv embebido) — *ojo: la Task 8 midió que en
+  su máquina esto sale negro en las dos ramas por el z-order del puente
+  XAML; ver la «PREGUNTA ABIERTA» al principio de este documento antes de
+  dar esto por bueno en la tuya*
 - Añadir / Importar / Borrar, modo EDIT-SHOW, conmutador de salida, SIGUIENTE
 - Ajustes: **las cinco pestañas** — Vídeo, Audio, Red/Control, Interfaz, Rutas
 - **Disparo remoto por OSC y MIDI**, con ping de prueba y MIDI Learn
@@ -283,6 +406,40 @@ pantalla por la propia sesión, que sí podía mirar — ver
 - El inspector cuadrado con el de WinCue en anchos, altos y disposición del
   rack de audio.
 
+Y lo añadido el **2026-08-25**, en la tanda del editor de canvas y el
+compositor GPU (medido por máquina, con píxeles — el detalle técnico
+completo está en `task-4-report.md`, `task-7-report.md` y
+`task-8-report.md`, dentro de
+`.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`; lo que solo se
+puede verificar mirando la pantalla está en el `## PENDIENTE` de esos
+mismos informes y en la «PREGUNTA ABIERTA» de arriba):
+
+- **Editor de canvas en Ajustes → Vídeo**: arrastrar y redimensionar las
+  cuatro salidas dentro del lienzo, con imán a bordes y a las otras salidas,
+  y presets de tamaño — el mismo control que ya tenía WinCue, ahora con el
+  cálculo compartido (`CanvasEditorLayout`, ver arriba) y WinCue usando el
+  mismo camino.
+- **El compositor GPU vive en Secuence**: un `OutputCompositor` +
+  `SwapChainSink` por salida, sobre el HWND hijo que ya existía — por eso
+  blackout e «Identificar» le siguen funcionando sin tocarlos: los dos
+  ocultan y muestran ese HWND, y el swapchain se va con él. Se enciende y
+  se apaga desde Ajustes → Vídeo, en caliente.
+- **Opacidad real entre pistas y crossfades de vídeo — esto en Secuence no
+  había funcionado nunca.** `SetVideoCueOpacity` tenía el cuerpo vacío por
+  defecto; ahora la opacidad baja en rampa de verdad (medido sobre la
+  salida: `126 → 127 → 130 → 126 → 99,8 → 73,4 → 46,6`).
+- **Modo canvas funcionando**: un vídeo puede repartirse entre varias
+  salidas del compositor GPU a la vez.
+- **El PGM espeja el compositor**, con selector `LIENZO` / `SALIDA 1..4` en
+  su cabecera. Respeta el blackout **por región** (una salida a oscuras se
+  ve a oscuras en el monitor, no el lienzo entero) y dice «Salida N — sin
+  señal» en vez de decodificar y enseñar otra cosa cuando lo que mira no
+  tiene nada al aire. Si la fontanería del espejo falla, cae a decodificar
+  su copia muda en vez de dejar al operador sin imagen.
+- El puente D3D9Ex→D3D11 (`SharedSurfaceSource`) que hace posible todo lo
+  anterior, verificado por píxel — ver la trampa de sincronización entre
+  devices, más abajo.
+
 ## Lo que falta
 
 **Inmediato: nada.** La lista de paridad con WinCue quedó CERRADA el
@@ -303,11 +460,39 @@ control pero no de un tirón como show completo.
     `RemoteRouter.OnTimecode()` que dispara al cruzar la marca, MTC por
     quarter-frame. **Falta el *chase*** (que el playhead siga al timecode) y
     **LTC** (timecode por audio, que es lo que da un teatro).
-  - **El multiviewer ES la fase 2b.** No se puede mostrar N salidas sin
-    renderizarlas a texturas. Contradice lo que dice el spec sobre que
-    Secuence no depende del compositor.
-- Verificación de **DPI distinto entre monitores** — nunca se hizo: los dos
-  monitores de Andrés están al 100 %.
+  - **El multiviewer ya tiene dónde apoyarse.** La contradicción que decía
+    esta misma frase —que Secuence "no depende del compositor"— ya no
+    existe: el compositor GPU (render-a-textura) vive en Secuence desde
+    esta tanda, que es justo lo que hacía falta para mostrar N salidas a la
+    vez sin N ventanas de mpv. **Sigue sin construirse** — nadie ha escrito
+    el panel que las junte — pero ya no es un bloqueo de arquitectura, es
+    trabajo pendiente sobre una base que ya funciona.
+- **Lo que el compositor GPU todavía no hace, para que quede escrito sin
+  adornos y no se venda como terminado:**
+  - **Genlock entre salidas.** Cada salida presenta a su propio vsync, sin
+    reloj común entre ellas; en modo canvas, un vídeo que cruza dos
+    proyectores puede desincronizarse hasta **±1 fotograma** entre los dos.
+  - **La ruta nativa `MpvSource`** — la fase 2b de verdad (mpv renderizando
+    directamente a una textura D3D11, sin el puente D3D9Ex de por medio).
+    Lo que hay hoy, `SharedSurfaceSource`, funciona y está verificado por
+    píxel, pero sigue siendo el paso intermedio, no el destino.
+  - **El multiviewer** (ver el punto de arriba).
+  - **El fundido del blackout.** Hoy el blackout de sala oculta el HWND de
+    golpe — instantáneo y a prueba de que el compositor se atasque, elegido
+    así a propósito en la Task 8 — pero sigue sin existir un fundido a
+    negro configurable.
+  - **El rectángulo de destino estilo Resolume**: recortar y posicionar
+    libremente una capa dentro de su salida, más allá del recorte de canvas
+    que ya existe.
+  - **Una carrera conocida y no cerrada**: si el `Join` de un hilo de
+    render se agota (2 s) y una recreación posterior de swapchain SÍ tiene
+    éxito, el hilo "zombi" del compositor viejo y el `Mutate` del nuevo
+    compiten sobre la misma raíz del grafo. No hay forma de arreglarlo sin
+    poder matar el hilo (no se puede) o sin cambiar de raíz (que borraría
+    el vídeo al aire — el mismo fallo que ya se pagó una vez en la Task 7).
+- Verificación de **DPI distinto entre monitores** — sigue sin hacerse. Esta
+  tanda tampoco la resuelve (los monitores de prueba de Andrés siguen al
+  100 %). Que no se caiga de esta lista.
 
 ---
 
@@ -332,10 +517,16 @@ dotnet test WinCueSharp.sln -c Release --filter "Requiere!=libmpv"
 pwsh -File scripts\verificar-paleta.ps1
 ```
 
-**Prueba intermitente conocida:**
-`WinCue.Video.Tests.MpvPropertyTests.FadeVolume_ReachesTarget` falla a veces
-por temporización bajo carga. **Pasa en solitario y al repetir.** No está
-rota. Cualquier OTRA en rojo sí es señal.
+**Dos flakes conocidos, no roturas:**
+- `WinCue.Video.Tests.MpvPropertyTests.FadeVolume_ReachesTarget` — falla a
+  veces por temporización bajo carga. Pasa en solitario y al repetir.
+- `WinCue.Audio.Tests` (nuevo de esta tanda) — falla por **contención del
+  dispositivo de audio** cuando la suite corre EN PARALELO con las demás.
+  En solitario: **105/105**. No es un test concreto el que falla, es la
+  suite entera compitiendo por el mismo hardware de audio.
+
+Cualquier OTRA prueba en rojo sí es señal — de esas dos no hay que
+desconfiar, del resto sí.
 
 **El entorno de Andrés:** dos monitores, 1920×1080 y 1024×600, **ambos al
 100 %**. La salida de vídeo se configura por índice (`video_output_screen`).
@@ -351,8 +542,10 @@ rota. Cualquier OTRA en rojo sí es señal.
 | `docs/superpowers/plans/2026-08-22-secuence-hitos-0-y-1.md` | El plan de los hitos 0 y 1 |
 | `tools/winui3-lab/INFORME.md` | El hito 0: por qué WinUI 3 es viable |
 | `.superpowers/sdd/2026-08-22-secuence-hitos-0-y-1/progress.md` | El ledger: todas las decisiones y por qué |
-| `.superpowers/sdd/.../secuence-shell-report.md` | Los informes de cada tarea de Secuence |
-| `docs/plan-compositor.md` | La fase 2b, escrita y sin conectar |
+| `.superpowers/sdd/.../secuence-shell-report.md` | Los informes de cada tarea de Secuence (hitos 0 y 1) |
+| `.superpowers/sdd/2026-08-25-secuence-canvas-compositor/progress.md` | El ledger de la tanda del canvas y el compositor GPU: todas las decisiones y por qué |
+| `.superpowers/sdd/2026-08-25-secuence-canvas-compositor/task-{4,7,8}-report.md` | El detalle técnico del puente D3D9Ex→D3D11, el compositor GPU en Secuence y el espejo del PGM |
+| `docs/plan-compositor.md` | La fase 2b tal y como se escribió. El compositor GPU que describe ya vive en Secuence (esta tanda); lo que sigue sin conectar es la ruta nativa `MpvSource` — ver «Lo que falta» |
 | `docs/legal/checklist-distribucion.md` | Lo legal antes de distribuir |
 
 Los dos últimos de `.superpowers/` **no están versionados** (ese directorio

@@ -11,6 +11,12 @@ apareció un apartado nuevo sobre manejar la interfaz a distancia, y el repaso
 del inspector quedó cerrado. Todo lo marcado como leído en fecha viene de
 haberlo pagado, no de suponerlo.*
 
+*Puesto al día el 2026-08-25 tras la tanda del canvas y el compositor GPU.
+«Lo que toca ahora» deja de ser la lista de paridad de interfaz (esa quedó
+cerrada) y pasa a ser la verificación en pantalla del compositor. Nuevo:
+cómo encenderlo para probar, dónde mira el log propio del compositor
+(`video-output.log`) y por qué el PGM deja de decodificar dos veces.*
+
 ---
 
 ## Lo primero, en una frase
@@ -106,49 +112,91 @@ Y tres fallos reales arreglados:
 ahí desde siempre. Cuando algo deja de estar recortado, vuelve a mirarlo
 entero.
 
----
-
-## Lo que toca ahora
-
-El repaso del inspector **elemento por elemento** está CERRADO
-(commits `6497e4f2` y `7f86bacc`, CI en verde):
-
-- [x] Los 55 campos existen en los dos. No falta ninguno.
-- [x] `WireTextCommit` idéntico en los dos.
-- [x] Muestras de color: equivalentes.
-- [x] Desplegables (`Cmb`) con el valor fuera de las opciones: **idénticos**,
-      los dos dejan puesta la selección anterior. No divergen.
-- [x] `TargetCombo`: **divergía y era un fallo de verdad.** Le faltaba el
-      `SelectedIndex = 0` con el que WinCue cae a «(sin objetivo)» — borras el
-      cue al que apuntaba un FADE y el desplegable enseñaba el objetivo del
-      cue ANTERIOR. Además ancho 230→260 y etiqueta 185→210.
-- [x] Barra de trim: doble inset quitado, `MinHeight = 0` puesto, y **la misma
-      caída que se arregló en `Commit` seguía viva en `MarkersChanged`** (el
-      guardián mira si hay cue ANTES de los dos commits). Sigue **sin onda en
-      cues de VÍDEO**: solo decodifica audio, y en un vídeo pone «— no media —».
-- [x] Rack de EQ y compresor: **reestructurado a las cinco columnas de
-      WinCue**. Era una columna vertical que dejaba ~1000 px de la derecha en
-      negro y mandaba el compresor detrás del scroll.
-- [x] `FileRow`: caja 220→300 y etiqueta a 210.
-
 **El hallazgo que más lejos llegó** no era del inspector sino del tema: los
 `MinWidth` por defecto de `TextBox` (64) y `CheckBox` (120) descuadraban
 *todos* los anchos del panel. Ver la lista de trampas del traspaso.
 
-Y la lista de paridad de interfaz que sigue pendiente, fuera del inspector:
+**Con esto, toda la paridad de interfaz con WinCue quedó CERRADA** el
+2026-08-24 — no solo el inspector: también la cabecera del timeline, las
+columnas de flag/✕, hotkeys por cue y los recuadros de grupo (la lista
+completa vive en `TRASPASO-SECUENCE.md`, «Lo que Secuence hace ya»). No hace
+falta volver a auditar nada de eso — si algo de esa lista falla ahora, **es
+una regresión**, no un pendiente.
 
-- [x] ~~**Separadores arrastrables**~~ — HECHO, los dos (panel izquierdo
-  455/200/760 y panel de pestañas 330/140/900), con `PaneSplitter` +
-  `SplitterDrag`. El alto del panel se guarda (`bottom_pane_height`) y el
-  ancho de la columna no, igual que en WinCue.
-- **Cabecera del timeline**: rótulo SHOW TIMELINE, números de pista, botones
-  de zoom, Fit, casilla «Crossfade on overlap».
-- **Dos columnas de la tabla de cues** que faltan: flag y ✕.
-- **Hotkeys por cue**: el campo se guarda y WinCue los respeta, pero
-  `RebuildHotkeys` de Secuence solo cubre Space y Esc.
-- Cajas de grupo y marcas de GO sin pintar en el timeline (los grupos no se
-  pueden agarrar).
-- Barra de trim para cues de VÍDEO (arriba).
+---
+
+## Lo que toca ahora
+
+Desde el 2026-08-25 Secuence tiene el editor de canvas y **el compositor
+GPU vivo**: opacidad real entre pistas, crossfades de vídeo y un PGM que
+espeja el compositor — nada de esto había funcionado antes en este
+producto (ver `TRASPASO-SECUENCE.md`). Es la primera vez que hay algo así
+que verificar, y **ningún subagente puede mirarlo**: lo de ahora es
+sentarse delante de la pantalla.
+
+**Empieza por la «PREGUNTA ABIERTA PARA ANDRÉS»** al principio de
+`TRASPASO-SECUENCE.md` — es literalmente la primera pregunta que hay que
+contestar, porque si es cierta en tu máquina afecta a todo lo demás (el
+hueco del PGM saldría negro en las dos ramas, no solo en la nueva).
+
+Después, la lista completa con el comando exacto y qué mirar está en el
+`## PENDIENTE — verificación en pantalla (Andrés)` de `task-7-report.md` y
+`task-8-report.md`
+(`.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`). En corto:
+
+- [ ] Compositor APAGADO: la ruta clásica sigue igual que siempre.
+- [ ] Compositor ENCENDIDO: un cue de vídeo sale igual (escala, letterbox,
+      color) que por la ruta clásica.
+- [ ] **Dos cues en pistas distintas con opacidad intermedia, mezclándose de
+      verdad, vistos a la vez.** Es el punto que más merece el ojo: en
+      Secuence esto no ha funcionado nunca.
+- [ ] Un crossfade entre dos vídeos, mirado (no solo medido por píxel).
+- [ ] Blackout y PANIC con el compositor encendido.
+- [ ] Identificar salida, con el compositor encendido.
+- [ ] **Modo canvas con DOS salidas de verdad** — aquí solo se ha probado
+      con una salida configurada.
+- [ ] **Mover la ventana de salida ENTRE monitores** (redimensionar ya está
+      medido y con contraprueba; mover, no) — y con ello, **DPI distinto
+      entre monitores**, que sigue sin verificarse nunca.
+- [ ] El selector del PGM (`LIENZO` / `SALIDA 1..4`) y el aviso
+      «Salida N — sin señal».
+- [ ] Arrastrar el separador del panel con el espejo del PGM activo.
+
+### Cómo encender el compositor para probar
+
+Ajustes → Vídeo → casilla **«GPU compositor (real per-layer opacity)»** →
+Guardar. Se aplica **en caliente**, sin reiniciar. Guarda `video_compositor`
+en `settings.json`, junto al ejecutable.
+
+Para arrancar ya con él puesto sin pasar por la UI, edita esa clave a mano
+antes de lanzar (el `settings.json` real vive junto al `Secuence.exe` que se
+vaya a ejecutar, normalmente bajo `bin\x64\Release\...\win-x64\`):
+
+```powershell
+(Get-Content $settingsPath -Raw) -replace '"video_compositor":\s*false',
+  '"video_compositor": true' | Set-Content $settingsPath
+```
+
+**Modo canvas** (repartir un vídeo entre varias salidas del compositor) es
+otra casilla en la misma pestaña: `video_canvas_mode` — exige el compositor
+encendido. El editor de canvas (arrastrar/redimensionar las salidas dentro
+del lienzo) está justo debajo, en el mismo panel.
+
+### Que el PGM ya no decodifica dos veces
+
+Antes, el monitor de PGM tenía **su propio mpv**, decodificando el mismo
+archivo que ya estaba decodificando el motor para la salida de sala — dos
+lecturas de disco por cada cue de vídeo. Con el compositor encendido, el
+PGM **deja de decodificar**: espeja los fotogramas que el compositor ya
+tiene en GPU, con un pase de solo lectura que no le roba tiempo a la sala.
+Solo sigue decodificando por su cuenta cuando el cue al aire NO tiene capa
+de compositor (compositor apagado, o las rutas HAP/ProRes) — ahí no ha
+cambiado nada.
+
+Se comprueba con el Administrador de tareas → pestaña Rendimiento → Disco,
+con un archivo pesado (HAP o 4K) al aire: con el espejo puesto, el uso de
+disco tiene que **bajar** respecto a la ruta clásica. Es el punto 3 del
+`## PENDIENTE` de `task-8-report.md`.
 
 ---
 
@@ -185,6 +233,20 @@ Los dos productos a la vez, para comparar:
 dotnet build WinCueSharp.sln -c Release -p:TreatWarningsAsErrors=true
 ```
 
+**Ojo si vas a MEDIR algo (probar un fix, comparar rutas, verificar el
+compositor), no solo a iterar sobre la interfaz**: `src\Secuence.App\bin`
+puede tener a la vez un `bin\Debug\`, un `bin\Release\` y un
+`bin\x64\Release\...\win-x64\` — y **el `Secuence.exe` que de verdad se
+lanza en producción vive en `bin\x64\Release\...`**. El `Get-ChildItem
+-Recurse | Sort-Object LastWriteTime` de arriba coge el más reciente de
+LOS TRES, así que si compilaste solo con `-c Debug` para iterar rápido y
+luego mides, puedes estar mirando un binario que no es el que vas a
+comparar. Para cualquier medición que vaya a un informe, compila **siempre**
+con `dotnet build WinCueSharp.sln` primero (deja lleno `bin\x64\Release\`) y
+verifica con las marcas de tiempo si hay duda. Costó una ronda entera de la
+tanda del compositor — ver «Trampas del compositor GPU» en
+`TRASPASO-SECUENCE.md`.
+
 ---
 
 ## Cuando algo se caiga
@@ -199,6 +261,28 @@ Get-ChildItem src\Secuence.App\bin -Recurse -Filter "crash-*.log" |
 Cuelga de los DOS enganches (`AppDomain.UnhandledException` y
 `Application.UnhandledException` de WinUI 3). El segundo es el que ve las
 excepciones del hilo de interfaz, que son las que tira esta app.
+
+**El compositor GPU tiene su propio log, aparte de los crash logs**:
+`logs\video-output.log`, también junto al ejecutable. Solo se CREA si hay
+algo que avisar — una superficie compartida que no abrió, un swapchain que
+no se pudo recrear, un espejo del PGM que se cayó. **Si el archivo no
+existe, es buena señal**: ni un aviso en toda la sesión.
+
+```powershell
+Get-ChildItem src\Secuence.App\bin -Recurse -Filter "video-output.log" |
+  Sort-Object LastWriteTime -Descending | Select-Object -First 1 | Get-Content
+```
+
+Para saber por qué RUTA salió cada cue (compositor GPU o clásica), arranca
+con `WINCUE_MPV_LOG=<carpeta>` puesto — vuelca `engine-trace.log` en esa
+carpeta, con líneas `StartPlayback cue=NN gpu=True|False`:
+
+```powershell
+$env:WINCUE_MPV_LOG = "$env:TEMP\wincue-trace"
+New-Item -ItemType Directory -Force $env:WINCUE_MPV_LOG | Out-Null
+# lanza Secuence en esta misma sesión de PowerShell, dispara cues, y luego:
+Get-Content "$env:WINCUE_MPV_LOG\engine-trace.log" -Tail 40
+```
 
 ---
 
@@ -312,6 +396,13 @@ posiciones de la captura anterior.
 
 La lista larga y con el porqué de cada una está en
 `TRASPASO-SECUENCE.md`; esta es solo la punta.
+
+**Y desde el 2026-08-25 hay una segunda lista, de interop D3D9Ex/D3D11 y no
+de WinUI 3**: el índice de vtbl de `ColorFill`, la falta de sincronización
+implícita entre devices D3D9Ex y D3D11 sobre una superficie compartida, y
+que compilar solo `Secuence.App.csproj` deja un exe viejo en un árbol de
+salida distinto al que se lanza. Las tres, con el porqué y cómo se
+detectaron, están en `TRASPASO-SECUENCE.md`, «Trampas del compositor GPU».
 
 ---
 
