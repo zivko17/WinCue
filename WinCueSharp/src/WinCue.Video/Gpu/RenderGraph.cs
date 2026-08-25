@@ -183,6 +183,83 @@ public sealed class MixNode : GraphNode
 }
 
 // ---------------------------------------------------------------------------
+// opacity — la opacidad propia de UNA capa
+// ---------------------------------------------------------------------------
+
+/// <summary>Modula la opacidad de su subárbol, con fundido opcional.
+///
+/// POR QUÉ HACE FALTA HABIENDO <see cref="MixNode"/>: el mix modula la
+/// opacidad ENTRE DOS RAMAS — es la transición, y necesita un saliente y un
+/// entrante. Una pista SUELTA con opacidad propia (el campo «opacidad» de un
+/// cue de vídeo, y el cue de control FADE que lo mueve) no tiene segunda rama
+/// contra la que mezclarse: mezclarla contra un negro inventado pintaría un
+/// velo que taparía a las pistas de DEBAJO en vez de dejarlas ver. La opacidad
+/// viaja en <see cref="LayerTarget"/>, y este es el único nodo del grafo que la
+/// cambia para una rama sola.
+///
+/// El fundido es un <see cref="Ramp"/> evaluado en el RELOJ DEL COMPOSITOR,
+/// con el mismo instante con el que las fuentes eligen su fotograma: todo el
+/// fotograma corresponde a un único momento. Ese es el cambio de fondo
+/// respecto a animar Opacity en WPF.
+///
+/// HILOS: <see cref="Opacity"/> y <see cref="Fade"/> los escribe el hilo del
+/// motor de cues DENTRO de OutputCompositor.Mutate() y los lee el hilo de
+/// render dentro de ese mismo lock. Fuera de Mutate es una carrera.</summary>
+public sealed class OpacityNode : GraphNode
+{
+    public OpacityNode(GraphNode child)
+    {
+        ArgumentNullException.ThrowIfNull(child);
+        Child = child;
+    }
+
+    public GraphNode Child { get; }
+
+    private float _opacity = 1f;
+
+    /// <summary>Opacidad fija. Se ignora mientras haya <see cref="Fade"/>.</summary>
+    public float Opacity
+    {
+        get => _opacity;
+        set => _opacity = Math.Clamp(value, 0f, 1f);
+    }
+
+    /// <summary>Fundido agendado en el reloj del compositor. Una vez terminado
+    /// se queda puesto a propósito: Ramp.At devuelve To para siempre, así que
+    /// nadie tiene que volver a pasar a recogerlo.</summary>
+    public Ramp? Fade { get; set; }
+
+    /// <summary>Opacidad efectiva en un instante (lo que se verá).</summary>
+    public float OpacityAt(double t) => Fade?.At(t) ?? _opacity;
+
+    /// <summary>Devuelve la capa a su estado de recién nacida: plena opacidad
+    /// y SIN rampa.
+    ///
+    /// No es cosmético. Las capas del motor son slots PERSISTENTES de un pool
+    /// (auditoría 05): el mismo nodo se reparte entre cues sucesivos de la
+    /// misma (salida, pista, spec). Y como una rampa terminada devuelve su
+    /// valor final PARA SIEMPRE, un cue con fade_out deja tras de sí una rampa
+    /// que vale 0 — con lo que el SIGUIENTE cue de esa pista nacería
+    /// invisible. Medido en Secuence con el show de prueba antes de que este
+    /// método existiera: tras el fade_out del 6.1, el 5.1 salía en negro.
+    /// Quien REASIGNE la capa a un cue nuevo tiene que llamar a esto, dentro
+    /// de Mutate.</summary>
+    public void Reset()
+    {
+        _opacity = 1f;
+        Fade = null;
+    }
+
+    public override void Render(in GraphFrame frame, in LayerTarget target)
+    {
+        float o = OpacityAt(frame.MediaTime);
+        if (o <= 0f)
+            return;   // invisible: ni se muestrea la fuente
+        Child.Render(frame, target.WithOpacity(target.Opacity * o));
+    }
+}
+
+// ---------------------------------------------------------------------------
 // solid — color plano (slate, velo de blackout, fondo)
 // ---------------------------------------------------------------------------
 

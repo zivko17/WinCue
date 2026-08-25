@@ -32,7 +32,7 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
 {
     private readonly SalidaGpu _salida;
     private SharedSurfaceSource? _fuente;
-    private OpacidadNode? _nodo;
+    private OpacityNode? _nodo;
     private Action? _copiador;
     private int _ancho = 1, _alto = 1;
     private bool _enElGrafo;
@@ -83,7 +83,7 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
             {
                 FrameCopier = _copiador,
             };
-            _nodo = new OpacidadNode(new SourceNode(_fuente));
+            _nodo = new OpacityNode(new SourceNode(_fuente));
         }
         catch (Exception exc)
         {
@@ -160,8 +160,7 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     /// que se esta viendo — para que un fundido nuevo arranque DESDE ahi y no
     /// desde el valor final del anterior (un crossfade interrumpido daria un
     /// salto).</summary>
-    internal float OpacidadEn(double ahora) =>
-        _nodo is null ? 1f : _nodo.Fundido?.At(ahora) ?? _nodo.Opacidad;
+    internal float OpacidadEn(double ahora) => _nodo?.OpacityAt(ahora) ?? 1f;
 
     /// <summary>LLAMAR SIEMPRE DENTRO DE Compositor.Mutate: el hilo de render
     /// lee estos dos campos en cada fotograma.</summary>
@@ -169,9 +168,14 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     {
         if (_nodo is null)
             return;
-        _nodo.Opacidad = opacidad;
-        _nodo.Fundido = fundido;
+        _nodo.Opacity = opacidad;
+        _nodo.Fade = fundido;
     }
+
+    /// <summary>La capa la toma un cue NUEVO: plena opacidad y sin rampa. El
+    /// porque —y el fallo real que lo motivo— viven en OpacityNode.Reset().
+    /// LLAMAR SIEMPRE DENTRO DE Compositor.Mutate.</summary>
+    internal void ReiniciarOpacidad() => _nodo?.Reset();
 
     private void LiberarFuente()
     {
@@ -181,47 +185,4 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     }
 
     public void Dispose() => ClearSurface();
-}
-
-/// <summary>Opacidad de una capa, evaluada en el RELOJ DEL COMPOSITOR.
-///
-/// El grafo no traia un nodo de opacidad: la lleva LayerTarget y solo MixNode
-/// la modula (mezclando dos subarboles). Una pista suelta con opacidad propia
-/// —que es justo lo que Secuence necesita para SetVideoCueOpacity— no encajaba
-/// en ninguno de los nodos existentes sin inventarse un subarbol falso, asi
-/// que es un nodo mas, del mismo tamano que TransformNode.
-///
-/// El fundido es un <see cref="Ramp"/>, no una animacion de la interfaz: se
-/// evalua con el MISMO instante con el que las fuentes eligen su fotograma, de
-/// modo que todo el frame corresponde a un unico momento. Ese es el punto de
-/// todo el compositor.
-///
-/// HILOS: Opacidad y Fundido los ESCRIBE el hilo principal dentro de
-/// Mutate() y los LEE el hilo de render dentro del mismo lock. Fuera de
-/// Mutate() seria una carrera.</summary>
-internal sealed class OpacidadNode : GraphNode
-{
-    public OpacidadNode(GraphNode hijo)
-    {
-        ArgumentNullException.ThrowIfNull(hijo);
-        Hijo = hijo;
-    }
-
-    public GraphNode Hijo { get; }
-
-    /// <summary>Opacidad fija. Se ignora mientras haya <see cref="Fundido"/>.</summary>
-    public float Opacidad { get; set; } = 1f;
-
-    /// <summary>Fundido agendado en el reloj del compositor. Una vez terminado
-    /// se queda puesto a proposito: Ramp.At devuelve To para siempre, asi que
-    /// no hace falta que nadie vuelva a pasar a recogerlo.</summary>
-    public Ramp? Fundido { get; set; }
-
-    public override void Render(in GraphFrame frame, in LayerTarget target)
-    {
-        float o = Fundido?.At(frame.MediaTime) ?? Opacidad;
-        if (o <= 0f)
-            return;   // invisible: ni se muestrea la fuente
-        Hijo.Render(frame, target.WithOpacity(target.Opacity * o));
-    }
 }

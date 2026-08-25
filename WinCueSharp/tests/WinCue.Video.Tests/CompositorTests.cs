@@ -170,6 +170,132 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
     }
 
     // ------------------------------------------------------------------
+    // Opacidad de UNA capa suelta (OpacityNode)
+    // ------------------------------------------------------------------
+
+    [Fact]
+    public void OpacityNode_AplicaLaOpacidadDeLaCapa()
+    {
+        // Lo que MixNode NO puede hacer: bajar la opacidad de UNA rama sin
+        // inventarse una segunda contra la que mezclarla. Es el campo
+        // «opacidad» de un cue de vídeo.
+        using GpuDevice? gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        using var sink = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, sink);
+        using var blanco = new SolidNode(gpu, 1f, 1f, 1f);
+
+        var capa = new OpacityNode(blanco);
+        comp.Root = capa;
+
+        capa.Opacity = 1f;
+        comp.RenderOnce(0.0);
+        byte lleno = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        capa.Opacity = 0.5f;
+        comp.RenderOnce(0.0);
+        byte medio = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        capa.Opacity = 0f;
+        comp.RenderOnce(0.0);
+        byte nada = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        _out.WriteLine($"GPU utilizable: opacidad 1.0 -> {lleno}, 0.5 -> {medio}, 0.0 -> {nada}");
+
+        AssertNear(255, lleno, "capa a plena opacidad");
+        AssertNear(128, medio, "capa al 50 %");
+        AssertNear(0, nada, "capa a 0 (queda el fondo)");
+    }
+
+    [Fact]
+    public void OpacityNode_ElFundidoLoGobiernaElRelojDelCompositor()
+    {
+        // Mismo criterio que el fundido de MixNode: la rampa se evalúa con el
+        // instante del FOTOGRAMA, no con un reloj de animación aparte. Es lo
+        // que hace el cue de control FADE sobre un vídeo al aire.
+        using GpuDevice? gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        using var sink = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, sink);
+        using var blanco = new SolidNode(gpu, 1f, 1f, 1f);
+
+        // FADE a 0 en 4 s que arranca en el segundo 10 del show
+        var capa = new OpacityNode(blanco) { Fade = Ramp.FadeOut(10.0, 4.0) };
+        comp.Root = capa;
+
+        comp.RenderOnce(9.0);
+        byte antes = PixelOf(gpu, sink, W / 2, H / 2).R;
+        comp.RenderOnce(12.0);
+        byte mitad = PixelOf(gpu, sink, W / 2, H / 2).R;
+        comp.RenderOnce(14.0);
+        byte fin = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        _out.WriteLine($"GPU utilizable: t=9 -> {antes}, t=12 (mitad) -> {mitad}, t=14 -> {fin}");
+
+        AssertNear(255, antes, "antes de empezar el fundido");
+        AssertNear(128, mitad, "mitad del fundido");
+        AssertNear(0, fin, "fundido terminado");
+    }
+
+    [Fact]
+    public void CapaReasignada_NoArrastraLaRampaDelCueAnterior()
+    {
+        // LA prueba de esta pieza, y la que habría cazado un fallo real de
+        // Secuence: las capas son slots PERSISTENTES de un pool (auditoría
+        // 05), así que el MISMO OpacityNode se reparte entre cues sucesivos de
+        // la misma (salida, pista, spec). Una rampa TERMINADA devuelve su
+        // valor final para siempre, así que un cue con fade_out deja el nodo
+        // valiendo 0 — y el siguiente cue de esa pista nacía invisible
+        // (medido con el show de prueba: tras el fade_out del 6.1, el 5.1
+        // salía en negro). Reset() es lo que tiene que llamar quien reasigna.
+        //
+        // Si Reset() dejara de borrar Fade, «tras reasignar» seguiría valiendo
+        // 0 y esta prueba se pondría roja.
+        using GpuDevice? gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        using var sink = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, sink);
+        using var blanco = new SolidNode(gpu, 1f, 1f, 1f);
+
+        // El cue ANTERIOR se fundió a 0 entre t=0 y t=1, y ya terminó
+        var capa = new OpacityNode(blanco) { Fade = Ramp.FadeOut(0.0, 1.0) };
+        comp.Root = capa;
+
+        comp.RenderOnce(5.0);
+        byte arrastrado = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        // El slot lo toma un cue NUEVO
+        capa.Reset();
+        comp.RenderOnce(5.0);
+        byte reasignado = PixelOf(gpu, sink, W / 2, H / 2).R;
+
+        _out.WriteLine("GPU utilizable: rampa terminada en 0 -> " +
+            $"{arrastrado}; tras reasignar la capa -> {reasignado}");
+
+        AssertNear(0, arrastrado,
+            "una rampa terminada sigue valiendo su valor final (por eso hace falta Reset)");
+        AssertNear(255, reasignado,
+            "el cue nuevo heredó la rampa del anterior y nace invisible");
+        Assert.Null(capa.Fade);
+        Assert.Equal(1f, capa.Opacity);
+    }
+
+    // ------------------------------------------------------------------
     // Geometría y orden de pista
     // ------------------------------------------------------------------
 

@@ -158,8 +158,9 @@ internal sealed class SalidaGpu : IDisposable
         _compositor?.Mutate(_ =>
         {
             // Plena opacidad y sin rampa: la capa es un slot REUTILIZADO del
-            // pool y puede traer la rampa del cue anterior — ver AssignCue.
-            capa.FijarOpacidad(1f, null);
+            // pool y puede traer la rampa del cue anterior — el porque entero
+            // (y su prueba) viven en OpacityNode.Reset().
+            capa.ReiniciarOpacidad();
             InsertarOrdenado(capa);
         });
     }
