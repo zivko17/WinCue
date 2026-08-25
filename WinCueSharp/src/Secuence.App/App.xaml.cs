@@ -169,11 +169,25 @@ public partial class App : Application
                 ? (screen, layer, slotSeq) =>
                     window.ObtenerSuperficieCompositor(screen, layer, slotSeq)
                 : null);
-            // Apagarlo no es solo quitar el proveedor: el swapchain de cada
-            // salida está sobre el HWND hijo que la ruta clásica va a volver a
-            // darle a mpv como wid.
+            // APAGARLO NO ES SOLO QUITAR EL PROVEEDOR. Aquí, a diferencia de
+            // WinCue, las superficies de capa MUEREN con el compositor de su
+            // salida (allí son elementos WPF que sobreviven), así que hay que
+            // decírselo al motor: sin esto, sus slots se quedan apuntando a
+            // capas muertas y, al volver a encender el compositor, el cue
+            // sale a una capa que ya no pinta — salida en NEGRO permanente.
+            // Es una llamada explícita a propósito: el motor no puede
+            // adivinar cuál de los dos productos le está hablando, y
+            // hacérselo automáticamente pararía cues al aire en WinCue (ver
+            // VideoEngine.DiscardCompositorPipelines).
+            //
+            // Y el swapchain de cada salida está sobre el HWND hijo que la
+            // ruta clásica va a volver a darle a mpv como wid, así que
+            // también hay que soltarlo.
             if (!on)
+            {
+                video.DiscardCompositorPipelines();
                 window.LiberarCompositoresGpu();
+            }
         }
         ApplyCompositorMode();
 

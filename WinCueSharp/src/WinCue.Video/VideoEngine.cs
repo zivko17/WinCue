@@ -252,34 +252,48 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // las viejas — soltarlas ANTES de cambiar de proveedor (si no, el slot
         // quedaría reservado para siempre por un cue que ya no existe).
         ReleaseFrozenSurfaces();
-
-        // ENCENDER O APAGAR EL COMPOSITOR TIRA LOS POOLS. Sin esto, los slots
-        // seguían vivos apuntando a superficies que el anfitrión ya había
-        // soltado: al volver a encenderlo, AcquireGpuSlot encontraba el slot
-        // viejo, NO volvía a pedir superficie (ese cableado solo ocurre al
-        // crear el pipeline) y hacía AssignCue sobre una superficie muerta.
-        // Resultado medido en Secuence: salida en NEGRO permanente, sin que
-        // _gpuFailed llegara a marcarse y sin caída a la ruta clásica — a un
-        // clic de la ventana de Ajustes.
-        //
-        // Solo cuando el modo CAMBIA de verdad (encendido↔apagado): guardar
-        // Ajustes sin tocar el interruptor vuelve a llamar aquí, y tirar los
-        // pipelines entonces mataría el vídeo que esté al aire por nada.
-        bool modeChanged = (_gpuSurfaces is null) != (provider is null);
-        if (modeChanged)
-        {
-            // Con los players parados ANTES: los motores propios tienen hilos
-            // vivos usando el device D3D de su slot (misma regla que Cleanup).
-            foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
-                         .Concat(_proresPlayers.Keys).ToList())
-            {
-                TerminatePlayer(cueId);
-            }
-            DiscardGpuPools();
-        }
-
         _gpuSurfaces = provider;
         _gpuFailed = false;
+    }
+
+    /// <summary>Tira los pipelines del compositor y desengancha sus
+    /// superficies: el pool se queda VACÍO y el siguiente cue construye slot
+    /// y superficie nuevos.
+    ///
+    /// QUIÉN DEBE LLAMARLO, Y POR QUÉ NO LO HACE
+    /// <see cref="SetGpuLayerSurfaceProvider"/> POR SU CUENTA — no lo muevas
+    /// ahí «para simplificar»:
+    ///
+    /// El pool guarda los sinks que el anfitrión entregó al crear cada
+    /// pipeline; ese cableado (SetSurface / SetSharedHandle / SetFrameCopier)
+    /// ocurre UNA vez, al crearlo. Si el anfitrión DESTRUYE esas superficies
+    /// al apagar su compositor, los slots quedan apuntando a objetos muertos:
+    /// al volver a encenderlo, AcquireGpuSlot reutiliza el slot viejo, no
+    /// vuelve a pedir superficie, y el cue sale a una capa que ya no pinta —
+    /// salida en NEGRO permanente, sin que _gpuFailed llegue a marcarse.
+    ///
+    /// Pero eso depende del PRODUCTO, y el motor no puede adivinarlo:
+    ///   · WinCue: sus sinks son CompositorLayerControl, elementos WPF que
+    ///     siguen vivos al cambiar de modo. Los slots viejos seguirían
+    ///     funcionando, y tirar los pipelines aquí PARARÍA cues que están al
+    ///     aire. WinCue está en producción y no cambia de comportamiento.
+    ///   · Secuence: sus sinks son nodos de un grafo que muere con el
+    ///     compositor de su salida. Ahí sí hay que llamar a esto, justo antes
+    ///     (o después) de soltar los compositores.
+    ///
+    /// Quien sabe si sus superficies han muerto es el anfitrión, no el motor.
+    /// Por eso es una llamada explícita y no un efecto secundario.</summary>
+    public void DiscardCompositorPipelines()
+    {
+        // Los players PRIMERO: los motores propios tienen hilos vivos usando
+        // el device D3D de su slot, y destruir el pipeline con esos hilos
+        // dentro es un acceso a recursos liberados (misma regla que Cleanup).
+        foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
+                     .Concat(_proresPlayers.Keys).ToList())
+        {
+            TerminatePlayer(cueId);
+        }
+        DiscardGpuPools();
     }
 
     /// <summary>RELOJ MAESTRO del motor HAP: la App inyecta un provider que
