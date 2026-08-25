@@ -1529,7 +1529,14 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
                 sink.SetSharedHandle(pipeline.ViewSharedHandle(i));
                 int viewIndex = i;
-                sink.SetFrameCopier(() => pipeline.CopyPresent(viewIndex));
+                // FENCEADO solo para quien abra el handle en otro device
+                // (Secuence, D3D11): sin la barrera entre las dos colas lee
+                // negro de forma no determinista. WinCue hospeda la superficie
+                // en su propio device D3D9Ex y sigue con CopyPresent a secas,
+                // sin pagar un bloqueo por fotograma y por capa.
+                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                    ? () => pipeline.CopyPresentFenced(viewIndex)
+                    : () => pipeline.CopyPresent(viewIndex));
                 pipeline.FrameRendered += sink.InvalidateFrame;
                 sinks.Add(sink);
             }
@@ -1711,7 +1718,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
             sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
             sink.SetSharedHandle(pipeline.PresentSharedHandle);
-            sink.SetFrameCopier(pipeline.CopyPresent);
+            // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
+            sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                ? pipeline.CopyPresentFenced
+                : pipeline.CopyPresent);
             pipeline.FrameRendered += sink.InvalidateFrame;
             slot = new HapSlot
             {
@@ -1921,7 +1931,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
             sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
             sink.SetSharedHandle(pipeline.PresentSharedHandle);
-            sink.SetFrameCopier(pipeline.CopyPresent);
+            // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
+            sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                ? pipeline.CopyPresentFenced
+                : pipeline.CopyPresent);
             pipeline.FrameRendered += sink.InvalidateFrame;
             slot = new ProResSlot
             {

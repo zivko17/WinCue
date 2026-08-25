@@ -247,6 +247,22 @@ public interface IVideoLayerSurface
     /// WinUI 3 no tiene D3DImage). Cuerpo vacio a proposito: el control de
     /// WinCue no lo necesita y no debe enterarse de que esto existe.</summary>
     void SetSharedHandle(nint sharedHandle) { }
+
+    /// <summary>true si esta superficie abre el handle compartido en OTRO
+    /// device (Secuence: D3D11 sobre la superficie D3D9Ex del pipeline). El
+    /// motor le entrega entonces el copiador FENCEADO en vez del de siempre.
+    ///
+    /// Existe porque una superficie compartida D3D9Ex NO trae sincronizacion
+    /// implicita entre devices: que el StretchRect del pipeline devuelva S_OK
+    /// solo dice que el comando se encolo, no que la GPU ya lo ejecuto, y el
+    /// consumidor D3D11 lee negro de forma NO determinista (medido en el
+    /// puente: quitando el fence, la prueba por pixel vuelve a fallar incluso
+    /// con un Thread.Sleep(100) de por medio).
+    ///
+    /// Falso por defecto: WinCue hospeda la MISMA superficie en su propio
+    /// device D3D9Ex, donde no hay dos colas que sincronizar, y el fence solo
+    /// le costaria un bloqueo por fotograma y por capa a cambio de nada.</summary>
+    bool NeedsCrossDeviceFence => false;
 }
 
 /// <summary>Motor de vídeo (implementado por WinCue.Video sobre libmpv).</summary>
