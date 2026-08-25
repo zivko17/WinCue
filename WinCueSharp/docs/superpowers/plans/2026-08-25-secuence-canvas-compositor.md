@@ -1075,9 +1075,23 @@ public class SharedSurfaceSourceTests
 ```
 
 **Nota:** `D3D9Minimal.ColorFill` no existe todavía; se añade en el paso 3
-junto al resto. Es un `IDirect3DDevice9Ex::ColorFill` (índice 42 de la vtbl de
-`IDirect3DDevice9`), del mismo estilo que los helpers que ya hay en
-`GlDxInterop.cs`.
+junto al resto. Es un `IDirect3DDevice9::ColorFill`, del mismo estilo que los
+helpers que ya hay en `GlDxInterop.cs`. **Está en el índice 35 de la vtbl**
+(el plan dijo 42 y era falso: se comprobó recontando contra los vecinos que ya
+funcionan en producción, `CreateRenderTarget = 28` y `StretchRect = 34`). Un
+índice equivocado no falla al compilar — corrompe la pila o devuelve basura.
+
+**Y falta un fence**, que este plan tampoco contemplaba: una superficie
+compartida D3D9Ex abierta en D3D11 **no trae sincronización implícita entre
+devices**. Sin él, D3D11 lee negro de forma no determinista — y falla también
+con un `Thread.Sleep(100)` de por medio, así que no es cuestión de esperar más.
+Se resuelve con `D3D9Minimal.FlushAndWait(device)` (event query D3D9, espera
+ACOTADA a ~100 ms que se rinde en vez de colgarse: va a correr en el hilo que
+presenta durante un show, y un fotograma repetido se nota mucho menos que un
+show congelado). **Lo llama el PRODUCTOR, nunca `SharedSurfaceSource`**, que es
+un consumidor — y nunca `MarkFrameReady`, que corre en el hilo de render de
+mpv y no puede bloquearse. En la prueba lo llama la propia prueba, que está
+haciendo de productor.
 
 - [ ] **Step 2: Ver que falla**
 
@@ -1276,6 +1290,13 @@ Pasa a guardarse en un array paralelo `_presentShared[i]`, y se expone junto a
 
 Añade la misma propiedad a `HapGpuPipeline` y a `ProResGpuPipeline`, que ya
 tienen `PresentSurfacePointer`: llámala `PresentSharedHandle`.
+
+**Y añade `CopyPresentFenced(int i)`** — `CopyPresent(i)` más el
+`D3D9Minimal.FlushAndWait` que la Task 4 descubrió que hace falta. **Variante
+SEPARADA, a propósito**: `CopyPresent` la llama WinCue desde el `Lock` de su
+`D3DImage`, y WinCue no puede cambiar de comportamiento. La ruta nueva paga el
+fence; la vieja no se entera. Reutiliza **una query persistente** creada con el
+pipeline, no una por fotograma.
 
 - [ ] **Step 2: Ampliar el contrato**
 
