@@ -784,10 +784,60 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         IReadOnlyList<IVideoLayerSurface> sinks)
     {
         foreach (var s in sinks)
+            DetachSink(pipeline, s);
+    }
+
+    /// <summary>UN sink: el `-=` y después ClearSurface (ver DetachSinks para
+    /// el porqué del orden). Extraído para poder desmontar sink a sink en los
+    /// caminos de error, donde uno que lance no puede llevarse por delante a
+    /// los demás.</summary>
+    private static void DetachSink(MpvGpuRenderer pipeline, IVideoLayerSurface sink)
+    {
+        pipeline.FrameRendered -= sink.InvalidateFrame;
+        sink.ClearSurface();
+    }
+
+    /// <summary>Un paso de desmontaje dentro de un `catch` que va a RELANZAR,
+    /// blindado para que su propio fallo no se escape.
+    ///
+    /// Sin esto, cualquier excepción del desmontaje haría dos daños a la vez:
+    ///   · SUSTITUIRÍA a la excepción original — y la original es justo la que
+    ///     hace que el llamante marque _gpuFailed, avise y saque el cue por la
+    ///     ruta clásica; el llamante vería en su lugar un fallo de limpieza que
+    ///     no sabe interpretar;
+    ///   · ABORTARÍA los pasos siguientes, entre ellos el Dispose del pipeline,
+    ///     que para entonces ya no está en el pool y del que nadie más guarda
+    ///     referencia: fuga total del device D3D9Ex, el FBO, las superficies
+    ///     compartidas y el interop GL — el MISMO modo de fallo que estos catch
+    ///     vinieron a eliminar.
+    ///
+    /// Y no es teórico: ClearSurface, en Secuence, toma el lock del grafo del
+    /// compositor y libera recursos D3D11. Queda traza (WINCUE_MPV_LOG) para
+    /// que un desmontaje fallido no sea invisible.</summary>
+    private static void TeardownStep(string what, Action step)
+    {
+        try
         {
-            pipeline.FrameRendered -= s.InvalidateFrame;
-            s.ClearSurface();
+            step();
         }
+        catch (Exception exc)
+        {
+            Trace($"desmontaje tras fallo: {what} lanzó " +
+                $"({exc.GetType().Name}: {exc.Message})");
+        }
+    }
+
+    /// <summary>Desmonta un slot mpv en un camino de ERROR y GARANTIZA que el
+    /// pipeline queda liberado, pase lo que pase con los sinks. Sink a sink a
+    /// propósito: si el primero lanza, los demás tienen que desengancharse
+    /// IGUAL — mientras conserven la suscripción a FrameRendered, el pipeline
+    /// los mantiene vivos a todos.</summary>
+    private static void TearDownFailedGpuSlot(MpvGpuRenderer pipeline,
+        IReadOnlyList<IVideoLayerSurface> sinks)
+    {
+        foreach (var s in sinks)
+            TeardownStep("desenganchar sink mpv", () => DetachSink(pipeline, s));
+        TeardownStep("liberar pipeline mpv", pipeline.Dispose);
     }
 
     public void Dispose()
@@ -1630,8 +1680,12 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 // por el borde de error. En la ruta mpv se pagaría una vez
                 // por sesión (_gpuFailed engancha), pero en HAP y ProRes no
                 // hay latch y sería una fuga POR CUE.
-                DetachSinks(pipeline, sinks);
-                pipeline.Dispose();
+                //
+                // El desmontaje va BLINDADO (ver TeardownStep): si él mismo
+                // lanzara, sustituiría a la excepción original y dejaría el
+                // pipeline sin liberar, que es exactamente lo que este catch
+                // viene a evitar.
+                TearDownFailedGpuSlot(pipeline, sinks);
                 throw;
             }
             slot = new GpuSlot
@@ -1660,10 +1714,11 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         }
         catch (Exception)
         {
+            // Primero lo que NO puede fallar (el pool queda limpio pase lo que
+            // pase) y solo después el desmontaje, blindado: ver TeardownStep.
             slot.BusyCueId = null;
             _gpuPool.Remove(slot);
-            DetachSinks(slot.Pipeline, slot.Sinks);
-            slot.Pipeline.Dispose();
+            TearDownFailedGpuSlot(slot.Pipeline, slot.Sinks);
             throw;
         }
         return slot;
@@ -1850,7 +1905,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
                 // puente no se puede montar) fugaría el pipeline ENTERO —
                 // y aquí, a diferencia de la ruta mpv, no hay _gpuFailed que
                 // enganche: sería una fuga POR CUE. Ver AcquireGpuSlot.
-                pipeline.Dispose();
+                // Blindado para que un Dispose que lance no sustituya a la
+                // excepción original (ver TeardownStep).
+                TeardownStep("liberar pipeline HAP", pipeline.Dispose);
                 throw;
             }
             slot = new HapSlot
@@ -1871,11 +1928,20 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         }
         catch (Exception)
         {
+            // Primero lo que NO puede fallar, y el desmontaje blindado
+            // después: si ClearSurface lanzara (en Secuence toma el lock del
+            // grafo y libera D3D11), el pipeline se quedaría sin liberar y sin
+            // nadie que lo referencie. Ver TeardownStep.
             slot.BusyCueId = null;
             _hapPool.Remove(slot);
-            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
-            slot.Sink.ClearSurface();
-            slot.Pipeline.Dispose();
+            var hapPipe = slot.Pipeline;
+            var hapSink = slot.Sink;
+            TeardownStep("desenganchar sink HAP", () =>
+            {
+                hapPipe.FrameRendered -= hapSink.InvalidateFrame;
+                hapSink.ClearSurface();
+            });
+            TeardownStep("liberar pipeline HAP", hapPipe.Dispose);
             throw;
         }
         return slot;
@@ -2089,8 +2155,9 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
             catch (Exception)
             {
                 // Mismo motivo que en HAP: sin latch, un proveedor que lance
-                // fugaría un pipeline ProRes por cada cue.
-                pipeline.Dispose();
+                // fugaría un pipeline ProRes por cada cue. Blindado para que un
+                // Dispose que lance no sustituya a la excepción original.
+                TeardownStep("liberar pipeline ProRes", pipeline.Dispose);
                 throw;
             }
             slot = new ProResSlot
@@ -2124,12 +2191,23 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         }
         catch (Exception)
         {
+            // Primero lo que NO puede fallar, y el desmontaje blindado
+            // después (ver TeardownStep): la sesión y el pipeline tienen que
+            // liberarse aunque ClearSurface lance, porque el slot ya no está
+            // en el pool y nadie más los referencia.
             slot.BusyCueId = null;
             _proresPool.Remove(slot);
-            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
-            slot.Sink.ClearSurface();
-            slot.Session?.Dispose();
-            slot.Pipeline.Dispose();
+            var prPipe = slot.Pipeline;
+            var prSink = slot.Sink;
+            var prSession = slot.Session;
+            TeardownStep("desenganchar sink ProRes", () =>
+            {
+                prPipe.FrameRendered -= prSink.InvalidateFrame;
+                prSink.ClearSurface();
+            });
+            // La SESION muere antes que su device, como en todas partes.
+            TeardownStep("liberar sesión ProRes", () => prSession?.Dispose());
+            TeardownStep("liberar pipeline ProRes", prPipe.Dispose);
             throw;
         }
         return slot;
