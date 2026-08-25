@@ -267,6 +267,10 @@ public sealed partial class MainWindow : Window, IShowView
         // cue en STANDBY, que por definición aún NO sale.
         _canvas = new CanvasLayout(_settings, this);
         _pgm.PedirPlanEspejo = PlanEspejoPgm;
+        // Un espejo que no arranca tiene que verse donde el operador mira, no
+        // solo en logsideo-output.log — mismo reparto que el AvisoEnPantalla
+        // de la ventana de salida.
+        _pgm.AvisoEnPantalla = FlashStatus;
         ConstruirSelectorPgm();
         PreviewPlayIcon.Text = Icons.Play;
         PreviewPlayButton.Click += (_, _) =>
@@ -734,7 +738,13 @@ public sealed partial class MainWindow : Window, IShowView
         //     nada que espejar de ninguna salida, y el monitor decodifica su
         //     copia muda exactamente como hace WinCue en ese caso. Esa rama es
         //     la de abajo y NO se toca.
-        if (CueConCapaDeCompositor(_cueEnPantalla))
+        // AVERÍA del espejo (su HWND o su swapchain no nacieron): la sala está
+        // bien, lo roto es la fontanería de NUESTRO monitor. Se cae a la rama
+        // clásica sin más — negarle imagen al operador por esto sería peor, y
+        // LiveMonitorControl ya le ha puesto el aviso en la barra de estado.
+        // NO es el caso de «sin señal», que es otro: ahí la salida que mira
+        // realmente no tiene compositor.
+        if (!_pgm.EspejoAveriado && CueConCapaDeCompositor(_cueEnPantalla))
         {
             string aviso = TextoSinSenal();
             // Mismo criterio que la rama de NEGRO: no se re-limpia en cada tic
@@ -827,9 +837,16 @@ public sealed partial class MainWindow : Window, IShowView
             if (regiones.Count == 0)
                 return null;
             var (cw, ch) = _canvas.CanvasDims();
-            // CanvasViews() ya viene ordenado por salida y la 1 siempre está,
-            // así que la ANFITRIONA (la primera) es la Salida 1: la que presta
-            // su compositor para dibujar el espejo entero.
+            // La ANFITRIONA es la PRIMERA región, la que presta su compositor
+            // para dibujar el espejo entero. CanvasViews() viene ordenado por
+            // salida, así que NORMALMENTE es la Salida 1 — pero no está
+            // garantizado: el filtro de arriba descarta las salidas cuya
+            // SalidaGpu todavía no existe, y la 1 puede ser una de ellas (un
+            // cue que solo toca la 2, por ejemplo). El código aguanta ese caso
+            // —anfitriona es quien quede primera, y su grafo va en vivo
+            // mientras los demás van por instantánea—, así que aquí no hay
+            // nada que arreglar; lo que había que arreglar era este comentario,
+            // que prometía una garantía que nadie da.
             return (cw, ch, regiones);
         }
 
@@ -889,6 +906,18 @@ public sealed partial class MainWindow : Window, IShowView
             _pgmFuente.SelectionChanged += OnPgmFuenteChanged;
         }
 
+        // DOS NOCIONES DISTINTAS DE «SALIDA HABILITADA», y es a propósito:
+        //   · el SELECTOR usa video_output_screen* (¿tiene monitor asignado?),
+        //     el mismo criterio que el botón de salidas — es lo que el operador
+        //     entiende por «esta salida existe».
+        //   · las REGIONES del LIENZO salen de video_output_enabled*, que es lo
+        //     que marca el editor de canvas de Ajustes → Vídeo y lo que lee el
+        //     motor (CanvasLayout.CanvasViews).
+        // Consecuencia conocida: una salida con monitor asignado pero SIN
+        // marcar en el editor de canvas se ofrece en el desplegable y no aporta
+        // región al lienzo. Es coherente —se puede mirar esa salida suelta,
+        // simplemente no forma parte del canvas—, pero queda escrito para que
+        // nadie «unifique» las dos claves creyendo que es un descuido.
         bool canvas = _canvas.CanvasMode;
         _fuentesPgm.Clear();
         if (canvas)

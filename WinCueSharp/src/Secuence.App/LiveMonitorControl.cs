@@ -35,18 +35,27 @@
 //
 // QUIÉN LLAMA AL COPIADOR (regla dura de esta arquitectura): el copiador de
 // una capa —el StretchRect interop→presentación, ver CapaCompositor.cs— lo
-// invoca SIEMPRE el compositor DUEÑO de esa salida, desde su TryAcquire y
-// dentro de su propio lock. El espejo solo MUESTREA, en lectura. Cuando el
-// espejo y el nodo son de la misma salida eso sale solo: el pase principal ya
-// consumió la bandera «fotograma nuevo» (SharedSurfaceSource._frameIsNew) y
-// el pase del espejo repite el último fotograma sin copiar nada.
+// invoca SIEMPRE el compositor DUEÑO de esa salida. El espejo solo MUESTREA,
+// en lectura, y eso lo GARANTIZA EL MOTOR, no la casualidad: el pase de
+// espejo va marcado SoloLectura y baja hasta
+// IVideoSource.TryAcquireReadOnly, que ni consume la bandera de «fotograma
+// nuevo» ni dispara copia ninguna.
 //
-// Al mirar salidas que NO son la anfitriona (modo LIENZO con varias salidas
-// habilitadas) queda una ventana de tearing TEÓRICA: el hilo de la anfitriona
-// puede muestrear una superficie mientras el dueño de esa salida la está
-// copiando. SE ACEPTA A PROPÓSITO — esto es un monitor, no la sala —, y
-// evitarla costaría sincronizar entre sí los hilos que van a pantalla, que es
-// justo lo que no se debe tocar (cada salida presenta al vsync de SU pantalla).
+// Y no es un detalle de limpieza. En modo LIENZO el espejo recorre nodos de
+// OTRAS salidas; muestreándolos «de verdad», el hilo de la ANFITRIONA —que es
+// un hilo que va A LA SALA— le robaría la copia a su dueño y, con el puente
+// D3D9Ex, se quedaría bloqueado dentro de CopyPresentFenced esperando un fence
+// de GPU de otro device, con el lock de su grafo tomado. O sea: el monitor de
+// control metiéndole latencia a la sala. La regla de toda esta tanda es que el
+// monitor NO le cuesta NADA a la sala.
+//
+// LO QUE SÍ QUEDA, y se acepta: al mirar salidas que no son la anfitriona hay
+// una ventana de tearing TEÓRICA — se puede muestrear una superficie mientras
+// su dueño la está copiando— y el espejo puede ir un fotograma por detrás de
+// lo que el dueño acaba de copiar. Las dos cosas son invisibles en un monitor,
+// y evitarlas costaría sincronizar entre sí los hilos que van a pantalla, que
+// es justo lo que no se debe tocar (cada salida presenta al vsync de SU
+// pantalla).
 //
 // LO QUE SÍ SE EVITA, porque no es tearing sino la aplicación abajo: recorrer
 // la lista VIVA de hijos del grafo de OTRA salida. StackNode.Render la recorre
@@ -130,6 +139,29 @@ internal sealed class LiveMonitorControl : IDisposable
     /// <summary>true si el monitor está ESPEJANDO (sin decodificar nada).
     /// Equivalente de WinCue.App.LiveMonitorControl.IsMirroring.</summary>
     public bool Espejando => _espejando;
+
+    /// <summary>El espejo HABÍA de poder montarse —hay plan, o sea que la
+    /// fuente elegida tiene compositor— y NO se pudo: la fontanería del
+    /// monitor (su HWND hijo o su swapchain) falló.
+    ///
+    /// Es un estado DISTINTO de «no hay nada que espejar», y quien decide qué
+    /// enseñar tiene que separarlos: aquí la sala está perfectamente, lo que
+    /// se ha roto es nuestro monitor, así que lo correcto es que el PGM caiga
+    /// a la RAMA CLÁSICA y decodifique su copia muda. Puede diferir en
+    /// opacidad o en blackout, sí — pero dejar al operador sin imagen porque
+    /// nuestro swapchain no nació es peor, y el aviso de la barra de estado ya
+    /// le dice que el espejo está caído.</summary>
+    public bool EspejoAveriado { get; private set; }
+
+    /// <summary>Camino a la barra de estado de la ventana de control. Sin
+    /// esto, un espejo que no arranca solo deja rastro en un archivo de log —
+    /// mismo criterio (y mismo nombre) que SalidaGpu.AvisoEnPantalla.</summary>
+    public Action<string>? AvisoEnPantalla { get; set; }
+
+    /// <summary>Ya se avisó de ESTA avería: el tic del PGM vuelve a intentarlo
+    /// cada medio segundo y la barra de estado no puede convertirse en un
+    /// martilleo. Se rearma en cuanto el espejo vuelve a montarse.</summary>
+    private bool _averiaAvisada;
 
     /// <summary>Una región del espejo: la salida cuyo compositor la pinta y el
     /// rectángulo que ocupa EN COORDENADAS DEL LIENZO. En modo LIENZO hay una
@@ -223,6 +255,9 @@ internal sealed class LiveMonitorControl : IDisposable
         var plan = PedirPlanEspejo?.Invoke();
         if (plan is not { } p || p.Regiones.Count == 0)
         {
+            // No hay NADA que espejar: ni avería ni fallo, simplemente esta
+            // fuente no tiene compositor. Quien llama decide qué enseñar.
+            EspejoAveriado = false;
             SalirDelEspejo();
             return;
         }
@@ -230,9 +265,13 @@ internal sealed class LiveMonitorControl : IDisposable
         bool recreado = AsegurarSinkEspejo();
         if (_sinkEspejo is null)
         {
-            SalirDelEspejo();   // sin swapchain no hay espejo: a la rama clásica
+            // Hay plan pero no hay fontanería: AVERÍA, no «sin señal». El PGM
+            // se va a su rama clásica — ver EspejoAveriado.
+            EspejoAveriado = true;
+            SalirDelEspejo();
             return;
         }
+        EspejoAveriado = false;
 
         // La ANFITRIONA es la primera región. Su compositor es el que dibuja
         // el espejo entero, en su hilo y en su fotograma — por eso el espejo
@@ -273,7 +312,8 @@ internal sealed class LiveMonitorControl : IDisposable
     /// <summary>Crea (o recrea, si el hueco cambió de tamaño) el swapchain del
     /// espejo sobre su HWND hijo. Devuelve true si ha quedado uno NUEVO —
     /// entonces hay que volver a dárselo al compositor—. Un fallo deja
-    /// <c>_sinkEspejo</c> a null: el monitor cae a su rama clásica, que es
+    /// <c>_sinkEspejo</c> a null, y quien llama lo convierte en
+    /// <see cref="EspejoAveriado"/>: el monitor cae a su rama clásica, que es
     /// mejor que un PGM muerto.</summary>
     private bool AsegurarSinkEspejo()
     {
@@ -294,8 +334,9 @@ internal sealed class LiveMonitorControl : IDisposable
                 _hijoEspejo = HwndHijo.Crear(_hwndPropio, w, h);
                 SyncGeometry();                  // a su sitio, sobre el hueco
             }
-            catch (InvalidOperationException)
+            catch (InvalidOperationException exc)
             {
+                Averiado($"No se pudo crear el HWND hijo del espejo ({exc.Message}).");
                 _hijoEspejo = 0;
                 return false;
             }
@@ -323,17 +364,37 @@ internal sealed class LiveMonitorControl : IDisposable
             };
             _espejoW = w;
             _espejoH = h;
+            _averiaAvisada = false;   // si vuelve a caerse, se vuelve a avisar
             return true;
         }
         catch (Exception exc)
         {
-            VideoOutputWindow.LogAviso(
-                $"[PGM] No se pudo crear el swapchain del espejo a {w}x{h} " +
-                $"({exc.Message}). El monitor sigue con su mpv propio.");
+            Averiado($"No se pudo crear el swapchain del espejo a {w}x{h} " +
+                $"({exc.Message}).");
             _sinkEspejo = null;
             _espejoW = _espejoH = 0;
             return false;
         }
+    }
+
+    /// <summary>Deja constancia de una avería del espejo: al log SIEMPRE (sin
+    /// rastro escrito, un fallo en la máquina de un cliente es indiagnosticable
+    /// después de la función) y a la barra de estado UNA sola vez — el tic del
+    /// PGM reintenta cada medio segundo y no puede martillear al operador.
+    ///
+    /// El texto dice lo que de verdad pasa a continuación: el monitor vuelve a
+    /// su mpv propio. Que este aviso y el código digan lo mismo no es celo: la
+    /// cabecera vieja de este archivo llegó a afirmar lo contrario de lo que
+    /// hacía, y un comentario que miente es peor que no tenerlo.</summary>
+    private void Averiado(string motivo)
+    {
+        string aviso = $"[PGM] {motivo} El monitor vuelve a su mpv propio " +
+            "(puede diferir en opacidad y blackout de lo que sale a sala).";
+        VideoOutputWindow.LogAviso(aviso);
+        if (_averiaAvisada)
+            return;
+        _averiaAvisada = true;
+        AvisoEnPantalla?.Invoke($"[AVISO] {aviso}");
     }
 
     /// <summary>El árbol que el compositor anfitrión pinta en el espejo: una
