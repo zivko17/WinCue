@@ -150,8 +150,27 @@ internal sealed class LiveMonitorControl : IDisposable
     /// a la RAMA CLÁSICA y decodifique su copia muda. Puede diferir en
     /// opacidad o en blackout, sí — pero dejar al operador sin imagen porque
     /// nuestro swapchain no nació es peor, y el aviso de la barra de estado ya
-    /// le dice que el espejo está caído.</summary>
-    public bool EspejoAveriado { get; private set; }
+    /// le dice que el espejo está caído.
+    ///
+    /// EL REARME DEL AVISO CUELGA DE AQUÍ, y no de montar el swapchain: lo que
+    /// hace que el operador merezca un aviso nuevo es haber dejado de estar
+    /// averiado, no que una pieza concreta de la fontanería haya nacido. Atado
+    /// a lo segundo, una avería que se cura por otro camino (deja de haber plan
+    /// que espejar, o el hueco vuelve a medirse) dejaba MUDA la siguiente.</summary>
+    public bool EspejoAveriado
+    {
+        get => _espejoAveriado;
+        private set
+        {
+            if (_espejoAveriado == value)
+                return;
+            _espejoAveriado = value;
+            if (!value)
+                _averiaAvisada = false;   // curado: la próxima sí se avisa
+        }
+    }
+
+    private bool _espejoAveriado;
 
     /// <summary>Camino a la barra de estado de la ventana de control. Sin
     /// esto, un espejo que no arranca solo deja rastro en un archivo de log —
@@ -339,7 +358,15 @@ internal sealed class LiveMonitorControl : IDisposable
     {
         SyncGeometry();
         if (_huecoW <= 0 || _huecoH <= 0)
-            return false;   // aún sin layout: lo reintenta el siguiente tic
+        {
+            // AÚN SIN LAYOUT. Lo reintenta el siguiente tic, sí — pero hasta
+            // que llegue, quien llama nos convierte en EspejoAveriado y el PGM
+            // se va a su rama clásica SIN decir por qué. Un monitor que cambia
+            // de comportamiento en silencio es indistinguible de uno roto: se
+            // avisa igual que en los otros dos fallos de fontanería.
+            Averiado("El hueco del PGM todavía no está medido (sin layout).");
+            return false;
+        }
 
         int w = Math.Max(16, _huecoW);
         int h = Math.Max(16, _huecoH);
@@ -384,7 +411,8 @@ internal sealed class LiveMonitorControl : IDisposable
             };
             _espejoW = w;
             _espejoH = h;
-            _averiaAvisada = false;   // si vuelve a caerse, se vuelve a avisar
+            // El rearme del aviso NO va aquí: cuelga de EspejoAveriado, que es
+            // quien sabe si seguimos averiados. Ver su comentario.
             return true;
         }
         catch (Exception exc)
