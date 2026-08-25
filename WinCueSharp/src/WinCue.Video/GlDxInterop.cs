@@ -50,7 +50,27 @@ internal static class D3D9Minimal
     private const int VtblCreateDeviceEx = 20;      // IDirect3D9Ex
     private const int VtblCreateRenderTarget = 28;  // IDirect3DDevice9
     private const int VtblStretchRect = 34;         // IDirect3DDevice9
+    // ColorFill: contando IUnknown (3) mas los metodos de IDirect3DDevice9 en
+    // el orden de d3d9.h hasta llegar a el, da 35 — no 42 como decia el plan.
+    // Se confirma con los dos vecinos de arriba, que ya funcionan en
+    // produccion: con esa misma cuenta CreateRenderTarget cae en 28 y
+    // StretchRect en 34; 42 caeria en EndScene (firma sin argumentos), lo que
+    // habria corrompido la pila con los argumentos de ColorFill.
+    private const int VtblColorFill = 35;           // IDirect3DDevice9
+    // CreateQuery: siguiendo la misma cuenta de d3d9.h (comentario de arriba)
+    // hasta el ultimo metodo de IDirect3DDevice9, cae en 118.
+    private const int VtblCreateQuery = 118;        // IDirect3DDevice9
     private const int VtblRelease = 2;              // IUnknown
+    // IDirect3DQuery9 es OTRA interfaz COM (la que crea CreateQuery), con su
+    // PROPIA vtable: IUnknown (0..2) + GetDevice(3) + GetType(4) +
+    // GetDataSize(5) + Issue(6) + GetData(7).
+    private const int VtblQueryIssue = 6;           // IDirect3DQuery9
+    private const int VtblQueryGetData = 7;         // IDirect3DQuery9
+
+    private const uint D3DQUERYTYPE_EVENT = 8;
+    private const uint D3DISSUE_END = 2;
+    private const uint D3DGETDATA_FLUSH = 1;
+    private const int S_FALSE = 1;
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int CreateDeviceExFn(nint self, uint adapter, uint deviceType,
@@ -65,6 +85,18 @@ internal static class D3D9Minimal
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate int StretchRectFn(nint self, nint srcSurface, nint srcRect,
         nint dstSurface, nint dstRect, uint filter);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int ColorFillFn(nint self, nint surface, nint rect, uint color);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int CreateQueryFn(nint self, uint type, out nint query);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int QueryIssueFn(nint self, uint issueFlags);
+
+    [UnmanagedFunctionPointer(CallingConvention.StdCall)]
+    private delegate int QueryGetDataFn(nint self, nint data, uint size, uint flags);
 
     [UnmanagedFunctionPointer(CallingConvention.StdCall)]
     private delegate uint ReleaseFn(nint self);
@@ -87,6 +119,67 @@ internal static class D3D9Minimal
     /// GL — WPF jamás debe tocar esa (auditoría 05: fuga de VRAM).</summary>
     internal static int StretchRect(nint device, nint src, nint dst) =>
         Method<StretchRectFn>(device, VtblStretchRect)(device, src, 0, dst, 0, 0);
+
+    /// <summary>Rellena una superficie D3D9 entera de un color plano (D3DCOLOR
+    /// = 0xAARRGGBB, mismo layout de bytes que B8G8R8A8). Solo lo usan las
+    /// pruebas, para pintar la superficie compartida de un color conocido
+    /// antes de verificar el puente por píxel.</summary>
+    internal static int ColorFill(nint device, nint surface, uint color) =>
+        Method<ColorFillFn>(device, VtblColorFill)(device, surface, 0, color);
+
+    /// <summary>Fuerza a la GPU a terminar TODO lo pendiente en <paramref
+    /// name="device"/> y espera (acotado) a que sea visible. SOLO lo llama el
+    /// PRODUCTOR — quien acaba de escribir en la superficie compartida — justo
+    /// antes de avisar al consumidor. Nunca el consumidor: eso convertiría un
+    /// muestreo en una espera de GPU ajena.
+    ///
+    /// POR QUE HACE FALTA — el hallazgo caro de esta tarea: una superficie
+    /// D3D9Ex compartida NO trae sincronización implícita entre devices. Un
+    /// IDirect3DDevice9Ex y un ID3D11Device son colas de comandos DISTINTAS
+    /// sobre la MISMA GPU física; que ColorFill/StretchRect devuelvan S_OK
+    /// solo dice que el comando se ENCOLÓ, no que la GPU ya lo ejecutó. Medido
+    /// en esta máquina (RTX 5070 Ti): sin este flush, leer desde D3D11
+    /// inmediatamente después de escribir por D3D9 falla de forma NO
+    /// determinista incluso con un Thread.Sleep(100) de por medio — así que no
+    /// es "cuestión de darle tiempo", es la ausencia de una barrera real.
+    ///
+    /// CÓMO: un event query D3D9 (D3DQUERYTYPE_EVENT) es la forma estándar de
+    /// pedirle al driver "avísame cuando la GPU haya vaciado la cola hasta
+    /// aquí" — Issue(END) marca el punto, GetData(D3DGETDATA_FLUSH) fuerza el
+    /// flush del command buffer y se sondea hasta que deja de devolver
+    /// S_FALSE (pendiente).
+    ///
+    /// ESPERA ACOTADA, NO INDEFINIDA: esto puede acabar corriendo en el hilo
+    /// que presenta durante un show en directo. Preferimos un fotograma
+    /// repetido (el consumidor no ve bandera nueva y reenseña el anterior) a
+    /// colgar ese hilo si el driver tarda o la query nunca se resuelve. Si no
+    /// se pudo crear la query, o el plazo expira, se vuelve sin más: el
+    /// llamante decide si aun así publica.</summary>
+    internal static void FlushAndWait(nint device, int timeoutMs = 100)
+    {
+        int hrQuery = Method<CreateQueryFn>(device, VtblCreateQuery)(
+            device, D3DQUERYTYPE_EVENT, out nint query);
+        if (hrQuery < 0 || query == 0)
+            return;   // sin query no hay barrera que esperar; el llamante decide
+
+        try
+        {
+            Method<QueryIssueFn>(query, VtblQueryIssue)(query, D3DISSUE_END);
+
+            var deadline = Environment.TickCount64 + timeoutMs;
+            while (Environment.TickCount64 < deadline)
+            {
+                int hrData = Method<QueryGetDataFn>(query, VtblQueryGetData)(
+                    query, 0, 0, D3DGETDATA_FLUSH);
+                if (hrData != S_FALSE)
+                    return;   // S_OK (terminó) o error: en ambos casos, dejar de esperar
+            }
+        }
+        finally
+        {
+            Release(query);
+        }
+    }
 
     /// <summary>Crea el dispositivo D3D9Ex (uno por renderer; las render
     /// targets compartidas se crean sobre él). Lanza si algo falla.</summary>

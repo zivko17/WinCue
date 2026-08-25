@@ -48,6 +48,19 @@ public readonly record struct FrameLease : IDisposable
         Pts = pts;
     }
 
+    /// <summary>Prestamo SIN anillo: un unico recurso que vive fuera (una
+    /// superficie compartida de otro device, como el puente D3D9Ex→D3D11).
+    /// Dispose es no-op porque no hay slot que devolver — _ring queda null y
+    /// Dispose ya es null-safe.</summary>
+    internal FrameLease(ID3D11ShaderResourceView srv, ID3D11Texture2D texture, double pts)
+    {
+        _ring = null;
+        _index = -1;
+        View = srv;
+        Texture = texture;
+        Pts = pts;
+    }
+
     /// <summary>Vista muestreable del fotograma (lo que usa el compositor).</summary>
     public ID3D11ShaderResourceView View { get; }
 
