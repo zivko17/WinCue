@@ -60,6 +60,25 @@ public sealed partial class MainWindow : Window, IShowView
     // ── Salida de vídeo (ver el bloque IShowView de más abajo) ──────────
     private bool _blackout;
 
+    /// <summary>Modo canvas, tamaño del lienzo y recortes por salida — el
+    /// MISMO cálculo que usa el motor (WinCue.Controller.CanvasLayout), no una
+    /// segunda lectura de settings a mano. MainController lleva el suyo en
+    /// privado, así que esta ventana construye otro sobre los mismos dos
+    /// argumentos (ajustes + vista): el espejo del PGM tiene que recomponer
+    /// EXACTAMENTE el lienzo que ven las salidas, y para eso hay que leer los
+    /// recortes con la misma regla.</summary>
+    private readonly CanvasLayout _canvas;
+
+    /// <summary>Selector de qué mira el espejo del PGM. Vive en la cabecera de
+    /// color que el monitor ya tiene (PgmHeader): no se inventa disposición
+    /// nueva para él. Lo puebla ConstruirSelectorPgm.</summary>
+    private readonly ComboBox _pgmFuente = new();
+
+    /// <summary>true mientras ConstruirSelectorPgm repuebla el desplegable:
+    /// evita que el SelectedIndex que él mismo pone se tome por una elección
+    /// del operador y reescriba el ajuste.</summary>
+    private bool _repoblandoSelectorPgm;
+
     // ── VU de programa (piloto Win2D, ver IShowView.UpdateVuMeter) ──────
     // Mismo ancho (9) y misma orientación vertical que _pgmVuL/_pgmVuR en
     // src/WinCue.App/MainWindow.xaml.cs: es el mismo medidor, otro pincel.
@@ -238,9 +257,17 @@ public sealed partial class MainWindow : Window, IShowView
         KeepAspect(PvwBox, PvwHeader);
 
         // Previos PGM/PVW en vivo — ver LiveMonitorControl.cs para el HwndHijo
-        // que hospeda a mpv y el porqué de no espejar el compositor.
+        // que hospeda a mpv y para las DOS ramas del PGM (espejo del
+        // compositor / mpv propio).
         _pgm = new LiveMonitorControl(_hwndPropio, PgmInner, PgmHeader, PgmMessage, PgmStatus);
         _pvw = new LiveMonitorControl(_hwndPropio, PvwInner, PvwHeader, PvwMessage, PvwStatus);
+
+        // El PGM espeja: le damos el plan (qué salidas y en qué hueco del
+        // lienzo) y el selector de qué mira. Solo el PGM — el PVW enseña el
+        // cue en STANDBY, que por definición aún NO sale.
+        _canvas = new CanvasLayout(_settings, this);
+        _pgm.PedirPlanEspejo = PlanEspejoPgm;
+        ConstruirSelectorPgm();
         PreviewPlayIcon.Text = Icons.Play;
         PreviewPlayButton.Click += (_, _) =>
         {
@@ -667,21 +694,181 @@ public sealed partial class MainWindow : Window, IShowView
         SyncMixer();   // los canales del show cargado, ya visibles al arrancar
     }
 
-    /// <summary>PGM = lo que SALE. Secuence no tiene compositor GPU todavía
-    /// (ver la cabecera de LiveMonitorControl.cs), así que siempre decodifica
-    /// su propia copia, muda — la misma rama que toma WinCue.App cuando no
-    /// hay superficie que espejar.</summary>
+    /// <summary>PGM = lo que SALE. Con el compositor GPU encendido la salida ya
+    /// está compuesta en el grafo de su SalidaGpu: el monitor la ESPEJA (pila
+    /// entera de pistas, opacidades y cruces incluidos) y no decodifica nada.
+    /// Sin compositor —ruta clásica HWND, y también HAP/ProRes por sus
+    /// pipelines propios— no hay nada que espejar y el monitor reproduce el
+    /// archivo por su cuenta, mudo, exactamente como hace WinCue en ese
+    /// caso.</summary>
     private void UpdateProgramMonitor()
     {
         var info = _controller?.GetProgramVideo();
         if (info is null)
         {
-            if (_pgm.CurrentPath.Length > 0)
+            _cueEnPantalla = -1;
+            if (_pgm.CurrentPath.Length > 0 || _pgm.Espejando)
                 _pgm.Clear("NEGRO");
             return;
         }
+        _cueEnPantalla = info.Value.CueId;
+        _pgm.RefrescarEspejo(System.IO.Path.GetFileName(info.Value.FilePath));
+        if (_pgm.Espejando)
+            return;
         // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí.
         _pgm.ShowVideo(info.Value.FilePath, info.Value.Elapsed, loop: false);
+    }
+
+    /// <summary>Cue que el PGM está mirando ahora mismo. Lo apunta
+    /// UpdateProgramMonitor para que PlanEspejoPgm —que corre justo después,
+    /// dentro de RefrescarEspejo— sepa de qué cue tiene que buscar capa sin
+    /// volver a preguntárselo al controlador.</summary>
+    private int _cueEnPantalla = -1;
+
+    // ── El plan del espejo del PGM ────────────────────────────────────
+    // Esta ventana es la ÚNICA que conoce las cuatro salidas y los ajustes,
+    // así que es la que traduce «qué mira el operador» a «qué salidas, en qué
+    // hueco del lienzo». LiveMonitorControl solo ejecuta ese plan.
+
+    /// <summary>Salida GPU YA creada de una salida, o null. Nunca la
+    /// materializa: ver VideoOutputWindow.SalidaGpuActual.</summary>
+    private SalidaGpu? SalidaGpuDe(int output) =>
+        output >= 0 && output < MaxVideoOutputs
+            ? _videoOutputs[output]?.SalidaGpuActual : null;
+
+    /// <summary>true si el cue al aire tiene capa de compositor en ALGUNA
+    /// salida. Es la condición de la regla 6 del encargo: cuando no la tiene
+    /// (ruta clásica, HAP, ProRes) el PGM sigue decodificando su copia muda,
+    /// como hace WinCue. Equivalente de
+    /// WinCue.App.VideoOutputWindow.HasCompositorSurface, con las cuatro
+    /// salidas de una vez porque en modo canvas un cue vive en todas.</summary>
+    private bool CueConCapaDeCompositor(int cueId)
+    {
+        for (int s = 0; s < MaxVideoOutputs; s++)
+        {
+            if (SalidaGpuDe(s) is not { } salida)
+                continue;
+            var capas = salida.Capas;
+            for (int i = 0; i < capas.Count; i++)
+                if (capas[i].CueId == cueId)
+                    return true;
+        }
+        return false;
+    }
+
+    private (int LienzoW, int LienzoH,
+        IReadOnlyList<LiveMonitorControl.RegionEspejo> Regiones)? PlanEspejoPgm()
+    {
+        if (_cueEnPantalla < 0 || !CueConCapaDeCompositor(_cueEnPantalla))
+            return null;
+
+        // LIENZO: se recompone el canvas entero colocando cada vista en su
+        // hueco. Las vistas llegan YA RECORTADAS desde MpvGpuRenderer (cada
+        // salida renderiza su propio recorte en su propia superficie), así que
+        // aquí no hay recorte que calcular — solo colocación.
+        if (_pgm.FuenteEspejo < 0 && _canvas.CanvasMode)
+        {
+            var regiones = new List<LiveMonitorControl.RegionEspejo>();
+            foreach (var v in _canvas.CanvasViews())
+                if (SalidaGpuDe(v.Screen) is { Compositor: not null } salida)
+                    regiones.Add(new LiveMonitorControl.RegionEspejo(salida, v.X, v.Y, v.W, v.H));
+            if (regiones.Count == 0)
+                return null;
+            var (cw, ch) = _canvas.CanvasDims();
+            // CanvasViews() ya viene ordenado por salida y la 1 siempre está,
+            // así que la ANFITRIONA (la primera) es la Salida 1: la que presta
+            // su compositor para dibujar el espejo entero.
+            return (cw, ch, regiones);
+        }
+
+        // UNA SOLA SALIDA: el espejo es esa salida entera, sin recorte.
+        int output = Math.Clamp(_pgm.FuenteEspejo < 0 ? 0 : _pgm.FuenteEspejo,
+            0, MaxVideoOutputs - 1);
+        if (SalidaGpuDe(output) is not { Compositor: not null } sola)
+            return null;
+        return (sola.Ancho, sola.Alto,
+            new[] { new LiveMonitorControl.RegionEspejo(sola, 0, 0, sola.Ancho, sola.Alto) });
+    }
+
+    // ── El selector de la cabecera del PGM ────────────────────────────
+
+    /// <summary>Puebla el desplegable de la cabecera del PGM con lo que HOY se
+    /// puede mirar: las salidas HABILITADAS (monitor asignado en Ajustes) y,
+    /// SOLO con el modo canvas puesto, LIENZO. Por defecto LIENZO en modo
+    /// canvas y SALIDA 1 si no. Se vuelve a llamar tras guardar Ajustes: ahí
+    /// pueden haber cambiado tanto las salidas habilitadas como el modo.</summary>
+    private void ConstruirSelectorPgm()
+    {
+        // El desplegable se monta la PRIMERA vez dentro de la cabecera que el
+        // monitor ya tiene (PgmHeader), sin inventar disposición nueva: una
+        // columna más en su Grid, entre el distintivo y el nombre del archivo.
+        if (_pgmFuente.Parent is null && PgmHeader.Child is Grid cabecera)
+        {
+            cabecera.ColumnDefinitions.Insert(1,
+                new ColumnDefinition { Width = GridLength.Auto });
+            Grid.SetColumn(PgmStatus, 2);
+            _pgmFuente.FontSize = 10;
+            _pgmFuente.MinWidth = 0;
+            _pgmFuente.MinHeight = 0;
+            _pgmFuente.Height = 20;
+            _pgmFuente.Padding = new Thickness(6, 0, 6, 0);
+            _pgmFuente.Margin = new Thickness(8, 0, 8, 0);
+            _pgmFuente.BorderThickness = new Thickness(0);
+            // Pastilla OSCURA sobre la cabecera roja, y no texto negro sobre
+            // rojo: el desplegable abierto se pinta con el tema oscuro de
+            // WinUI, así que un Foreground pensado para el rojo dejaría la
+            // lista ilegible. Tokens de la paleta, ni un color literal.
+            _pgmFuente.Background = Theme.DeepBgBrush;
+            _pgmFuente.Foreground = Theme.TextPrimaryBrush;
+            _pgmFuente.VerticalAlignment = VerticalAlignment.Center;
+            Grid.SetColumn(_pgmFuente, 1);
+            cabecera.Children.Add(_pgmFuente);
+            _pgmFuente.SelectionChanged += OnPgmFuenteChanged;
+        }
+
+        bool canvas = _canvas.CanvasMode;
+        _fuentesPgm.Clear();
+        if (canvas)
+            _fuentesPgm.Add(-1);
+        for (int s = 0; s < MaxVideoOutputs; s++)
+            if (ConfiguredScreen(s) >= 0)
+                _fuentesPgm.Add(s);
+        if (_fuentesPgm.Count == 0)
+            _fuentesPgm.Add(0);   // la Salida 1 siempre se puede nombrar
+
+        // Guardado, saneado: LIENZO solo vale con el modo canvas puesto, y una
+        // salida que ya no está habilitada cae a la primera de la lista.
+        int guardado = _settings.Get("pgm_monitor_source", -1);
+        if (!_fuentesPgm.Contains(guardado))
+            guardado = _fuentesPgm[0];
+        _pgm.FuenteEspejo = guardado;
+
+        _repoblandoSelectorPgm = true;
+        _pgmFuente.Items.Clear();
+        foreach (int f in _fuentesPgm)
+            _pgmFuente.Items.Add(f < 0
+                ? Loc.T("LIENZO", "CANVAS")
+                : Loc.T($"SALIDA {f + 1}", $"OUTPUT {f + 1}"));
+        _pgmFuente.SelectedIndex = _fuentesPgm.IndexOf(guardado);
+        _repoblandoSelectorPgm = false;
+    }
+
+    /// <summary>Valor (-1 = LIENZO, 0..3 = salida) de cada entrada del
+    /// desplegable, en su mismo orden.</summary>
+    private readonly List<int> _fuentesPgm = new();
+
+    private void OnPgmFuenteChanged(object sender, SelectionChangedEventArgs e)
+    {
+        if (_repoblandoSelectorPgm)
+            return;
+        int i = _pgmFuente.SelectedIndex;
+        if (i < 0 || i >= _fuentesPgm.Count)
+            return;
+        _pgm.FuenteEspejo = _fuentesPgm[i];
+        _settings.Set("pgm_monitor_source", _fuentesPgm[i]);
+        // Sin esperar al tic: RefrescarEspejo mueve el Mirror al compositor de
+        // la salida elegida (quitándoselo al anterior) y reconstruye la raíz.
+        UpdateProgramMonitor();
     }
 
     /// <summary>PVW: el cue en standby reproduciéndose en bucle (mudo).</summary>
@@ -1515,6 +1702,12 @@ public sealed partial class MainWindow : Window, IShowView
             if (_videoOutputs[s] is { IsVisible: true })
                 PlaceVideoOutput(s);
         UpdateVideoOutButton();
+        // El selector del PGM depende de lo que se acaba de guardar: qué
+        // salidas están habilitadas y si el modo canvas sigue puesto (LIENZO
+        // solo se ofrece con él). Y el espejo, de si el compositor sigue vivo:
+        // ApplyEngineSettings ha podido soltar todos los compositores.
+        ConstruirSelectorPgm();
+        UpdateProgramMonitor();
         FlashStatus(Loc.T("Configuración guardada y aplicada.", "Settings saved and applied."));
     }
 

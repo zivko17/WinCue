@@ -165,6 +165,14 @@ public sealed partial class VideoOutputWindow : Window
 
     private SalidaGpu? _salidaGpu;
 
+    /// <summary>La salida GPU YA creada, o null. NO la materializa, a
+    /// diferencia de <see cref="ObtenerSalidaGpu"/>: el espejo del PGM
+    /// pregunta por las cuatro salidas en cada tic, y encender el compositor
+    /// de una salida que ningún cue usa sería crear swapchain e hilo de render
+    /// para nada — el mismo criterio que ya siguen FijarOpacidadCue y
+    /// SubirCueAlFrente.</summary>
+    internal SalidaGpu? SalidaGpuActual => _salidaGpu;
+
     /// <summary>Salida GPU de esta ventana, creándola si hace falta. LANZA si
     /// el puente no se puede montar (sin D3D11, swapchain que no nace): quien
     /// la pide es VideoEngine, y necesita enterarse para caer a la ruta

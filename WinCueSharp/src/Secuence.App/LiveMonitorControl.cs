@@ -14,19 +14,49 @@
 // del hueco medido (PgmInner/PvwInner). Se resincroniza en el primer Loaded,
 // en cada SizeChanged del hueco y en cada cambio de XamlRoot (DPI).
 //
-// SIN ESPEJO DE COMPOSITOR — a propósito, no un olvido. WinCue.App.PGM tiene
-// DOS ramas (ver la cabecera de ese archivo): ESPEJA la superficie del
-// compositor GPU cuando el cue en pantalla tiene una
-// (VideoOutputWindow.HasCompositorSurface), y si no la tiene decodifica su
-// PROPIA copia, muda, con su propio mpv embebido — la ruta clásica HWND.
-// Secuence.App.VideoOutputWindow.xaml.cs NO tiene todavía superficie de
-// compositor GPU (ni HasCompositorSurface ni MirrorVisual: esa fase, 2b,
-// sigue escrita y sin conectar aquí — comprobado antes de escribir este
-// archivo), así que Secuence está SIEMPRE en la rama clásica que WinCue.App
-// ya usa cuando no hay qué espejar: decodificar su propia copia. Portar
-// ShowMirror/IsMirroring aquí sería portar una rama que este producto nunca
-// toma todavía — si el compositor llega a Secuence, esa rama sube entonces
-// (mismo aviso que GeometryCanvas.cs deja sobre TryGrabStillAsync/ShowPaused).
+// ESPEJO DEL COMPOSITOR — YA CONECTADO. Este archivo decía hasta ahora que
+// Secuence no espejaba «porque el compositor GPU no había llegado a este
+// producto», y dejaba escrito que «si el compositor llega, esa rama sube
+// entonces». Ha llegado (SalidaGpu.cs), así que la rama está aquí y este
+// aviso deja de mentir. Igual que WinCue.App.PGM, el monitor tiene DOS ramas:
+//
+//   · ESPEJO — el cue en pantalla tiene capa de compositor: el PGM NO
+//     decodifica nada. Un SwapChainSink propio, sobre un SEGUNDO HWND hijo,
+//     se le entrega al compositor de una salida como Mirror; ese compositor
+//     lo pinta en el MISMO fotograma y el MISMO hilo que la sala. Así el PGM
+//     es lo que SALE (pila de pistas, opacidades y cruces incluidos) y además
+//     sale gratis: con un 4K60 el mpv del monitor obligaba a decodificar y a
+//     leer el archivo del disco DOS veces.
+//
+//   · mpv EMBEBIDO Y MUDO — todo lo demás, sin tocar una línea: ruta clásica
+//     HWND, HAP/ProRes por sus pipelines propios, el PVW y el scrub de
+//     edición. Esa rama es la que WinCue toma cuando no hay qué espejar y
+//     NO se borra.
+//
+// QUIÉN LLAMA AL COPIADOR (regla dura de esta arquitectura): el copiador de
+// una capa —el StretchRect interop→presentación, ver CapaCompositor.cs— lo
+// invoca SIEMPRE el compositor DUEÑO de esa salida, desde su TryAcquire y
+// dentro de su propio lock. El espejo solo MUESTREA, en lectura. Cuando el
+// espejo y el nodo son de la misma salida eso sale solo: el pase principal ya
+// consumió la bandera «fotograma nuevo» (SharedSurfaceSource._frameIsNew) y
+// el pase del espejo repite el último fotograma sin copiar nada.
+//
+// Al mirar salidas que NO son la anfitriona (modo LIENZO con varias salidas
+// habilitadas) queda una ventana de tearing TEÓRICA: el hilo de la anfitriona
+// puede muestrear una superficie mientras el dueño de esa salida la está
+// copiando. SE ACEPTA A PROPÓSITO — esto es un monitor, no la sala —, y
+// evitarla costaría sincronizar entre sí los hilos que van a pantalla, que es
+// justo lo que no se debe tocar (cada salida presenta al vsync de SU pantalla).
+//
+// LO QUE SÍ SE EVITA, porque no es tearing sino la aplicación abajo: recorrer
+// la lista VIVA de hijos del grafo de OTRA salida. StackNode.Render la recorre
+// POR ÍNDICE y su dueño la muta (Insertar/Quitar) bajo un lock DISTINTO del
+// nuestro: un GO en la salida 2 en mitad de nuestro fotograma sería un
+// ArgumentOutOfRangeException en un hilo de fondo, o sea la app entera abajo
+// en mitad de una función. Por eso de las salidas AJENAS se toma una
+// INSTANTÁNEA de sus hijos dentro de SU Mutate (ver Instantanea), y el espejo
+// recorre esa copia, que nadie más toca. La anfitriona sí va en vivo: ahí el
+// lock es el mismo.
 //
 // ShowPaused y Scrub YA ESTÁN: los pide el cursor de edición del timeline,
 // que enseña en el PVW el fotograma bajo el cursor. El PVW es el visor de
@@ -40,12 +70,14 @@ using System.Globalization;
 using Microsoft.UI.Xaml;
 using Microsoft.UI.Xaml.Controls;
 using WinCue.Video;
+using WinCue.Video.Gpu;
 
 namespace Secuence.App;
 
 /// <summary>Un previo PGM o PVW: cabecera de color + hueco donde vive el mpv
-/// embebido (muted, decode independiente — ver la cabecera del archivo para
-/// el porqué de no espejar el compositor). <paramref name="hwndPropio"/> es el
+/// embebido (muted, decode independiente) o, en el PGM con compositor, el
+/// ESPEJO de lo que sale a sala — ver la cabecera del archivo para las dos
+/// ramas y para quién llama al copiador. <paramref name="hwndPropio"/> es el
 /// HWND de MainWindow (padre del hijo Win32); <paramref name="inner"/>/
 /// <paramref name="header"/> son PgmInner/PgmHeader (o Pvw-) del XAML, para
 /// medir el hueco; <paramref name="message"/>/<paramref name="status"/> son
@@ -66,7 +98,54 @@ internal sealed class LiveMonitorControl : IDisposable
     private string _currentPath = "";
     private double _lastElapsed = -1;
 
+    // ── Espejo del compositor (solo lo usa el PGM; el PVW nunca lo pide) ──
+    // Un SEGUNDO HWND hijo, hermano del de mpv y con la misma geometría: el
+    // swapchain del espejo no puede ir sobre el de mpv (dos dueños del mismo
+    // HWND es negro garantizado, ver VideoOutputWindow.LiberarSalidaGpu). Se
+    // enseña uno u otro según la rama activa.
+    private nint _hijoEspejo;
+    private SwapChainSink? _sinkEspejo;
+    private SalidaGpu? _anfitriona;   // salida cuyo compositor DIBUJA el espejo
+    private int _espejoW, _espejoH;   // tamaño del sink vivo
+    private int _huecoW, _huecoH;     // último tamaño MEDIDO del hueco
+    private bool _espejando;
+
+    /// <summary>Raíz que el compositor anfitrión pinta en el espejo. La LEE el
+    /// HILO DE RENDER (una vez por fotograma, vía <see cref="LeerRaizEspejo"/>)
+    /// y la ESCRIBE el hilo de interfaz. Es un campo volatile y NUNCA se muta
+    /// en sitio: cada refresco construye un árbol nuevo y lo publica de un
+    /// tirón, así que el hilo de render ve o el viejo entero o el nuevo entero.
+    /// Mutar el que está puesto sería una carrera sobre una lista que se
+    /// recorre por índice.</summary>
+    private volatile GraphNode? _raizEspejo;
+
     public string CurrentPath => _currentPath;
+
+    /// <summary>Qué mira el espejo: -1 = LIENZO (el canvas entero recompuesto),
+    /// 0..3 = Salida 1..4. Solo lo guarda; quien lo traduce a un plan concreto
+    /// es <see cref="PedirPlanEspejo"/>, que es de MainWindow (el único que
+    /// conoce las salidas y los ajustes).</summary>
+    public int FuenteEspejo { get; set; } = -1;
+
+    /// <summary>true si el monitor está ESPEJANDO (sin decodificar nada).
+    /// Equivalente de WinCue.App.LiveMonitorControl.IsMirroring.</summary>
+    public bool Espejando => _espejando;
+
+    /// <summary>Una región del espejo: la salida cuyo compositor la pinta y el
+    /// rectángulo que ocupa EN COORDENADAS DEL LIENZO. En modo LIENZO hay una
+    /// por salida habilitada; mirando una sola salida hay una sola, que ocupa
+    /// el lienzo entero. Cada vista llega YA RECORTADA desde MpvGpuRenderer
+    /// (cada salida renderiza su propio recorte en su propia superficie), así
+    /// que aquí no hay recorte que calcular: solo colocación.</summary>
+    internal readonly record struct RegionEspejo(SalidaGpu Salida, int X, int Y, int W, int H);
+
+    /// <summary>Lo que hay que espejar AHORA, o null si no hay nada que
+    /// espejar (sin compositor, o el cue en pantalla va por la ruta clásica).
+    /// La PRIMERA región manda: su salida es la ANFITRIONA, la que presta su
+    /// compositor —y su hilo, y su fotograma— para dibujar el espejo entero.
+    /// </summary>
+    internal Func<(int LienzoW, int LienzoH, IReadOnlyList<RegionEspejo> Regiones)?>?
+        PedirPlanEspejo { get; set; }
 
     public LiveMonitorControl(nint hwndPropio, FrameworkElement inner,
         FrameworkElement header, TextBlock message, TextBlock status)
@@ -106,10 +185,268 @@ internal sealed class LiveMonitorControl : IDisposable
         int w = Math.Max(1, (int)Math.Round(_inner.ActualWidth * scale));
         int h = Math.Max(1, (int)Math.Round((_inner.ActualHeight - headerH) * scale));
 
+        _huecoW = w;
+        _huecoH = h;
+
         if (_hijo == 0)
             _hijo = HwndHijo.Crear(_hwndPropio, w, h, x, y);
         else
             HwndHijo.Colocar(_hijo, x, y, w, h);
+
+        // El hijo del espejo sigue al de mpv como una sombra. NO se recrea
+        // aquí el swapchain aunque el hueco haya cambiado: SizeChanged llega
+        // en ráfaga mientras el operador arrastra el separador, y recrear un
+        // swapchain por cada píxel sería un castigo. Lo hace el tic del PGM
+        // (RefrescarEspejo), que compara _huecoW/H con _espejoW/H.
+        if (_hijoEspejo != 0)
+            HwndHijo.Colocar(_hijoEspejo, x, y, w, h);
+    }
+
+    // ------------------------------------------------------------------
+    // Espejo del compositor (ver la cabecera del archivo)
+    // ------------------------------------------------------------------
+
+    /// <summary>Pone al día el espejo: pide el plan, ajusta el swapchain al
+    /// hueco, engancha el <c>Mirror</c> al compositor de la salida anfitriona
+    /// y publica la raíz que ese compositor tiene que pintar. Si no hay nada
+    /// que espejar, sale del modo espejo y deja el monitor libre para su rama
+    /// clásica (el mpv mudo). Idempotente: se llama en cada tic del PGM.
+    ///
+    /// <paramref name="etiqueta"/> es lo que va en la cabecera (el nombre del
+    /// archivo al aire); vacío la deja como esté.</summary>
+    public void RefrescarEspejo(string etiqueta = "")
+    {
+        var plan = PedirPlanEspejo?.Invoke();
+        if (plan is not { } p || p.Regiones.Count == 0)
+        {
+            SalirDelEspejo();
+            return;
+        }
+
+        bool recreado = AsegurarSinkEspejo();
+        if (_sinkEspejo is null)
+        {
+            SalirDelEspejo();   // sin swapchain no hay espejo: a la rama clásica
+            return;
+        }
+
+        // La ANFITRIONA es la primera región. Su compositor es el que dibuja
+        // el espejo entero, en su hilo y en su fotograma — por eso el espejo
+        // va SIEMPRE colgado de un compositor vivo y nunca de uno propio.
+        var anfitriona = p.Regiones[0].Salida;
+
+        // La raíz se publica ANTES de enganchar: si se enganchara primero, el
+        // hilo de render podría pillar un fotograma con Mirror puesto y la
+        // raíz todavía en la del plan anterior.
+        _raizEspejo = ConstruirRaizEspejo(p, anfitriona);
+        if (_raizEspejo is null)
+        {
+            SalirDelEspejo();
+            return;
+        }
+
+        if (recreado || !ReferenceEquals(_anfitriona, anfitriona))
+        {
+            // Quitárselo a la anterior ANTES de dárselo a la nueva: dos
+            // compositores presentando en el mismo swapchain son dos hilos
+            // sobre la misma superficie de presentación.
+            if (_anfitriona is not null && !ReferenceEquals(_anfitriona, anfitriona))
+                _anfitriona.FijarEspejo(null, null);
+            _anfitriona = anfitriona;
+            // FijarEspejo entra en Mutate: asignar Mirror/MirrorRoot con el
+            // bucle de render corriendo es una carrera (regla de
+            // OutputCompositor).
+            _anfitriona.FijarEspejo(_sinkEspejo, LeerRaizEspejo);
+        }
+
+        EntrarEnEspejo(etiqueta);
+    }
+
+    /// <summary>Lo que el hilo de render lee en cada fotograma. Sin
+    /// asignaciones: solo devuelve el campo volatile.</summary>
+    private GraphNode? LeerRaizEspejo() => _raizEspejo;
+
+    /// <summary>Crea (o recrea, si el hueco cambió de tamaño) el swapchain del
+    /// espejo sobre su HWND hijo. Devuelve true si ha quedado uno NUEVO —
+    /// entonces hay que volver a dárselo al compositor—. Un fallo deja
+    /// <c>_sinkEspejo</c> a null: el monitor cae a su rama clásica, que es
+    /// mejor que un PGM muerto.</summary>
+    private bool AsegurarSinkEspejo()
+    {
+        SyncGeometry();
+        if (_huecoW <= 0 || _huecoH <= 0)
+            return false;   // aún sin layout: lo reintenta el siguiente tic
+
+        int w = Math.Max(16, _huecoW);
+        int h = Math.Max(16, _huecoH);
+        if (_sinkEspejo is not null && w == _espejoW && h == _espejoH)
+            return false;
+
+        SoltarSinkEspejo();
+        if (_hijoEspejo == 0)
+        {
+            try
+            {
+                _hijoEspejo = HwndHijo.Crear(_hwndPropio, w, h);
+                SyncGeometry();                  // a su sitio, sobre el hueco
+            }
+            catch (InvalidOperationException)
+            {
+                _hijoEspejo = 0;
+                return false;
+            }
+        }
+
+        // El swapchain nace con la ventana YA VISIBLE. Uno creado sobre una
+        // ventana oculta presenta OCCLUDED desde el primer fotograma, y salir
+        // de ese estado depende de que DXGI se recupere solo al mostrarla —
+        // no hay por qué apostar a eso pudiendo mostrarla antes. Solo se ve
+        // vacía durante las tres líneas que faltan para EntrarEnEspejo, todas
+        // en el mismo turno del hilo de interfaz: no da tiempo a repintar.
+        HwndHijo.Mostrar(_hijoEspejo);
+
+        try
+        {
+            _sinkEspejo = new SwapChainSink(GpuDevice.Shared, _hijoEspejo, w, h)
+            {
+                // SIN vsync, y no es un descuido. Present(1) BLOQUEA hasta el
+                // vsync de su pantalla, y aquí quien presenta es el hilo del
+                // compositor DE SALA: con intervalo 1 ese hilo esperaría dos
+                // vsyncs por fotograma (el de la sala y el del monitor de
+                // control) y la salida perdería la mitad del ritmo. El precio
+                // es tearing en el PGM, que es un monitor.
+                SyncInterval = 0,
+            };
+            _espejoW = w;
+            _espejoH = h;
+            return true;
+        }
+        catch (Exception exc)
+        {
+            VideoOutputWindow.LogAviso(
+                $"[PGM] No se pudo crear el swapchain del espejo a {w}x{h} " +
+                $"({exc.Message}). El monitor sigue con su mpv propio.");
+            _sinkEspejo = null;
+            _espejoW = _espejoH = 0;
+            return false;
+        }
+    }
+
+    /// <summary>El árbol que el compositor anfitrión pinta en el espejo: una
+    /// StackNode con un TransformNode por región, colocado en el hueco del
+    /// monitor. Donde no cubre ninguna región, el Clear del compositor deja
+    /// negro.
+    ///
+    /// SOLO TransformNode/StackNode a propósito: el RtPool del compositor está
+    /// dimensionado al sink PRINCIPAL, y esos dos nodos no piden render
+    /// targets intermedias. Un nodo que sí las pidiera saldría aquí con el
+    /// tamaño equivocado.</summary>
+    private GraphNode? ConstruirRaizEspejo(
+        (int LienzoW, int LienzoH, IReadOnlyList<RegionEspejo> Regiones) plan,
+        SalidaGpu anfitriona)
+    {
+        // Encaje UNIFORME, con bandas donde sobre: el lienzo (o la salida) no
+        // tiene por qué ser 16:9 como la caja del PGM, y estirar mentiría
+        // sobre el encuadre que ve la sala.
+        double escala = Math.Min(
+            (double)_espejoW / Math.Max(1, plan.LienzoW),
+            (double)_espejoH / Math.Max(1, plan.LienzoH));
+        double offX = (_espejoW - plan.LienzoW * escala) / 2.0;
+        double offY = (_espejoH - plan.LienzoH * escala) / 2.0;
+
+        var raiz = new StackNode();
+        foreach (var region in plan.Regiones)
+        {
+            // La ANFITRIONA va en VIVO (mismo lock que el hilo que dibuja);
+            // de las AJENAS, una instantánea — ver la cabecera del archivo.
+            GraphNode? contenido = ReferenceEquals(region.Salida, anfitriona)
+                ? region.Salida.Compositor?.Root
+                : Instantanea(region.Salida);
+            if (contenido is null)
+                continue;
+            raiz.Children.Add(new TransformNode(contenido)
+            {
+                Dest = new DestRect(
+                    (int)Math.Round(offX + region.X * escala),
+                    (int)Math.Round(offY + region.Y * escala),
+                    Math.Max(1, (int)Math.Round(region.W * escala)),
+                    Math.Max(1, (int)Math.Round(region.H * escala))),
+            });
+        }
+        return raiz.Children.Count > 0 ? raiz : null;
+    }
+
+    /// <summary>Copia de los hijos del grafo de una salida AJENA, tomada
+    /// DENTRO de su propio Mutate. Es lo que impide que el hilo del compositor
+    /// anfitrión recorra por índice una lista que otro dueño está mutando —
+    /// ver la cabecera del archivo. La copia queda congelada hasta el
+    /// siguiente refresco (medio segundo como mucho, y menos cuando cambian
+    /// los cues activos): en un monitor eso no se nota, y es el precio de no
+    /// poder tirar la aplicación.</summary>
+    private static GraphNode? Instantanea(SalidaGpu salida)
+    {
+        StackNode? copia = null;
+        salida.Compositor?.Mutate(c =>
+        {
+            if (c.Root is not StackNode viva)
+                return;
+            var nueva = new StackNode();
+            for (int i = 0; i < viva.Children.Count; i++)
+                nueva.Children.Add(viva.Children[i]);
+            copia = nueva;
+        });
+        return copia;
+    }
+
+    private void EntrarEnEspejo(string etiqueta)
+    {
+        if (!_espejando)
+        {
+            StopPlayback();                       // suelta el decode del monitor
+            if (_hijo != 0)
+                HwndHijo.Ocultar(_hijo);          // el HWND de mpv taparía el espejo
+            HwndHijo.Mostrar(_hijoEspejo);
+            _message.Visibility = Visibility.Collapsed;
+            _espejando = true;
+        }
+        if (etiqueta.Length > 0 &&
+            !string.Equals(_status.Text, etiqueta, StringComparison.Ordinal))
+            _status.Text = etiqueta;
+    }
+
+    /// <summary>Sale del modo espejo y suelta lo suyo. El HWND hijo del espejo
+    /// SOBREVIVE (crearlo cuesta y el siguiente cue lo reutiliza); lo que se
+    /// suelta es el swapchain, porque un swapchain vivo sobre un HWND oculto
+    /// es memoria de vídeo para nada.</summary>
+    private void SalirDelEspejo()
+    {
+        if (!_espejando && _anfitriona is null && _sinkEspejo is null)
+            return;
+        SoltarSinkEspejo();
+        _raizEspejo = null;
+        _espejando = false;
+        // Se oculta SIEMPRE, no solo al salir de un espejo en marcha: si el
+        // swapchain no llegó a nacer, la ventana ya se había mostrado (ver
+        // AsegurarSinkEspejo) y quedaría tapando la de mpv, vacía.
+        if (_hijoEspejo != 0)
+            HwndHijo.Ocultar(_hijoEspejo);
+        // El mpv del monitor vuelve a mandar. No se muestra su HWND aquí:
+        // StopPlayback dejó _currentPath vacío al entrar en el espejo, así que
+        // el siguiente ShowVideo lo tratará como archivo nuevo y hará el
+        // Mostrar él mismo — mismo camino que un arranque en frío.
+    }
+
+    private void SoltarSinkEspejo()
+    {
+        // ORDEN OBLIGATORIO: quitarle el espejo al compositor ANTES de soltar
+        // el sink. FijarEspejo entra en Mutate, así que cuando vuelve el hilo
+        // de render ya no lo tiene; al revés estaría presentando en una RTV
+        // recién liberada. Mismo orden que SalidaGpu.Redimensionar.
+        _anfitriona?.FijarEspejo(null, null);
+        _anfitriona = null;
+        _sinkEspejo?.Dispose();
+        _sinkEspejo = null;
+        _espejoW = _espejoH = 0;
     }
 
     // ------------------------------------------------------------------
@@ -122,6 +459,12 @@ internal sealed class LiveMonitorControl : IDisposable
     {
         if (!VideoEngine.MpvAvailable)
             return;
+        // Las dos ramas son EXCLUYENTES: los dos HWND hijos ocupan el MISMO
+        // hueco, así que dejarlas vivas a la vez sería decodificar debajo de
+        // una imagen que nadie ve (o al revés). Quien llama ya lo sabe —
+        // MainWindow solo llega aquí si Espejando es false—; esto es el
+        // cinturón, por si algún camino futuro entra por otro lado.
+        SalirDelEspejo();
         if (!EnsurePlayer())
             return;
 
@@ -308,6 +651,7 @@ internal sealed class LiveMonitorControl : IDisposable
 
     public void Clear(string message)
     {
+        SalirDelEspejo();
         StopPlayback();
         _message.Text = message;
         _message.Visibility = Visibility.Visible;
@@ -332,12 +676,21 @@ internal sealed class LiveMonitorControl : IDisposable
     /// app — mismo momento que VideoOutputWindow.CloseForShutdown).</summary>
     public void Dispose()
     {
+        // El espejo PRIMERO: mientras siga enganchado, un compositor de sala
+        // está presentando en su swapchain, y ese swapchain vive sobre el HWND
+        // que se destruye aquí abajo.
+        try { SalirDelEspejo(); } catch (Exception) { }
         try { _player?.Dispose(); } catch (Exception) { }
         _player = null;
         if (_hijo != 0)
         {
             try { HwndHijo.Destruir(_hijo); } catch (Exception) { }
             _hijo = 0;
+        }
+        if (_hijoEspejo != 0)
+        {
+            try { HwndHijo.Destruir(_hijoEspejo); } catch (Exception) { }
+            _hijoEspejo = 0;
         }
     }
 

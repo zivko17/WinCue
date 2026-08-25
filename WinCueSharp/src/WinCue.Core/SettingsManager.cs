@@ -83,6 +83,15 @@ public class SettingsManager
         ["video_output_screen2"]    = -1,
         ["video_output_screen3"]    = -1,
         ["video_output_screen4"]    = -1,
+        // QUÉ MIRA EL MONITOR PGM cuando espeja el compositor (Secuence):
+        // -1 = LIENZO (el canvas entero recompuesto), 0..3 = Salida 1..4.
+        // El default es -1 y NO significa «siempre el lienzo»: LIENZO solo se
+        // ofrece con el modo canvas puesto, así que sin él este valor se sanea
+        // a la Salida 1 al construir el selector. Es la forma de que el
+        // defecto sea «LIENZO en modo canvas, SALIDA 1 si no» con una sola
+        // clave. WinCue no lee esta clave: su PGM espeja siempre la salida
+        // del cue al aire y no tiene selector.
+        ["pgm_monitor_source"]      = -1,
 
         // ── Red / Control externo ────────────────────────────────────
         ["osc_enabled"]       = false,
