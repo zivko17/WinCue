@@ -10,6 +10,10 @@
 // El control NO toca settings: SettingsWindow lee/escribe vía las propiedades
 // (CanvasW/H, GetRegion/SetRegion "x,y,w,h", GetEnabled/SetEnabled) usando su
 // registro de campos estándar.
+//
+// El CÁLCULO (escala, encaje en la vista, imanes, mover/redimensionar) vive
+// en WinCue.Presentation.CanvasEditorLayout, compartido con Secuence.App:
+// este fichero solo pinta con WPF y traduce eventos de ratón a ese cálculo.
 // =============================================================================
 
 using System.Globalization;
@@ -18,6 +22,7 @@ using System.Windows.Controls;
 using System.Windows.Input;
 using System.Windows.Media;
 using System.Windows.Shapes;
+using WinCue.Presentation;
 
 namespace WinCue.App;
 
@@ -25,21 +30,9 @@ public sealed class CanvasEditorControl : StackPanel
 {
     private const int Outputs = 4;
     private const double ViewW = 480, ViewH = 270;
-    private const int MinSize = 16;          // px de canvas
-    private const double SnapPx = 10;        // umbral de snap en px de PANTALLA
-
-    /// <summary>Colores de identidad de las 4 salidas (compartidos con el
-    /// overlay "Identificar" y el menú del botón de salida).</summary>
-    internal static readonly Color[] OutColors =
-    {
-        Theme.Go,        // S1 verde
-        Theme.Info,      // S2 azul
-        Theme.Standby,   // S3 ámbar
-        Theme.Magenta,   // S4 magenta
-    };
 
     private int _cw = 1920, _ch = 1080;
-    private readonly int[,] _regions = new int[Outputs, 4];   // x, y, w, h
+    private readonly CanvasRegion[] _regions = new CanvasRegion[Outputs];
     private readonly bool[] _enabled = { true, false, false, false };
 
     private readonly Canvas _surface;
@@ -54,15 +47,12 @@ public sealed class CanvasEditorControl : StackPanel
     private int _dragOutput = -1;
     private bool _dragResize;
     private Point _dragStart;
-    private (int X, int Y, int W, int H) _dragOrig;
+    private CanvasRegion _dragOrig;
 
     public CanvasEditorControl()
     {
         for (int s = 0; s < Outputs; s++)
-        {
-            _regions[s, 0] = 0; _regions[s, 1] = 0;
-            _regions[s, 2] = _cw; _regions[s, 3] = _ch;
-        }
+            _regions[s] = new CanvasRegion(0, 0, _cw, _ch);
 
         // ── Tamaño del canvas + presets ─────────────────────────────────
         var sizeRow = new StackPanel
@@ -76,14 +66,7 @@ public sealed class CanvasEditorControl : StackPanel
         { Text = "×", VerticalAlignment = VerticalAlignment.Center, Margin = new Thickness(4, 0, 4, 0) });
         sizeRow.Children.Add(_hBox);
         var presets = new ComboBox { Margin = new Thickness(12, 0, 0, 0), MinWidth = 190 };
-        foreach (var (w, h, label) in new[]
-        {
-            (1920, 1080, "1920 × 1080 (FHD)"),
-            (3840, 1080, "3840 × 1080 (2×FHD horizontal)"),
-            (5760, 1080, "5760 × 1080 (3×FHD horizontal)"),
-            (1920, 2160, "1920 × 2160 (2×FHD vertical)"),
-            (3840, 2160, "3840 × 2160 (4K)"),
-        })
+        foreach (var (w, h, label) in CanvasEditorLayout.SizePresets)
             presets.Items.Add(new ComboBoxItem { Content = label, Tag = (w, h) });
         presets.SelectionChanged += (_, _) =>
         {
@@ -114,7 +97,7 @@ public sealed class CanvasEditorControl : StackPanel
         for (int s = 0; s < Outputs; s++)
         {
             int idx = s;
-            var color = OutColors[s];
+            var color = Theme.Hex(CanvasEditorLayout.OutputColors[s]);
             var label = new TextBlock
             {
                 Text = $"S{s + 1}",
@@ -170,7 +153,7 @@ public sealed class CanvasEditorControl : StackPanel
             _chk[s] = new CheckBox
             {
                 Content = $"Salida {s + 1}",
-                Foreground = new SolidColorBrush(OutColors[s]),
+                Foreground = new SolidColorBrush(Theme.Hex(CanvasEditorLayout.OutputColors[s])),
                 FontWeight = FontWeights.Bold,
                 Width = 90,
                 VerticalAlignment = VerticalAlignment.Center,
@@ -231,28 +214,12 @@ public sealed class CanvasEditorControl : StackPanel
         set { _ch = Math.Clamp(value <= 0 ? 1080 : value, 240, 16384); ClampAll(); Redraw(); }
     }
 
-    public string GetRegion(int s) =>
-        $"{_regions[s, 0]},{_regions[s, 1]},{_regions[s, 2]},{_regions[s, 3]}";
+    public string GetRegion(int s) => CanvasEditorLayout.Format(_regions[s]);
 
     public void SetRegion(int s, string? text)
     {
-        var parts = (text ?? "").Split(',');
-        if (parts.Length == 4
-            && int.TryParse(parts[0].Trim(), out int x)
-            && int.TryParse(parts[1].Trim(), out int y)
-            && int.TryParse(parts[2].Trim(), out int w)
-            && int.TryParse(parts[3].Trim(), out int h)
-            && w > 0 && h > 0)
-        {
-            _regions[s, 0] = x; _regions[s, 1] = y;
-            _regions[s, 2] = w; _regions[s, 3] = h;
-        }
-        else
-        {
-            _regions[s, 0] = 0; _regions[s, 1] = 0;
-            _regions[s, 2] = _cw; _regions[s, 3] = _ch;
-        }
-        ClampAll();
+        var v = WinCue.Controller.CanvasLayout.ParseRegion(text ?? "", s, _cw, _ch);
+        _regions[s] = CanvasEditorLayout.Clamp(new CanvasRegion(v.X, v.Y, v.W, v.H), _cw, _ch);
         Redraw();
     }
 
@@ -268,26 +235,15 @@ public sealed class CanvasEditorControl : StackPanel
     }
 
     // ==================================================================
-    // Lienzo: escala, redibujado y arrastre
+    // Lienzo: redibujado y arrastre (el cálculo vive en CanvasEditorLayout)
     // ==================================================================
-
-    private double Scale => Math.Min((ViewW - 4) / _cw, (ViewH - 4) / _ch);
-
-    private Point Origin
-    {
-        get
-        {
-            double s = Scale;
-            return new Point((ViewW - _cw * s) / 2.0, (ViewH - _ch * s) / 2.0);
-        }
-    }
 
     private void Redraw()
     {
-        double s = Scale;
-        var o = Origin;
-        Canvas.SetLeft(_canvasRect, o.X);
-        Canvas.SetTop(_canvasRect, o.Y);
+        double s = CanvasEditorLayout.Scale(_cw, _ch, ViewW, ViewH);
+        var (ox, oy) = CanvasEditorLayout.Origin(_cw, _ch, ViewW, ViewH);
+        Canvas.SetLeft(_canvasRect, ox);
+        Canvas.SetTop(_canvasRect, oy);
         _canvasRect.Width = _cw * s;
         _canvasRect.Height = _ch * s;
 
@@ -295,17 +251,20 @@ public sealed class CanvasEditorControl : StackPanel
         {
             bool on = GetEnabled(i);
             _rects[i].Visibility = on ? Visibility.Visible : Visibility.Collapsed;
-            Canvas.SetLeft(_rects[i], o.X + _regions[i, 0] * s);
-            Canvas.SetTop(_rects[i], o.Y + _regions[i, 1] * s);
-            _rects[i].Width = Math.Max(6, _regions[i, 2] * s);
-            _rects[i].Height = Math.Max(6, _regions[i, 3] * s);
+            var view = CanvasEditorLayout.ToView(_regions[i], _cw, _ch, ViewW, ViewH);
+            Canvas.SetLeft(_rects[i], view.X);
+            Canvas.SetTop(_rects[i], view.Y);
+            _rects[i].Width = Math.Max(6, view.W);
+            _rects[i].Height = Math.Max(6, view.H);
             // Z: la salida arrastrada, encima
             Panel.SetZIndex(_rects[i], i == _dragOutput ? 10 : 1 + i);
 
             _loading = true;
+            var r = _regions[i];
+            int[] vals = { r.X, r.Y, r.W, r.H };
             for (int f = 0; f < 4; f++)
             {
-                _num[i][f].Text = _regions[i, f].ToString(CultureInfo.InvariantCulture);
+                _num[i][f].Text = vals[f].ToString(CultureInfo.InvariantCulture);
                 _num[i][f].IsEnabled = on;
             }
             _loading = false;
@@ -322,8 +281,7 @@ public sealed class CanvasEditorControl : StackPanel
         _dragOutput = output;
         _dragResize = resize;
         _dragStart = e.GetPosition(_surface);
-        _dragOrig = (_regions[output, 0], _regions[output, 1],
-                     _regions[output, 2], _regions[output, 3]);
+        _dragOrig = _regions[output];
         _rects[output].CaptureMouse();
     }
 
@@ -332,27 +290,15 @@ public sealed class CanvasEditorControl : StackPanel
         if (_dragOutput < 0 || e.LeftButton != MouseButtonState.Pressed)
             return;
         var p = e.GetPosition(_surface);
-        double s = Scale;
-        int dx = (int)Math.Round((p.X - _dragStart.X) / s);
-        int dy = (int)Math.Round((p.Y - _dragStart.Y) / s);
+        double s = CanvasEditorLayout.Scale(_cw, _ch, ViewW, ViewH);
+        int dx = CanvasEditorLayout.ToCanvasDelta(p.X - _dragStart.X, s);
+        int dy = CanvasEditorLayout.ToCanvasDelta(p.Y - _dragStart.Y, s);
         int i = _dragOutput;
 
-        if (_dragResize)
-        {
-            int w = Math.Clamp(_dragOrig.W + dx, MinSize, _cw - _dragOrig.X);
-            int h = Math.Clamp(_dragOrig.H + dy, MinSize, _ch - _dragOrig.Y);
-            (w, h) = SnapSize(i, _dragOrig.X, _dragOrig.Y, w, h);
-            _regions[i, 2] = w;
-            _regions[i, 3] = h;
-        }
-        else
-        {
-            int x = Math.Clamp(_dragOrig.X + dx, 0, _cw - _dragOrig.W);
-            int y = Math.Clamp(_dragOrig.Y + dy, 0, _ch - _dragOrig.H);
-            (x, y) = SnapPos(i, x, y, _dragOrig.W, _dragOrig.H);
-            _regions[i, 0] = x;
-            _regions[i, 1] = y;
-        }
+        _regions[i] = _dragResize
+            ? CanvasEditorLayout.Resize(_dragOrig, dx, dy, _regions, _enabled, i, _cw, _ch, s)
+            : CanvasEditorLayout.Move(_dragOrig, dx, dy, _regions, _enabled, i, _cw, _ch, s);
+
         Redraw();
     }
 
@@ -364,61 +310,6 @@ public sealed class CanvasEditorControl : StackPanel
         Redraw();
     }
 
-    /// <summary>Imanes de X e Y para MOVER: bordes y mitades del canvas +
-    /// bordes de las otras salidas habilitadas.</summary>
-    private (int X, int Y) SnapPos(int self, int x, int y, int w, int h)
-    {
-        int snap = (int)Math.Max(1, SnapPx / Scale);
-        foreach (int t in SnapTargetsX(self))
-        {
-            if (Math.Abs(x - t) <= snap) { x = t; break; }
-            if (Math.Abs(x + w - t) <= snap) { x = t - w; break; }
-        }
-        foreach (int t in SnapTargetsY(self))
-        {
-            if (Math.Abs(y - t) <= snap) { y = t; break; }
-            if (Math.Abs(y + h - t) <= snap) { y = t - h; break; }
-        }
-        return (Math.Clamp(x, 0, _cw - w), Math.Clamp(y, 0, _ch - h));
-    }
-
-    /// <summary>Imanes del borde derecho/inferior al REDIMENSIONAR.</summary>
-    private (int W, int H) SnapSize(int self, int x, int y, int w, int h)
-    {
-        int snap = (int)Math.Max(1, SnapPx / Scale);
-        foreach (int t in SnapTargetsX(self))
-            if (Math.Abs(x + w - t) <= snap && t - x >= MinSize) { w = t - x; break; }
-        foreach (int t in SnapTargetsY(self))
-            if (Math.Abs(y + h - t) <= snap && t - y >= MinSize) { h = t - y; break; }
-        return (Math.Min(w, _cw - x), Math.Min(h, _ch - y));
-    }
-
-    private IEnumerable<int> SnapTargetsX(int self)
-    {
-        yield return 0;
-        yield return _cw / 2;
-        yield return _cw;
-        for (int i = 0; i < Outputs; i++)
-        {
-            if (i == self || !GetEnabled(i)) continue;
-            yield return _regions[i, 0];
-            yield return _regions[i, 0] + _regions[i, 2];
-        }
-    }
-
-    private IEnumerable<int> SnapTargetsY(int self)
-    {
-        yield return 0;
-        yield return _ch / 2;
-        yield return _ch;
-        for (int i = 0; i < Outputs; i++)
-        {
-            if (i == self || !GetEnabled(i)) continue;
-            yield return _regions[i, 1];
-            yield return _regions[i, 1] + _regions[i, 3];
-        }
-    }
-
     // ==================================================================
     // Campos numéricos
     // ==================================================================
@@ -428,7 +319,16 @@ public sealed class CanvasEditorControl : StackPanel
         if (_loading)
             return;
         if (int.TryParse(_num[output][field].Text.Trim(), out int v))
-            _regions[output, field] = v;
+        {
+            var r = _regions[output];
+            _regions[output] = field switch
+            {
+                0 => r with { X = v },
+                1 => r with { Y = v },
+                2 => r with { W = v },
+                _ => r with { H = v },
+            };
+        }
         ClampAll();
         Redraw();
     }
@@ -445,11 +345,6 @@ public sealed class CanvasEditorControl : StackPanel
     private void ClampAll()
     {
         for (int i = 0; i < Outputs; i++)
-        {
-            _regions[i, 0] = Math.Clamp(_regions[i, 0], 0, Math.Max(0, _cw - MinSize));
-            _regions[i, 1] = Math.Clamp(_regions[i, 1], 0, Math.Max(0, _ch - MinSize));
-            _regions[i, 2] = Math.Clamp(_regions[i, 2], MinSize, _cw - _regions[i, 0]);
-            _regions[i, 3] = Math.Clamp(_regions[i, 3], MinSize, _ch - _regions[i, 1]);
-        }
+            _regions[i] = CanvasEditorLayout.Clamp(_regions[i], _cw, _ch);
     }
 }

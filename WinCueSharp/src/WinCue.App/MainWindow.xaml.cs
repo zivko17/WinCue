@@ -1329,7 +1329,7 @@ public partial class MainWindow : Window, IShowView
             var sub = new MenuItem
             {
                 Header = Loc.T($"Salida {s + 1}", $"Output {s + 1}"),
-                Foreground = new SolidColorBrush(CanvasEditorControl.OutColors[s]),
+                Foreground = new SolidColorBrush(Theme.Hex(CanvasEditorLayout.OutputColors[s])),
                 FontWeight = FontWeights.Bold,
                 StaysOpenOnClick = true,
             };
@@ -1466,7 +1466,7 @@ public partial class MainWindow : Window, IShowView
     private void IdentifyOutput(int screen)
     {
         EnsureVideoOutputWindow(screen);
-        _videoOutputs[screen]!.ShowIdentify(screen, CanvasEditorControl.OutColors[screen]);
+        _videoOutputs[screen]!.ShowIdentify(screen, Theme.Hex(CanvasEditorLayout.OutputColors[screen]));
         PlaceVideoOutput(screen);
     }
 
