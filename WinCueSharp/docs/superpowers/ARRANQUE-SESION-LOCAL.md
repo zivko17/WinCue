@@ -335,7 +335,38 @@ $g.Dispose(); $bmp.Dispose()
 Luego `Read` sobre `%TEMP%\pantalla.png`. Con las dos ventanas lado a lado se
 comparan proporciones y orden sin que Andrés tenga que describirlos.
 
-### Si la captura falla — leído el 2026-08-24, costó media hora
+### LO PRIMERO QUE HAY QUE MIRAR: ¿está la sesión conectada? — leído el 2026-08-25, de noche
+
+**Comprueba esto antes que nada**, y desde luego antes de dar por rota una
+medición o por buena una conclusión:
+
+```powershell
+query session
+```
+
+Si tu sesión (la de `andres`) sale como **`Desc`** —desconectada, porque el
+equipo está bloqueado o alguien cerró el escritorio remoto— entonces:
+
+- **No hay capturas.** Ni `CopyFromScreen`, ni `BitBlt`. Y `PrintWindow` con
+  `PW_RENDERFULLCONTENT` **engaña**: devuelve la barra de título y los previos
+  de mpv, pero **toda la zona XAML en negro**. Parece que ha funcionado.
+- **No hay UI Automation** que valga: no hay nada que pilotar.
+- **Y las pruebas de GPU NO se saltan: revientan el host de pruebas** con
+  `System.AccessViolationException` en `GlD3D11Interop.Register` /
+  `MpvSource.RenderThread`. `WinCue.Video.Tests` aborta la serie entera, así que
+  **la suite completa deja de dar sus 1.229 verdes**. Esto es lo peor de todo,
+  porque parece una regresión del código y no lo es.
+
+La forma de distinguirlo en un minuto: si el mismo código estaba en verde hace
+un rato y lo único que ha cambiado desde entonces está en otro proyecto, no es
+tu cambio — es la sesión. Compruébala antes de ponerte a bisecar.
+
+**Con la sesión desconectada, el único trabajo honesto es el que no necesita
+pantalla**: leer código, diagnosticar, preparar planes. Cualquier tarea cuya
+evidencia sea una medición **hay que pararla**, no hacerla a ciegas y dejar el
+commit sin verificar.
+
+### Si la captura falla con la sesión CONECTADA — leído el 2026-08-24, costó media hora
 
 `CopyFromScreen` puede reventar con **«Controlador no válido»**. No es que el
 shell no tenga escritorio: es que **una pantalla estaba apagada** y la sesión
