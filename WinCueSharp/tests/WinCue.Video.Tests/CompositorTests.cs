@@ -15,6 +15,7 @@ using WinCue.Core;
 using WinCue.Video.Gpu;
 using WinCue.Video.Containers;
 using WinCue.Video.Hap;
+using Xunit.Abstractions;
 
 namespace WinCue.Video.Tests;
 
@@ -23,8 +24,13 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
     private const int W = 160, H = 90;
 
     private readonly HapMediaFixture _media;
+    private readonly ITestOutputHelper _out;
 
-    public CompositorTests(HapMediaFixture media) => _media = media;
+    public CompositorTests(HapMediaFixture media, ITestOutputHelper output)
+    {
+        _media = media;
+        _out = output;
+    }
 
     private static GpuDevice? TryCreateGpu()
     {
@@ -317,7 +323,10 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
     {
         using var gpu = TryCreateGpu();
         if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
             return;
+        }
 
         using var principal = new TextureSink(gpu, W, H);
         using var espejo = new TextureSink(gpu, W, H);
@@ -329,8 +338,11 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
 
         byte[] a = GpuReadback.Read(gpu, principal.Texture, W, H);
         byte[] b = GpuReadback.Read(gpu, espejo.Texture, W, H);
+        double lumaA = GpuReadback.MeanLumaBgra8(a);
+        double lumaB = GpuReadback.MeanLumaBgra8(b);
+        _out.WriteLine($"GPU utilizable: luma principal={lumaA:F3}, luma espejo={lumaB:F3}");
 
-        Assert.Equal(GpuReadback.MeanLumaBgra8(a), GpuReadback.MeanLumaBgra8(b), 3);
+        Assert.Equal(lumaA, lumaB, 3);
     }
 
     [Fact]
@@ -338,7 +350,10 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
     {
         using var gpu = TryCreateGpu();
         if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
             return;
+        }
 
         using var principal = new TextureSink(gpu, W, H);
         using var comp = new OutputCompositor(gpu, principal);
@@ -350,7 +365,50 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
         comp.RenderOnce(0.0);
 
         byte[] a = GpuReadback.Read(gpu, principal.Texture, W, H);
-        Assert.True(GpuReadback.MeanLumaBgra8(a) > 10.0);
+        double luma = GpuReadback.MeanLumaBgra8(a);
+        _out.WriteLine($"GPU utilizable: luma principal (sin espejo)={luma:F3}");
+
+        Assert.True(luma > 10.0);
+    }
+
+    [Fact]
+    public void Espejo_UsaSusPropiasDimensiones_NoLasDelPrincipal()
+    {
+        // La trampa que senala el brief: si el LayerTarget del espejo se
+        // construyera con las dimensiones del PRINCIPAL en vez de las suyas,
+        // una prueba con el mismo tamano en los dos sinks NO lo detectaria
+        // (SinkSecundario_RecibeElMISMOFotograma no lo haria: un SolidNode es
+        // el mismo color en cualquier rectangulo). Por eso aqui el espejo es
+        // mas GRANDE que el principal en los dos ejes: si el viewport del
+        // espejo se calculase con el tamano (menor) del principal, el borde
+        // inferior-derecho del espejo real se quedaria sin pintar (color de
+        // fondo), y esta prueba se pondria roja.
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        const int espejoW = 2 * W, espejoH = 2 * H;
+
+        using var principal = new TextureSink(gpu, W, H);
+        using var espejo = new TextureSink(gpu, espejoW, espejoH);
+        using var comp = new OutputCompositor(gpu, principal) { Mirror = espejo };
+
+        using var rojo = new SolidNode(gpu, 1f, 0f, 0f);
+        comp.Root = rojo;
+        comp.RenderOnce(0.0);
+
+        byte[] bytes = GpuReadback.Read(gpu, espejo.Texture, espejoW, espejoH);
+        int i = (((espejoH - 1) * espejoW) + (espejoW - 1)) * 4;
+        byte rEsquina = bytes[i + 2];
+        _out.WriteLine($"GPU utilizable: R en esquina inferior-derecha del espejo " +
+            $"({espejoW - 1},{espejoH - 1}) = {rEsquina} (esperado > 200)");
+
+        Assert.True(rEsquina > 200,
+            $"la esquina del espejo (fuera de {W}x{H}) no esta pintada: R={rEsquina}. " +
+            "El LayerTarget del espejo probablemente usa las dimensiones del principal.");
     }
 
     // ------------------------------------------------------------------
