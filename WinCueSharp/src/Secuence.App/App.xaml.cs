@@ -249,8 +249,9 @@ public partial class App : Application
                 // el SetGpuLayerSurfaceProvider de más arriba ya ha ejecutado
                 // su ReleaseFrozenSurfaces. Lo que este orden protege es la
                 // carrera con DiscardCompositorPipelines, que es la de abajo.)
-                // Mientras siga
-                // enganchado, el hilo del compositor anfitrión —un hilo que va
+                //
+                // Mientras el espejo siga enganchado, el hilo del compositor
+                // anfitrión —un hilo que va
                 // A LA SALA— recorre una raíz que en modo LIENZO lleva
                 // instantáneas de nodos de OTRAS salidas, y la recorre hasta
                 // medio segundo más (el tic del PGM).

@@ -2287,7 +2287,15 @@ public sealed partial class MainWindow : Window, IShowView
         }
     }
 
-    /// <summary>EL DESPACHADOR DE TECLADO — uno solo, y en el evento TÚNEL.
+    /// <summary>EL TRANSPORTE (Espacio y Escape), en el evento TÚNEL.
+    ///
+    /// NO es el único enganche de teclado de esta ventana, y decir lo contrario
+    /// —como decía este comentario— contradice al constructor treinta líneas
+    /// más abajo: los HOTKEYS POR CUE van aparte, en el KeyDown que burbujea
+    /// (<see cref="OnKeyDownHotkeys"/>), y el porqué medido de esa separación
+    /// está allí. Aquí solo viven las dos teclas que tienen que ganarle al
+    /// control con foco pase lo que pase.
+    ///
     /// Equivalente WinUI 3 del <c>PreviewKeyDown += OnKeyDownGlobal</c> de
     /// WinCue (WinCue.App/MainWindow.xaml.cs:72), portado con su guardián de
     /// escritura por delante.
@@ -2432,10 +2440,35 @@ public sealed partial class MainWindow : Window, IShowView
     /// quede escrito porque parece que sí: está medido en los DOS binarios que
     /// **no funciona** —teclear una letra no mueve la selección ni antes ni
     /// después de la tanda—, porque todas las filas comparten la misma
-    /// representación de texto. O sea que hoy no hay ninguna colisión
-    /// «buscar vs. disparar» que resolver. El día que la tabla tenga búsqueda
-    /// de verdad habrá que decidir de quién es la letra, y esa decisión será de
-    /// producto, no de teclado.</summary>
+    /// representación de texto (<c>CueRow</c> no sobrescribe <c>ToString()</c>).
+    /// O sea que hoy no hay ninguna colisión «buscar vs. disparar» que
+    /// resolver. El día que la tabla tenga búsqueda de verdad habrá que decidir
+    /// de quién es la letra, y esa decisión será de producto, no de teclado.
+    ///
+    /// ══ ESTO ES UNA DIVERGENCIA CONSCIENTE CON WinCue, NO UNA RESTAURACIÓN ══
+    ///
+    /// Que quede claro para la tanda de los 18 atajos, porque va a chocar de
+    /// frente con esto: en WinCue los hotkeys por cue NO viven en un manejador
+    /// aparte. Están dentro del MISMO despachador túnel
+    /// (<c>OnKeyDownGlobal</c>, WinCue.App/MainWindow.xaml.cs:2126), o sea en
+    /// la posición que aquí se acaba de descartar. WinCue puede permitírselo
+    /// porque su tabla NUNCA VE LAS FLECHAS: ↑ y ↓ los reclama el propio
+    /// despachador para mover el playhead (<c>OnPrevPressed</c> /
+    /// <c>OnNextPressed</c>, <c>:2171-2178</c>) y los marca <c>Handled</c>, así
+    /// que en WinCue no hay navegación de <c>DataGrid</c> que proteger: se la
+    /// quitó a propósito.
+    ///
+    /// Secuence hoy NO tiene ↑/↓ de playhead —son de la tanda siguiente—, así
+    /// que aquí las flechas todavía son de la tabla y hay que respetárselas.
+    /// CUANDO ESA TANDA LLEGUE, esta separación se queda coja: en cuanto ↑/↓
+    /// pasen a ser transporte y se marquen Handled en el preview, la tabla deja
+    /// de verlas igual que en WinCue, y entonces mantener los hotkeys en un
+    /// enganche distinto ya no compra navegación — compra otra cosa (que un
+    /// hotkey no le robe una tecla a un deslizador o a un futuro campo), que
+    /// puede seguir valiendo la pena o no. Es una decisión que hay que TOMAR
+    /// entonces, a la vista de la lista completa de atajos, y no heredarla sin
+    /// mirar. Lo que no se puede es dejar los dos productos divergiendo sin que
+    /// nadie lo haya escrito: por eso está escrito aquí.</summary>
     private void OnKeyDownHotkeys(object sender, KeyRoutedEventArgs e)
     {
         // Con un diálogo modal delante, tampoco: teclear en Ajustes no puede
@@ -2471,26 +2504,51 @@ public sealed partial class MainWindow : Window, IShowView
     private static bool EsDesplegableAbierto(object? foco) =>
         foco is ComboBoxItem || foco is ComboBox { IsDropDownOpen: true };
 
-    /// <summary>¿El foco está donde se ESCRIBE? Se mira el TIPO del elemento
-    /// con foco, no una lista de teclas — mismo criterio que WinCue.
-    /// <c>NumberBox</c> y <c>AutoSuggestBox</c> no hacen falta por separado:
-    /// envuelven un <c>TextBox</c>, y el que tiene el foco es el de dentro.
-    /// Van igualmente en la lista por si algún día el foco cae en el envoltorio
-    /// (y <c>RichEditBox</c>/<c>PasswordBox</c>, que hoy no existen en
-    /// Secuence, para que aparecer no cueste otra auditoría).
+    /// <summary>¿El foco está donde el despachador NO debe meterse? Se mira el
+    /// TIPO del elemento con foco, no una lista de teclas — mismo criterio que
+    /// WinCue. <c>NumberBox</c> y <c>AutoSuggestBox</c> no hacen falta por
+    /// separado (envuelven un <c>TextBox</c>, y el que tiene el foco es el de
+    /// dentro); van igualmente por si algún día el foco cae en el envoltorio, y
+    /// con ellos <c>RichEditBox</c>/<c>PasswordBox</c>, que hoy no existen en
+    /// Secuence, para que aparecer no cueste otra auditoría.
     ///
-    /// UN <c>ComboBox</c> CERRADO Y NO EDITABLE NO ES UN CAMPO DE ESCRITURA, y
-    /// tratarlo como tal abría un agujero justo donde más duele: el selector de
-    /// fuente del PGM (<c>_pgmFuente</c>, CANVAS / OUTPUT 1..4) vive PEGADO a
-    /// los monitores y el operador lo toca durante la función. Con él enfocado
-    /// —que es como queda tras elegir fuente con el ratón— el guardián hacía
-    /// salir al despachador entero, así que la barra abría el desplegable en
-    /// vez de dar GO: exactamente el patrón que esta tanda existe para matar,
-    /// reaparecido en la zona de transporte. En un combo cerrado no se escribe
-    /// nada; solo se escribe si es <c>IsEditable</c>.</summary>
-    private static bool EsCampoDeEscritura(object? foco) =>
+    /// LA REGLA ENTERA DE LOS <c>ComboBox</c>, QUE NO ES «COMBO SÍ / COMBO NO»
+    /// SINO «TRANSPORTE SÍ / EDICIÓN NO»:
+    ///
+    /// La ventana principal tiene DIEZ desplegables —siete en el inspector, dos
+    /// en el editor de lienzo y el selector de fuente del PGM— y no se parecen
+    /// en nada más que en el tipo:
+    ///
+    ///   · <c>_pgmFuente</c> (CANVAS / OUTPUT 1..4) vive PEGADO a los monitores,
+    ///     en la zona de transporte, y el operador lo toca DURANTE la función.
+    ///     Tras elegir fuente con el ratón el foco se queda ahí, y con el
+    ///     guardián puesto la barra abría el desplegable en vez de dar GO:
+    ///     exactamente el patrón que esta tanda existe para matar, reaparecido
+    ///     en la zona donde más duele. Ese, y solo ese, queda EXENTO.
+    ///
+    ///   · Los otros nueve son controles de EDICIÓN: se usan en modo EDIT,
+    ///     preparando el show, con el operador tecleando parámetros de un cue.
+    ///     Ahí Espacio es el gesto NATIVO para abrir un desplegable, y
+    ///     exceptuarlos convertía ese gesto en un GO al aire. Eso es peor que el
+    ///     problema que la excepción venía a resolver, así que para ellos el
+    ///     guardián SIGUE EN PIE.
+    ///
+    /// Por eso la frontera es la FUNCIÓN del control y no su tipo, y por eso
+    /// esto compara por referencia contra <c>_pgmFuente</c> en vez de preguntar
+    /// «¿eres un ComboBox cerrado?». Si algún día hay más desplegables en la
+    /// barra de transporte, se añaden AQUÍ, uno a uno y a sabiendas.
+    ///
+    /// (Un combo EDITABLE nunca queda exento: ahí sí se escribe. Y el caso del
+    /// desplegable ABIERTO lo resuelve antes <see cref="EsDesplegableAbierto"/>,
+    /// que vale para los diez.)</summary>
+    private bool EsCampoDeEscritura(object? foco) =>
         foco is TextBox or AutoSuggestBox or RichEditBox or PasswordBox or NumberBox
-             || foco is ComboBox { IsEditable: true };
+             || (foco is ComboBox cb && !EsSelectorDeTransporte(cb));
+
+    /// <summary>El único desplegable que NO es de edición: el selector de fuente
+    /// del PGM. Ver la regla completa en <see cref="EsCampoDeEscritura"/>.</summary>
+    private bool EsSelectorDeTransporte(ComboBox cb) =>
+        ReferenceEquals(cb, _pgmFuente) && !cb.IsEditable;
 
     private static bool IsDown(Windows.System.VirtualKey key) =>
         Microsoft.UI.Input.InputKeyboardSource

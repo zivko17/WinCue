@@ -33,13 +33,19 @@
          acelerador: escribir un espacio en el nombre de un cue disparaba el
          GO del show, y Escape dentro de un campo paraba el show entero.
 
-         Ahora hay UN despachador en el PreviewKeyDown del Grid raíz
-         (MainWindow.xaml.cs, OnPreviewKeyDownGlobal), que es el equivalente
-         WinUI 3 del PreviewKeyDown de ventana de WinCue: el evento TÚNEL viaja
-         de la raíz hacia el foco, así que se ve la tecla ANTES que nadie.
-         Medido en tools/winui3-lab/SpikeTeclado.cs antes de escribir una línea
-         de esto. Los dos aceleradores TIENEN que estar fuera: si se quedan,
-         siguen disparando desde dentro de un TextBox por la vía de siempre.
+         Ahora el TRANSPORTE (Espacio, Escape) va en el PreviewKeyDown del
+         Grid raíz (MainWindow.xaml.cs, OnPreviewKeyDownGlobal): el evento
+         TÚNEL viaja de la raíz hacia el foco, así que se ve la tecla ANTES que
+         nadie. Medido en tools/winui3-lab/SpikeTeclado.cs antes de escribir una
+         línea de esto. Los dos aceleradores TIENEN que estar fuera: si se
+         quedan, siguen disparando desde dentro de un TextBox por la vía de
+         siempre.
+
+         Y OJO, QUE NO ES UN ÚNICO ENGANCHE: los hotkeys por cue van aparte, en
+         el KeyDown que BURBUJEA (OnKeyDownHotkeys), para no robarle al control
+         con foco las teclas que ese control necesita — las flechas de la tabla,
+         las de un deslizador. Las dos mitades y el porqué medido de cada una
+         están en el constructor y en esos dos métodos.
 
          Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+G sí siguen siendo
          KeyboardAccelerator (en código, ver el constructor): ningún control se
