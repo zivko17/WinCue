@@ -55,6 +55,14 @@ public static class Theme
     public static readonly Color Border = Hex(Palette.Border);
     public static readonly Color Divider = Hex(Palette.Divider);
 
+    // ── Lienzo de geometría (sumado para CanvasEditorPanel.cs, hitos-0-1):
+    // el editor de canvas de Ajustes → Vídeo es XAML plano y necesita Brush,
+    // a diferencia de GeometryCanvas.cs (Win2D), que usa Palette.GeometryBg/
+    // GeometryGrid directamente con su propio ToColor(uint) local. Mismos dos
+    // tokens que WinCue.App.Theme.GeometryBg/GeometryGrid. ──────────────
+    public static readonly Color GeometryBg = Hex(Palette.GeometryBg);
+    public static readonly Color GeometryGrid = Hex(Palette.GeometryGrid);
+
     // ── Controles / mixer (sumado para MixerPanel.cs, hitos-0-1) ───────
     public static readonly Color ButtonBg = Hex(Palette.ButtonBg);
     public static readonly Color SunkenBg = Hex(Palette.SunkenBg);
@@ -161,6 +169,8 @@ public static class Theme
     public static readonly SolidColorBrush TextOnAccentBrush = Solid(TextOnAccent);
     public static readonly SolidColorBrush BorderBrush = Solid(Border);
     public static readonly SolidColorBrush DividerBrush = Solid(Divider);
+    public static readonly SolidColorBrush GeometryBgBrush = Solid(GeometryBg);
+    public static readonly SolidColorBrush GeometryGridBrush = Solid(GeometryGrid);
     public static readonly SolidColorBrush ButtonBgBrush = Solid(ButtonBg);
     public static readonly SolidColorBrush SunkenBgBrush = Solid(SunkenBg);
     public static readonly SolidColorBrush ToolbarBgBrush = Solid(ToolbarBg);

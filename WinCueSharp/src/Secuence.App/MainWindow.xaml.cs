@@ -2099,13 +2099,14 @@ public sealed partial class MainWindow : Window, IShowView
     private const int MaxVideoOutputs = 4;
     private readonly VideoOutputWindow?[] _videoOutputs = new VideoOutputWindow?[MaxVideoOutputs];
 
-    /// <summary>Colores por salida, para identificar y para el rótulo. Los
-    /// mismos cuatro que WinCue usa en su editor de canvas.</summary>
+    /// <summary>Colores por salida, para identificar y para el rótulo.
+    /// CanvasEditorLayout.OutputColors (WinCue.Presentation), no un array
+    /// propio: antes había un segundo juego de colores por salida solo aquí,
+    /// que no coincidía con el que pinta el editor de canvas de
+    /// Ajustes → Vídeo (CanvasEditorPanel.cs) — mismos cuatro en los dos
+    /// sitios ahora, por construcción.</summary>
     private static readonly Windows.UI.Color[] OutColors =
-    {
-        Microsoft.UI.Colors.DeepSkyBlue, Microsoft.UI.Colors.Orange,
-        Microsoft.UI.Colors.LimeGreen, Microsoft.UI.Colors.Violet,
-    };
+        CanvasEditorLayout.OutputColors.Select(Theme.Hex).ToArray();
 
     /// <summary>Clave de settings del monitor de cada salida. La 1 conserva
     /// el nombre histórico para no romper shows/ajustes ya guardados — mismo

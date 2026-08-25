@@ -43,9 +43,15 @@
 //     que algo lee — ShowFileService.ResolveFfmpegPath).
 //   - Interfaz: idioma (recién enchufado, ver App.xaml.cs), comportamiento de
 //     GO y PANIC — todo MainController, el mismo motor que WinCue.
-// FUERA a propósito, todavía: video_compositor/canvas — sin
-// GetCompositorSurface conectado (SetGpuLayerSurfaceProvider nunca se llama
-// en Secuence.App.xaml.cs), el interruptor no cambiaría nada visible.
+// video_compositor/canvas SÍ entran en esta pasada: el grupo CANVAS de
+// BuildVideo (con CanvasEditorPanel.cs, el editor visual de recortes) llega
+// junto con el interruptor del compositor GPU — antes se dejaban fuera
+// porque SetGpuLayerSurfaceProvider no estaba conectado y el interruptor no
+// habría cambiado nada visible; sigue sin estarlo (ese cableado es de otra
+// tarea), pero el propio editor —tamaño de canvas, recortes por salida,
+// arrastre con imanes— ya funciona y escribe en los mismos settings que lee
+// WinCue.Controller.CanvasLayout, así que dejarlo fuera del formulario ya no
+// tenía motivo.
 // video_default_volume/video_loop_default/audio_buffer_size/
 // default_show_path/default_media_path/show_latency_column/
 // show_next_cue_label/confirm_last_cue/ui_font_scale/keyboard_* — ninguno de
@@ -172,6 +178,44 @@ public sealed class SettingsPanel : ContentControl
         Note(scr, Loc.T(
             "Cada cue de vídeo elige su salida en el inspector (Geometría). Las ventanas se abren solas a pantalla completa cuando un cue las usa. Una salida «Deshabilitada» no aparece en el botón de salidas.",
             "Each video cue picks its output in the inspector (Geometry). Output windows open full-screen on their own when a cue uses them. A «Disabled» output doesn't appear in the outputs button."));
+
+        Check("video_compositor", scr, Loc.T(
+            "Compositor GPU (opacidad real entre capas)",
+            "GPU compositor (real per-layer opacity)"));
+        Note(scr, Loc.T(
+            "Las pistas se funden según su Opacidad % (Geometría). Requiere driver con interop OpenGL↔DirectX; si falla, cae al modo clásico.",
+            "Layers blend by their Opacity % (Geometry). Requires a driver with OpenGL↔DirectX interop; if it fails, it falls back to classic mode."));
+
+        var canvas = Group(root, Loc.T(
+            "CANVAS (las salidas recortan un lienzo común)",
+            "CANVAS (outputs crop a shared canvas)"));
+        Check("video_canvas_mode", canvas, Loc.T(
+            "Modo canvas: los cues se colocan en el canvas y cada salida muestra su recorte",
+            "Canvas mode: cues are placed on the canvas and each output shows its crop"));
+        Note(canvas, Loc.T(
+            "Requiere el compositor GPU. Un vídeo puede cruzar varias salidas con sincronía perfecta (un solo render). En este modo la «Salida» del inspector se ignora: el vídeo vive en el canvas.",
+            "Requires the GPU compositor. A video can span several outputs with perfect sync (a single render). In this mode the inspector's «Output» is ignored: the video lives on the canvas."));
+
+        var editor = new CanvasEditorPanel { Margin = new Thickness(0, 6, 0, 0) };
+        canvas.Children.Add(editor);
+        _fields["surface_width"] = (
+            () => editor.CanvasW,
+            v => editor.CanvasW = v is null ? 1920 : Convert.ToInt32(v));
+        _fields["surface_height"] = (
+            () => editor.CanvasH,
+            v => editor.CanvasH = v is null ? 1080 : Convert.ToInt32(v));
+        for (int s = 0; s < 4; s++)
+        {
+            int idx = s;
+            string regionKey = s == 0 ? "video_output_region" : $"video_output_region{s + 1}";
+            _fields[regionKey] = (
+                () => editor.GetRegion(idx),
+                v => editor.SetRegion(idx, v?.ToString()));
+            if (s > 0)
+                _fields[$"video_output_enabled{s + 1}"] = (
+                    () => editor.GetEnabled(idx),
+                    v => editor.SetEnabled(idx, AsBool(v)));
+        }
 
         var pr = Group(root, Loc.T("MOTOR ProRes", "ProRes ENGINE"));
         Check("video_prores_engine", pr,
