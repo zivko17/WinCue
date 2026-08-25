@@ -233,19 +233,19 @@ public sealed partial class VideoOutputWindow : Window
         if (screenIndex <= 0)
             return primary;
 
-        try
-        {
-            var otras = DisplayArea.FindAll()
-                .Where(a => a.DisplayId.Value != primary.DisplayId.Value)
-                .ToList();
-            int i = screenIndex - 1;
-            return i >= 0 && i < otras.Count ? otras[i] : primary;
-        }
-        catch (Exception ex)
-        {
-            LogAviso($"DisplayArea.FindAll() falló al resolver el monitor {screenIndex}: {ex.Message} — se usa la principal.");
-            return primary;
-        }
+        // Se INDEXA, no se enumera: un .Where() sobre lo que devuelve
+        // DisplayArea.FindAll() lanza InvalidCastException, y por eso este
+        // método caía SIEMPRE a la principal hiciera lo que hiciera el
+        // operador. Ver Pantallas.cs, que es ahora el único sitio donde se
+        // hace esta cuenta — las dos llamadas TIENEN que estar de acuerdo en
+        // el orden de los índices, porque es el contrato de settings.json.
+        var otras = Pantallas.NoPrincipales(primary);
+        int i = screenIndex - 1;
+        if (i >= 0 && i < otras.Count)
+            return otras[i];
+
+        LogAviso($"El monitor {screenIndex} no existe (hay {otras.Count} no principales) — se usa la principal.");
+        return primary;
     }
 
     /// <summary>Coloca la salida a pantalla completa en el monitor indicado

@@ -255,14 +255,9 @@ public sealed class SettingsPanel : ContentControl
                 $"Pantalla 0 (principal) — {primary.OuterBounds.Width}×{primary.OuterBounds.Height}",
                 $"Screen 0 (main) — {primary.OuterBounds.Width}×{primary.OuterBounds.Height}")),
         };
-        List<DisplayArea> otras;
-        try
-        {
-            otras = DisplayArea.FindAll()
-                .Where(a => a.DisplayId.Value != primary.DisplayId.Value)
-                .ToList();
-        }
-        catch (Exception) { otras = new List<DisplayArea>(); }
+        // OJO: se INDEXA, no se enumera — un .Where() sobre lo que devuelve
+        // DisplayArea.FindAll() lanza InvalidCastException. Ver Pantallas.cs.
+        var otras = Pantallas.NoPrincipales(primary);
         for (int i = 0; i < otras.Count; i++)
             items.Add(((object)(i + 1), Loc.T(
                 $"Pantalla {i + 1} — {otras[i].OuterBounds.Width}×{otras[i].OuterBounds.Height}",
