@@ -217,13 +217,10 @@ public sealed class SettingsPanel : ContentControl
                     v => editor.SetEnabled(idx, AsBool(v)));
         }
 
-        var pr = Group(root, Loc.T("MOTOR ProRes", "ProRes ENGINE"));
-        Check("video_prores_engine", pr,
-            Loc.T("Motor propio para ProRes (.mov)", "Native engine for ProRes (.mov)"));
-        Note(pr, Loc.T(
-            "Desmárcalo si este equipo da problemas: los ProRes vuelven a ir por mpv, igual que en WinCue.",
-            "Uncheck it if this machine misbehaves: ProRes goes back through mpv, same as in WinCue."));
-
+        // ORDEN: REPRODUCCIÓN antes que MOTOR ProRes, el MISMO que
+        // WinCue.App.SettingsWindow.BuildVideo (pb en la 234, pr en la 243).
+        // El encargo pide literalmente «el orden de los elementos» igual que
+        // WinCue, y aquí estaban al revés — lo cazó la revisión de la Task 3.
         var pb = Group(root, Loc.T("REPRODUCCIÓN", "PLAYBACK"));
         SpinDouble("video_default_volume", pb,
             Loc.T("Volumen por defecto (%):", "Default volume (%):"), 0, 100, 1);
@@ -232,6 +229,13 @@ public sealed class SettingsPanel : ContentControl
         SpinDouble("video_audio_max_minutes", pb,
             Loc.T("Audio de vídeo por el rack nativo hasta (min, 0 = sin límite):",
                   "Video audio through the native rack up to (min, 0 = no limit):"), 0, 240, 1);
+
+        var pr = Group(root, Loc.T("MOTOR ProRes", "ProRes ENGINE"));
+        Check("video_prores_engine", pr,
+            Loc.T("Motor propio para ProRes (.mov)", "Native engine for ProRes (.mov)"));
+        Note(pr, Loc.T(
+            "Desmárcalo si este equipo da problemas: los ProRes vuelven a ir por mpv, igual que en WinCue.",
+            "Uncheck it if this machine misbehaves: ProRes goes back through mpv, same as in WinCue."));
 
         return root;
     }
