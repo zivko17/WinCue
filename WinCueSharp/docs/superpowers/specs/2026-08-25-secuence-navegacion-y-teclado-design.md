@@ -90,7 +90,12 @@ Lo mueven **cinco gestos, y ninguno más**:
 | `↓` / `→` | Playhead al cue siguiente (`OnNextPressed`) |
 | `Enter` con el foco en la tabla | Playhead a la fila seleccionada (`OnSetPlayhead`) |
 | Doble clic en una fila | Playhead a esa fila (`OnSetPlayhead`) |
-| Dígitos + `Enter` | Playhead a ese cue (`OnJumpToCue`) |
+| Dígitos + `Enter` | Playhead al cue con ese NÚMERO (`OnSetPlayhead`) |
+
+**Ojo con el último**: no es `OnJumpToCue(n)`, que salta por posición. WinCue
+casa el texto tecleado contra `DisplayNumber` —que es `"1.1"`, no un índice— y
+llama a `OnSetPlayhead(fila)`. Es lo correcto: el operador teclea el número que
+ve en la tabla. `OnJumpToCue` se queda sin usar.
 
 Más el GO, que lo avanza el motor como ya hace hoy.
 
