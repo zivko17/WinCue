@@ -169,15 +169,23 @@ public sealed partial class MainWindow : Window, IShowView
         // Close() se llama una segunda vez desde dentro del propio handler).
         WireSplitters();
 
-        // EL DESPACHADOR ÚNICO DE TECLADO. Va en el evento TÚNEL
-        // (PreviewKeyDown) del Grid raíz, no en KeyDown, y ése es todo el
-        // arreglo — ver OnPreviewKeyDownGlobal para el porqué medido.
+        // EL TECLADO, EN DOS ENGANCHES Y NO EN UNO, A PROPÓSITO:
         //
-        // handledEventsToo: true por si algún día alguien marca la tecla más
-        // arriba; aquí, siendo el preview de la raíz, en la práctica siempre
-        // llega sin marcar.
+        //   · TRANSPORTE (Espacio, Escape) en el evento TÚNEL del Grid raíz.
+        //     Tiene que ganarle al control con foco, y ése es todo el arreglo
+        //     — ver OnPreviewKeyDownGlobal para el porqué medido.
+        //     handledEventsToo: true por si algún día alguien marca la tecla
+        //     más arriba; siendo el preview de la raíz, en la práctica siempre
+        //     llega sin marcar.
+        //
+        //   · HOTKEYS POR CUE en el KeyDown que BURBUJEA y SIN
+        //     handledEventsToo, para que una tecla que el control con foco ya
+        //     ha consumido (las flechas de la tabla, las de un deslizador) no
+        //     dispare nada. Ver OnKeyDownHotkeys: juntarlos en el preview mató
+        //     la navegación de la tabla, y está medido.
         RootGrid.AddHandler(UIElement.PreviewKeyDownEvent,
             new KeyEventHandler(OnPreviewKeyDownGlobal), handledEventsToo: true);
+        RootGrid.KeyDown += OnKeyDownHotkeys;
 
         _appWindow.Closing += async (_, args) =>
         {
@@ -1958,10 +1966,22 @@ public sealed partial class MainWindow : Window, IShowView
     // Diálogos modales y los huecos de vídeo — la mitigación del airspace
     // ==================================================================
 
-    /// <summary>Cuántos diálogos modales hay abiertos AHORA. Es un contador y
-    /// no un booleano porque un diálogo puede abrir otro cuando el primero se
-    /// cierra (Ajustes → aviso de frecuencia de muestreo), y con un booleano el
-    /// segundo destaparía los monitores al terminar el primero.</summary>
+    /// <summary>Cuántos diálogos modales hay abiertos AHORA. Lo leen DOS cosas,
+    /// y las dos importan en directo:
+    ///   · la mitigación del airspace (MostrarDialogoAsync, más abajo): con un
+    ///     diálogo delante los HWND de los monitores se apartan;
+    ///   · el teclado (OnPreviewKeyDownGlobal / OnKeyDownHotkeys): con un
+    ///     diálogo delante, ni el transporte ni los hotkeys tocan nada — el
+    ///     ContentDialog vive en el MISMO XamlRoot y el preview del Grid raíz
+    ///     le vería las teclas antes que él.
+    ///
+    /// Contador y no booleano por PRUDENCIA, no por un caso conocido: hoy
+    /// ningún camino de Secuence llega a tener dos a la vez —el aviso de
+    /// frecuencia de muestreo de Ajustes se abre DESPUÉS de que el primero se
+    /// haya cerrado, así que ahí el contador nunca pasa de 1—, pero un
+    /// booleano convierte cualquier anidamiento futuro en monitores destapados
+    /// sobre un diálogo y en un Escape que para el show. Es dos líneas más y
+    /// quita un modo de fallo entero.</summary>
     private int _dialogosAbiertos;
 
     /// <summary>Abre un ContentDialog CON LOS HUECOS DE VÍDEO APARTADOS.
@@ -2310,21 +2330,43 @@ public sealed partial class MainWindow : Window, IShowView
     /// esas combinaciones, así que la fase tardía les llega igual de bien.</summary>
     private void OnPreviewKeyDownGlobal(object sender, KeyRoutedEventArgs e)
     {
-        if (_controller is null)
+        // ── 0 · CON UN DIÁLOGO MODAL DELANTE, EL TECLADO NO ES NUESTRO ──
+        // MEDIDO, y es la trampa que este preview abrió: el ContentDialog de
+        // Ajustes vive en el MISMO XamlRoot, así que el preview del Grid raíz ve
+        // sus teclas ANTES que él. Con Ajustes abierto, Escape disparaba
+        // STOP ALL Y ADEMÁS dejaba el diálogo abierto — o sea que abrir Ajustes
+        // en mitad de una función y pulsar Escape para cerrarlo paraba el show.
+        // Antes de esta tanda no pasaba: el KeyboardAccelerator llegaba tarde y
+        // el ContentDialog se quedaba su Escape, que es lo correcto.
+        //
+        // El contador es el MISMO que usa la mitigación de los monitores
+        // (MostrarDialogoAsync): mientras algo modal esté delante, el
+        // transporte no se mete.
+        if (_controller is null || _dialogosAbiertos > 0)
             return;
 
-        // ── 1 · GUARDIÁN DE ESCRITURA. VA PRIMERO, Y NO ES NEGOCIABLE ──
-        // Si el foco está en un campo de texto o en un desplegable, este
-        // despachador sale ENTERO: en un preview que marca Handled, el
-        // carácter no llega a escribirse (medido en el spike, caso C). Sin
-        // esto el problema se invierte y la app se come la escritura.
+        object? foco = FocusManager.GetFocusedElement(Content.XamlRoot);
+
+        // ── 1a · DESPLEGABLE ABIERTO ──
+        // Mientras la lista de un ComboBox está desplegada, sus teclas son
+        // suyas: Escape la cierra, Espacio elige. Se sale SIN tocar el foco —
+        // a diferencia del caso de escritura de abajo, moverlo aquí cerraría
+        // el desplegable de una forma que el operador no ha pedido.
+        if (EsDesplegableAbierto(foco))
+            return;
+
+        // ── 1b · GUARDIÁN DE ESCRITURA. VA PRIMERO, Y NO ES NEGOCIABLE ──
+        // Si el foco está donde se escribe, este despachador sale ENTERO: en un
+        // preview que marca Handled, el carácter no llega a escribirse (medido
+        // en el spike, caso C). Sin esto el problema se invierte y la app se
+        // come la escritura.
         //
         // Escape es la única excepción, y hace lo MISMO que en WinCue: devolver
         // el foco a la tabla. NO para el show — que es justo lo que hacía
         // Secuence hasta ahora desde dentro de un TextBox. No se marca
         // Handled, igual que WinCue: quien tenga el foco puede seguir usando su
         // Escape (el inspector lo usa para revertir un campo).
-        if (EsCampoDeEscritura(FocusManager.GetFocusedElement(Content.XamlRoot)))
+        if (EsCampoDeEscritura(foco))
         {
             if (e.Key == Windows.System.VirtualKey.Escape)
                 CueList.Focus(FocusState.Programmatic);
@@ -2352,15 +2394,67 @@ public sealed partial class MainWindow : Window, IShowView
                 return;
         }
 
-        // ── 4 · Hotkeys por cue (Disparadores → Hotkey) ──
-        // Vivían en un manejador aparte sobre KeyDown, registrado con
-        // handledEventsToo: true PRECISAMENTE para ver teclas que el control
-        // con foco ya hubiera consumido… y cuya primera línea era
-        // `if (e.Handled) return`, que anulaba exactamente eso. Medido: un
-        // hotkey en la flecha ↓ disparaba con el foco en un botón y NO con el
-        // foco en la tabla, porque el ListView se comía la flecha. Aquí, en el
-        // preview, nadie ha podido marcar nada todavía: la contradicción
-        // desaparece con el manejador que la tenía.
+        // ── 4 · Los hotkeys por cue NO se despachan aquí: ver OnKeyDownHotkeys,
+        //        y el porqué medido de que vayan en otro sitio.
+    }
+
+    /// <summary>Los hotkeys por cue (Disparadores → Hotkey), y NO en el preview
+    /// de arriba. La diferencia es deliberada, y está medida.
+    ///
+    /// LOS ATAJOS DE DIRECTO Y LOS HOTKEYS NO SON LA MISMA CLASE DE TECLA.
+    /// Espacio y Escape son TRANSPORTE: tienen que ganarle siempre al control
+    /// con foco, porque una barra que hace algo distinto según dónde esté el
+    /// foco es una barra de la que el operador no se puede fiar en una función.
+    /// Por eso viven en el preview y marcan <c>Handled</c>. Un hotkey por cue,
+    /// en cambio, es ADITIVO: es una comodidad sobre una tecla cualquiera, y no
+    /// puede quitarle a quien tiene el foco una tecla que ese control necesita
+    /// para funcionar.
+    ///
+    /// EL CONTRATO ES «LA TECLA QUE EL CONTROL CON FOCO YA HA CONSUMIDO NO
+    /// DISPARA NADA», y por eso este manejador va en el <c>KeyDown</c> que
+    /// BURBUJEA y SIN <c>handledEventsToo</c>: aquí solo llegan las teclas que
+    /// nadie ha querido. Ése era el contrato que el código viejo PRETENDÍA
+    /// tener y no tenía —se registraba con <c>handledEventsToo: true</c> y
+    /// acto seguido hacía <c>if (e.Handled) return</c>, que anulaba justo eso—;
+    /// la contradicción se resuelve quitando la BANDERA, no la comprobación.
+    /// Meterlo todo en el preview la resolvía al revés y se llevaba por delante
+    /// la navegación de la tabla y la de los deslizadores del mezclador.
+    ///
+    /// MEDIDO, con un hotkey en la flecha ABAJO y la tabla enfocada:
+    ///   · antes de esta tanda: la flecha MUEVE la selección (fila 0 → 1) y el
+    ///     cue NO se dispara — el ListView se la come y la marca Handled;
+    ///   · con los hotkeys en el preview: el cue SE DISPARA y la selección se
+    ///     queda clavada en 0 — la navegación, muerta;
+    ///   · aquí, en el KeyDown sin handledEventsToo: vuelve a mover la
+    ///     selección y a no disparar.
+    ///
+    /// El type-ahead de la tabla NO entra en esta decisión, y conviene que
+    /// quede escrito porque parece que sí: está medido en los DOS binarios que
+    /// **no funciona** —teclear una letra no mueve la selección ni antes ni
+    /// después de la tanda—, porque todas las filas comparten la misma
+    /// representación de texto. O sea que hoy no hay ninguna colisión
+    /// «buscar vs. disparar» que resolver. El día que la tabla tenga búsqueda
+    /// de verdad habrá que decidir de quién es la letra, y esa decisión será de
+    /// producto, no de teclado.</summary>
+    private void OnKeyDownHotkeys(object sender, KeyRoutedEventArgs e)
+    {
+        // Con un diálogo modal delante, tampoco: teclear en Ajustes no puede
+        // disparar cues. Mismo motivo y mismo contador que en el preview.
+        if (_controller is null || _dialogosAbiertos > 0)
+            return;
+
+        // El MISMO guardián, y por el mismo motivo: sin él, teclear el nombre
+        // de un cue dispararía los cues cuyas teclas coincidan con sus letras.
+        object? foco = FocusManager.GetFocusedElement(Content.XamlRoot);
+        if (EsDesplegableAbierto(foco) || EsCampoDeEscritura(foco))
+            return;
+
+        // Sin modificadores: un Ctrl+S no puede disparar el cue de la «S».
+        if (IsDown(Windows.System.VirtualKey.Control)
+            || IsDown(Windows.System.VirtualKey.Menu)
+            || IsDown(Windows.System.VirtualKey.Shift))
+            return;
+
         if (_cueHotkeys.TryGetValue(e.Key, out int cueId))
         {
             // Dispara SIN mover el playhead, igual que en WinCue.
@@ -2369,16 +2463,34 @@ public sealed partial class MainWindow : Window, IShowView
         }
     }
 
+    /// <summary>¿Hay una lista desplegada AHORA MISMO? Mientras la haya, sus
+    /// teclas son suyas (Escape cierra, Espacio elige) y ni el transporte ni
+    /// los hotkeys se meten. Con el desplegable abierto el foco puede estar en
+    /// el <c>ComboBoxItem</c> o seguir en el propio <c>ComboBox</c>, así que se
+    /// miran los dos.</summary>
+    private static bool EsDesplegableAbierto(object? foco) =>
+        foco is ComboBoxItem || foco is ComboBox { IsDropDownOpen: true };
+
     /// <summary>¿El foco está donde se ESCRIBE? Se mira el TIPO del elemento
     /// con foco, no una lista de teclas — mismo criterio que WinCue.
     /// <c>NumberBox</c> y <c>AutoSuggestBox</c> no hacen falta por separado:
     /// envuelven un <c>TextBox</c>, y el que tiene el foco es el de dentro.
     /// Van igualmente en la lista por si algún día el foco cae en el envoltorio
     /// (y <c>RichEditBox</c>/<c>PasswordBox</c>, que hoy no existen en
-    /// Secuence, para que aparecer no cueste otra auditoría).</summary>
+    /// Secuence, para que aparecer no cueste otra auditoría).
+    ///
+    /// UN <c>ComboBox</c> CERRADO Y NO EDITABLE NO ES UN CAMPO DE ESCRITURA, y
+    /// tratarlo como tal abría un agujero justo donde más duele: el selector de
+    /// fuente del PGM (<c>_pgmFuente</c>, CANVAS / OUTPUT 1..4) vive PEGADO a
+    /// los monitores y el operador lo toca durante la función. Con él enfocado
+    /// —que es como queda tras elegir fuente con el ratón— el guardián hacía
+    /// salir al despachador entero, así que la barra abría el desplegable en
+    /// vez de dar GO: exactamente el patrón que esta tanda existe para matar,
+    /// reaparecido en la zona de transporte. En un combo cerrado no se escribe
+    /// nada; solo se escribe si es <c>IsEditable</c>.</summary>
     private static bool EsCampoDeEscritura(object? foco) =>
-        foco is TextBox or ComboBox or ComboBoxItem
-             or AutoSuggestBox or RichEditBox or PasswordBox or NumberBox;
+        foco is TextBox or AutoSuggestBox or RichEditBox or PasswordBox or NumberBox
+             || foco is ComboBox { IsEditable: true };
 
     private static bool IsDown(Windows.System.VirtualKey key) =>
         Microsoft.UI.Input.InputKeyboardSource

@@ -191,9 +191,18 @@ public partial class App : Application
         //
         // Lo que NO entra en la guarda: SharePresentSurfaces y el proveedor de
         // superficies se fijan en TODOS los caminos, también en el arranque y
-        // también cuando el modo no ha cambiado. Son idempotentes y baratos, y
-        // dejarlos dentro del "if" volvería a dejar el motor sin proveedor
-        // después de un ciclo — que es el otro fallo, el simétrico.
+        // también cuando el modo no ha cambiado: dejarlos dentro del "if"
+        // volvería a dejar el motor sin proveedor después de un ciclo — que es
+        // el otro fallo, el simétrico.
+        //
+        // Y NO SON GRATIS, aunque lo parezcan. Aquí decía que «son idempotentes
+        // y baratos» y es FALSO: SetGpuLayerSurfaceProvider no es una simple
+        // asignación — llama a ReleaseFrozenSurfaces() y pone _gpuFailed = false
+        // en CADA invocación (VideoEngine.cs:273-281). O sea que cada Guardar de
+        // Ajustes suelta las superficies CONGELADAS (las del saliente de un
+        // crossfade en marcha) y rearma el aviso de fallo de GPU. Es
+        // PREEXISTENTE —esta tanda no lo toca— y queda escrito para que nadie
+        // lo dé por inocuo: es lo siguiente que hay que medir de este camino.
         bool? modoCompositorAplicado = null;   // null = todavía no se aplicó ninguno
         void ApplyCompositorMode()
         {
@@ -235,7 +244,12 @@ public partial class App : Application
             if (seAcabaDeApagar)
             {
                 // ORDEN OBLIGATORIO, y la primera línea no es cosmética: el
-                // ESPEJO DEL PGM se suelta ANTES que nada. Mientras siga
+                // ESPEJO DEL PGM se suelta ANTES QUE EL RESTO DE ESTE BLOQUE.
+                // (No «antes que nada», como decía: para cuando se llega aquí,
+                // el SetGpuLayerSurfaceProvider de más arriba ya ha ejecutado
+                // su ReleaseFrozenSurfaces. Lo que este orden protege es la
+                // carrera con DiscardCompositorPipelines, que es la de abajo.)
+                // Mientras siga
                 // enganchado, el hilo del compositor anfitrión —un hilo que va
                 // A LA SALA— recorre una raíz que en modo LIENZO lleva
                 // instantáneas de nodos de OTRAS salidas, y la recorre hasta

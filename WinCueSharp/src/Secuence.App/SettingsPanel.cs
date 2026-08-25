@@ -68,11 +68,14 @@
 //     (MainWindow.xaml.cs, OnPreviewKeyDownGlobal) y todavía no son
 //     configurables: hacerlos configurables es de la tanda de teclado
 //     siguiente, la que porta los 18 atajos que faltan.
-//   · show_next_cue_label (WinCue MainWindow.xaml.cs:269), confirm_last_cue
-//     (:312) y ui_font_scale (:273) — también los lee WinCue.
+//   · show_latency_column (WinCue MainWindow.xaml.cs:267),
+//     show_next_cue_label (:269), confirm_last_cue (:312) y ui_font_scale
+//     (:273) — también los lee WinCue. Los dos primeros, en la MISMA función
+//     (ApplyViewSettings) y con dos líneas de diferencia: si uno se corrige y
+//     el otro no, el comentario sigue mintiendo a medias.
 //   · video_default_volume / video_loop_default / audio_buffer_size /
-//     default_show_path / default_media_path / show_latency_column — de éstos
-//     sí es cierto: no los lee nadie fuera de la ventana de Ajustes.
+//     default_show_path / default_media_path — de éstos sí es cierto: no los
+//     lee nadie fuera de la ventana de Ajustes.
 // Ninguno se añade en esta pasada; lo que se corrige aquí es el porqué.
 // =============================================================================
 

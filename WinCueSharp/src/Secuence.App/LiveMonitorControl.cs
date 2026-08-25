@@ -263,7 +263,7 @@ internal sealed class LiveMonitorControl : IDisposable
         _huecoH = h;
 
         if (_hijo == 0)
-            _hijo = HwndHijo.Crear(_hwndPropio, w, h, x, y);
+            _hijo = CrearHijo(w, h, x, y);
         else
             HwndHijo.Colocar(_hijo, x, y, w, h);
 
@@ -397,7 +397,7 @@ internal sealed class LiveMonitorControl : IDisposable
         {
             try
             {
-                _hijoEspejo = HwndHijo.Crear(_hwndPropio, w, h);
+                _hijoEspejo = CrearHijo(w, h);
                 SyncGeometry();                  // a su sitio, sobre el hueco
             }
             catch (InvalidOperationException exc)
@@ -833,6 +833,45 @@ internal sealed class LiveMonitorControl : IDisposable
         if (hijo == 0 || _tapadoPorDialogo)
             return;
         HwndHijo.Mostrar(hijo);
+    }
+
+    /// <summary>Crea un HWND hijo… y lo aparta EN EL ACTO si hay un diálogo
+    /// modal delante.
+    ///
+    /// No es un cinturón: es la otra mitad del latch. El hijo nace con
+    /// <c>WS_VISIBLE</c> y además Crear lo sube a <c>HWND_TOP</c>, así que un
+    /// hijo que nazca mientras Ajustes está abierto aparece ENCIMA del
+    /// ContentDialog — el mismo fallo que la mitigación existe para evitar,
+    /// reabierto por la puerta de atrás. Y puede pasar de verdad: el tic del
+    /// PGM sigue corriendo cada 500 ms por debajo del diálogo (ésa es la
+    /// premisa del latch), así que basta con que el PGM entre por primera vez
+    /// en espejo, o con que llegue el primer layout que mide el hueco, para que
+    /// se cree un hijo con el diálogo delante.
+    ///
+    /// MostrarHijo no cubre este camino porque aquí no se llama a Mostrar: la
+    /// ventana ya nace visible.
+    ///
+    /// HONESTIDAD SOBRE LO QUE ESTO ES: se INTENTÓ medir el fallo quitando
+    /// estas dos líneas y forzando que el hijo del espejo naciera con Ajustes
+    /// delante (un cue de espera que encadena a uno de vídeo a mitad de
+    /// diálogo). El hijo nuevo SÍ nace ahí —se ve el tercer Static aparecer—
+    /// pero sale ya con vis=False INCLUSO SIN ESTAS LÍNEAS: AsegurarSinkEspejo
+    /// remata el mismo turno del hilo de interfaz por caminos que sí están
+    /// guardados. O sea que hoy el agujero NO llega a verse.
+    ///
+    /// Se cierra igualmente, y a sabiendas de que es DEFENSIVO: hoy Crear
+    /// depende de que quien llame remate el turno con un camino guardado, y eso
+    /// es una propiedad de los llamantes, no de esta clase. El día que alguien
+    /// añada un tercer sitio que cree un hijo y no llame a Mostrar
+    /// inmediatamente después, el fallo fotografiado vuelve. Dos líneas por
+    /// quitar esa dependencia valen la pena; presentarlo como un fallo medido,
+    /// no.</summary>
+    private nint CrearHijo(int ancho, int alto, int x = 0, int y = 0)
+    {
+        nint hijo = HwndHijo.Crear(_hwndPropio, ancho, alto, x, y);
+        if (_tapadoPorDialogo)
+            HwndHijo.Ocultar(hijo);
+        return hijo;
     }
 
     /// <summary>Se abre un diálogo modal encima: los dos hijos se apartan.
