@@ -2164,6 +2164,77 @@ public sealed partial class MainWindow : Window, IShowView
         return handle;
     }
 
+    /// <summary>Superficie del COMPOSITOR GPU para un slot del pool de
+    /// VideoEngine (salida, pista, secuencia). Es el proveedor que App.xaml.cs
+    /// enchufa con SetGpuLayerSurfaceProvider cuando Ajustes → Vídeo tiene el
+    /// compositor encendido; con él, el cue ya no pinta en un HWND propio sino
+    /// en un NODO del grafo de su salida, y por fin hay opacidad de verdad
+    /// entre pistas.
+    ///
+    /// Misma resolución de salida que GetVideoOutputLayerHandle (el índice se
+    /// acota a las cuatro) y mismo ritual de primera apertura: colocar en su
+    /// monitor, heredar el blackout y refrescar el botón.
+    ///
+    /// LANZA si el puente no se puede montar, y es lo que hay que hacer: la
+    /// única pieza que sabe caer a la ruta clásica es VideoEngine, y solo se
+    /// entera por una excepción (marca _gpuFailed, avisa y reintenta el cue
+    /// por el camino de siempre).</summary>
+    public IVideoLayerSurface ObtenerSuperficieCompositor(int screen, int layer, int slotSeq)
+    {
+        int output = Math.Clamp(screen, 0, MaxVideoOutputs - 1);
+        var w = EnsureVideoOutputWindow(output);
+        bool firstOpen = !w.IsVisible;
+        _ = w.EnsureVisibleHandle();
+        if (firstOpen)
+        {
+            // ANTES de crear el swapchain: PlaceOnScreen mueve la ventana a
+            // su monitor y la pone a pantalla completa, y el swapchain nace
+            // con el tamaño que el HWND hijo tenga en ese momento. Al revés
+            // nacería con el tamaño provisional y habría que recrearlo en el
+            // acto.
+            PlaceVideoOutput(output);
+            w.SetBlackout(_blackout);   // la que nace durante un blackout, nace en negro
+            UpdateVideoOutButton();
+        }
+        return w.NuevaCapa(layer, slotSeq);
+    }
+
+    /// <summary>Opacidad (0..1) del vídeo de un cue, con fundido opcional.
+    /// Secuence la implementa POR PRIMERA VEZ aquí: hasta ahora se quedaba
+    /// con el cuerpo vacío por defecto de IShowView, así que la opacidad de un
+    /// cue de vídeo y los cruces de vídeo no hacían absolutamente nada. Solo
+    /// tiene efecto con el compositor encendido — en la ruta clásica por HWND
+    /// no hay opacidad posible (airspace), igual que en WinCue.
+    ///
+    /// Un cue puede verse en varias salidas (modo canvas): cada una funde su
+    /// capa si la tiene; donde no haya compositor, no-op.</summary>
+    public void SetVideoCueOpacity(int cueId, double opacity, double fadeSeconds = 0.0)
+    {
+        foreach (var w in _videoOutputs)
+            w?.FijarOpacidadCue(cueId, opacity, fadeSeconds);
+    }
+
+    /// <summary>El GO sube el cue al frente de su pista. Con la precarga en
+    /// STANDBY, la capa entra en el grafo mucho antes de salir al aire y puede
+    /// quedar por debajo de vídeos que arrancaron después — mismo motivo (y
+    /// mismo remedio) que RaiseCueToFront en WinCue.</summary>
+    public void RaiseVideoCueToFront(int cueId)
+    {
+        foreach (var w in _videoOutputs)
+            w?.SubirCueAlFrente(cueId);
+    }
+
+    /// <summary>Apaga el compositor GPU de TODAS las salidas (Ajustes → Vídeo
+    /// lo desmarcó, ver App.xaml.cs). No basta con quitarle el proveedor al
+    /// motor: el swapchain seguiría presentando sobre el HWND hijo que la ruta
+    /// clásica va a volver a darle a mpv como wid, y dos dueños del mismo HWND
+    /// es negro garantizado.</summary>
+    public void LiberarCompositoresGpu()
+    {
+        foreach (var w in _videoOutputs)
+            w?.LiberarSalidaGpu();
+    }
+
     /// <summary>true si ESA salida está mostrada. MainController.
     /// PrepareVideoStandby lo consulta para decidir si prepara standby.</summary>
     public bool IsVideoOutputVisible(int screen) =>

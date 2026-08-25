@@ -92,8 +92,13 @@ public sealed partial class VideoOutputWindow : Window
     /// <summary>Aviso a disco (no a consola: esta ventana puede vivir sin
     /// nadie mirando una terminal). Mismo espíritu que DumpCrash de
     /// App.xaml.cs — un fallo de colocación de pantalla sin rastro es
-    /// imposible de diagnosticar después de la función.</summary>
-    private static void LogAviso(string mensaje)
+    /// imposible de diagnosticar después de la función.
+    ///
+    /// internal (era private) para que SalidaGpu escriba en el MISMO archivo:
+    /// un fallo del compositor y uno de colocación de pantalla se leen juntos
+    /// o no se leen — a menudo son el mismo incidente (un monitor que
+    /// desaparece) visto desde dos sitios.</summary>
+    internal static void LogAviso(string mensaje)
     {
         try
         {
@@ -145,6 +150,61 @@ public sealed partial class VideoOutputWindow : Window
         }
 
         return _hwndHijo;
+    }
+
+    // ── COMPOSITOR GPU ───────────────────────────────────────────────────
+    // El swapchain va sobre el MISMO HWND hijo que en modo clásico usa mpv
+    // como wid: con el compositor encendido mpv arranca con vo=libmpv (sin
+    // ventana), así que ese HWND está libre. Lo bueno de reutilizarlo es que
+    // blackout e «Identificar» siguen funcionando sin tocar nada — los dos
+    // ocultan y muestran ese HWND, y el swapchain se va con él.
+    //
+    // PEREZOSA: la salida GPU nace la primera vez que un cue pide capa en
+    // esta salida, y muere con la ventana. Una salida que nadie usa no
+    // materializa ni device, ni swapchain, ni hilo de render.
+
+    private SalidaGpu? _salidaGpu;
+
+    /// <summary>Salida GPU de esta ventana, creándola si hace falta. LANZA si
+    /// el puente no se puede montar (sin D3D11, swapchain que no nace): quien
+    /// la pide es VideoEngine, y necesita enterarse para caer a la ruta
+    /// clásica — <c>_gpuFailed</c> avisa y reintenta el cue por el camino de
+    /// siempre. Mejor vídeo por la ruta vieja que ningún vídeo.</summary>
+    internal SalidaGpu ObtenerSalidaGpu()
+    {
+        if (_salidaGpu is { } existente)
+            return existente;
+
+        nint hijo = EnsureVisibleHandle();
+        var size = _appWindow.ClientSize;
+        var salida = new SalidaGpu(hijo, Math.Max(1, size.Width), Math.Max(1, size.Height));
+        _salidaGpu = salida;
+        return salida;
+    }
+
+    /// <summary>Capa nueva del compositor para un slot del pool de
+    /// VideoEngine. Lanza por el mismo motivo que ObtenerSalidaGpu.</summary>
+    internal CapaCompositor NuevaCapa(int layer, int slotSeq) =>
+        ObtenerSalidaGpu().NuevaCapa(layer, slotSeq);
+
+    /// <summary>Opacidad del vídeo de un cue en ESTA salida. Sin compositor
+    /// creado, no-op: no lo materializa (el tally barre las cuatro salidas y
+    /// no debe encender el compositor de las que nadie usa).</summary>
+    public void FijarOpacidadCue(int cueId, double opacidad, double fadeSegundos) =>
+        _salidaGpu?.FijarOpacidad(cueId, opacidad, fadeSegundos);
+
+    /// <summary>El GO sube el cue al frente de su pista. Mismo no-op que
+    /// FijarOpacidadCue si aquí no hay compositor.</summary>
+    public void SubirCueAlFrente(int cueId) => _salidaGpu?.SubirAlFrente(cueId);
+
+    /// <summary>Apaga el compositor de esta salida (Ajustes → Vídeo lo
+    /// desmarcó). Hay que soltarlo de verdad: su swapchain está sobre el HWND
+    /// hijo que la ruta clásica va a volver a darle a mpv como wid, y dos
+    /// dueños del mismo HWND es negro garantizado.</summary>
+    public void LiberarSalidaGpu()
+    {
+        _salidaGpu?.Dispose();
+        _salidaGpu = null;
     }
 
     /// <summary>Resuelve el índice de settings.json a un DisplayArea real.
@@ -279,6 +339,11 @@ public sealed partial class VideoOutputWindow : Window
         {
             var size = sender.ClientSize;
             HwndHijo.Redimensionar(_hwndHijo, Math.Max(1, size.Width), Math.Max(1, size.Height));
+            // Y el swapchain del compositor, si lo hay: RECREARLO, no
+            // redimensionarlo (ver la cabecera de SalidaGpu.cs). Va después
+            // del HWND hijo a propósito — el swapchain se crea sobre el
+            // tamaño que ese HWND ya tiene.
+            _salidaGpu?.Redimensionar(Math.Max(1, size.Width), Math.Max(1, size.Height));
         }
         catch (Exception ex)
         {
@@ -291,6 +356,10 @@ public sealed partial class VideoOutputWindow : Window
     public void CloseForShutdown()
     {
         _shutdown = true;
+        // El compositor PRIMERO: su hilo de render presenta sobre el HWND
+        // hijo, así que destruir el HWND antes de pararlo sería presentar
+        // sobre una ventana muerta.
+        LiberarSalidaGpu();
         try
         {
             if (_hwndHijo != 0)

@@ -156,6 +156,27 @@ public partial class App : Application
         var video = new VideoEngine(() => 0, dispatch);
         _video = video;   // CA2000: el Dispose real llega en window.Closed, más abajo
 
+        // COMPOSITOR GPU (Ajustes → Vídeo → «Compositor GPU»): con él, cada
+        // cue de vídeo pinta en un NODO del grafo de su salida en vez de en un
+        // HWND propio — y de ahí sale la opacidad real entre pistas, que en
+        // Secuence no ha existido nunca. El interruptor ya estaba en Ajustes
+        // desde la tarea del canvas, pero nadie leía el ajuste: esta línea es
+        // la que faltaba (mismo reparto que WinCue.App.App.xaml.cs).
+        void ApplyCompositorMode()
+        {
+            bool on = settings.Get("video_compositor", false);
+            video.SetGpuLayerSurfaceProvider(on
+                ? (screen, layer, slotSeq) =>
+                    window.ObtenerSuperficieCompositor(screen, layer, slotSeq)
+                : null);
+            // Apagarlo no es solo quitar el proveedor: el swapchain de cada
+            // salida está sobre el HWND hijo que la ruta clásica va a volver a
+            // darle a mpv como wid.
+            if (!on)
+                window.LiberarCompositoresGpu();
+        }
+        ApplyCompositorMode();
+
         var scheduler = new TimerScheduler(dispatch);
         var controller = new MainController(model, window, audio, video, scheduler, settings);
         _controller = controller;
@@ -183,6 +204,7 @@ public partial class App : Application
         {
             ApplyAudioDevice(settings);
             remote.Apply();
+            ApplyCompositorMode();    // modo compositor en caliente
         };
         remote.Apply();
 
