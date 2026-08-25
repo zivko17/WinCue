@@ -177,10 +177,18 @@ public sealed partial class VideoOutputWindow : Window
 
         nint hijo = EnsureVisibleHandle();
         var size = _appWindow.ClientSize;
-        var salida = new SalidaGpu(hijo, Math.Max(1, size.Width), Math.Max(1, size.Height));
+        var salida = new SalidaGpu(hijo, Math.Max(1, size.Width), Math.Max(1, size.Height))
+        {
+            AvisoEnPantalla = msg => AvisoEnPantalla?.Invoke(msg),
+        };
         _salidaGpu = salida;
         return salida;
     }
+
+    /// <summary>Camino a la barra de estado de la ventana de control. Lo pone
+    /// MainWindow: un fallo del compositor tiene que verse donde el operador
+    /// mira, no solo en un archivo de log.</summary>
+    public Action<string>? AvisoEnPantalla { get; set; }
 
     /// <summary>Capa nueva del compositor para un slot del pool de
     /// VideoEngine. Lanza por el mismo motivo que ObtenerSalidaGpu.</summary>
@@ -203,6 +211,7 @@ public sealed partial class VideoOutputWindow : Window
     /// dueños del mismo HWND es negro garantizado.</summary>
     public void LiberarSalidaGpu()
     {
+        _resizeTimer?.Stop();
         _salidaGpu?.Dispose();
         _salidaGpu = null;
     }
@@ -340,15 +349,48 @@ public sealed partial class VideoOutputWindow : Window
             var size = sender.ClientSize;
             HwndHijo.Redimensionar(_hwndHijo, Math.Max(1, size.Width), Math.Max(1, size.Height));
             // Y el swapchain del compositor, si lo hay: RECREARLO, no
-            // redimensionarlo (ver la cabecera de SalidaGpu.cs). Va después
-            // del HWND hijo a propósito — el swapchain se crea sobre el
-            // tamaño que ese HWND ya tiene.
-            _salidaGpu?.Redimensionar(Math.Max(1, size.Width), Math.Max(1, size.Height));
+            // redimensionarlo (ver la cabecera de SalidaGpu.cs) — pero
+            // AMORTIGUADO. Arrastrar un borde en vivo dispara decenas de
+            // estos eventos, y cada recreación mata un hilo de render (con un
+            // Join de hasta 2 s EN EL HILO DE INTERFAZ) y levanta swapchain e
+            // hilo nuevos. Sin amortiguar, mover la ventana congela la app.
+            // El HWND hijo sí sigue el tamaño en el acto: eso es barato.
+            PedirRecrearSwapchain();
         }
         catch (Exception ex)
         {
             LogAviso($"Redimensionar el HWND hijo tras un cambio de ventana falló: {ex.Message}");
         }
+    }
+
+    // ── Amortiguación de la recreación del swapchain (riesgo nº 2) ──────
+    private Microsoft.UI.Dispatching.DispatcherQueueTimer? _resizeTimer;
+
+    /// <summary>Recrea el swapchain cuando el tamaño lleve un rato QUIETO.
+    /// 250 ms: lo bastante corto para que soltar el borde se sienta
+    /// inmediato, y lo bastante largo para que un arrastre entero cueste UNA
+    /// recreación en vez de treinta.</summary>
+    private void PedirRecrearSwapchain()
+    {
+        if (_salidaGpu is null)
+            return;
+        _resizeTimer ??= DispatcherQueue.CreateTimer();
+        _resizeTimer.Interval = TimeSpan.FromMilliseconds(250);
+        _resizeTimer.IsRepeating = false;
+        _resizeTimer.Tick -= OnRecrearSwapchain;
+        _resizeTimer.Tick += OnRecrearSwapchain;
+        _resizeTimer.Stop();
+        _resizeTimer.Start();
+    }
+
+    private void OnRecrearSwapchain(
+        Microsoft.UI.Dispatching.DispatcherQueueTimer sender, object args)
+    {
+        sender.Stop();
+        if (_shutdown || _salidaGpu is null)
+            return;
+        var size = _appWindow.ClientSize;
+        _salidaGpu.Redimensionar(Math.Max(1, size.Width), Math.Max(1, size.Height));
     }
 
     /// <summary>Cierre real, solo al salir de la aplicación (ver App.xaml.cs,

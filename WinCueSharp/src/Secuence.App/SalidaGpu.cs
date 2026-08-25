@@ -85,6 +85,14 @@ internal sealed class SalidaGpu : IDisposable
 
     public IReadOnlyList<CapaCompositor> Capas => _capas;
 
+    /// <summary>Aviso VISIBLE (barra de estado). Lo pone la ventana de salida.
+    /// Un fallo del compositor que solo deje rastro en un log es un fallo que
+    /// el operador descubre cuando ya no hay imagen y no sabe por que — el
+    /// resto del motor avisa por ErrorOccurred, y esto es su equivalente para
+    /// lo que ocurre por debajo de VideoEngine (una recreacion de swapchain,
+    /// que no cuelga de ningun cue). Se invoca en el hilo principal.</summary>
+    public Action<string>? AvisoEnPantalla { get; set; }
+
     public int Ancho => _ancho;
     public int Alto => _alto;
 
@@ -155,7 +163,14 @@ internal sealed class SalidaGpu : IDisposable
     {
         if (_dispuesta || capa.Nodo is null)
             return;
-        _compositor?.Mutate(_ =>
+        // Salida ROTA (una recreacion de swapchain que fallo): LANZAR, no
+        // no-op silencioso. Asi VideoEngine marca _gpuFailed y el cue sale por
+        // la ruta clasica, en vez de quedarse en un grafo que nadie pinta.
+        if (_compositor is not { } comp)
+            throw new InvalidOperationException(
+                "Esta salida se quedo sin compositor GPU (el swapchain no se " +
+                "pudo recrear).");
+        comp.Mutate(_ =>
         {
             // Plena opacidad y sin rampa: la capa es un slot REUTILIZADO del
             // pool y puede traer la rampa del cue anterior — el porque entero
@@ -283,6 +298,7 @@ internal sealed class SalidaGpu : IDisposable
         // ORDEN OBLIGATORIO: primero parar el hilo de render (Dispose del
         // compositor lo hace y espera a que termine), y solo despues soltar
         // el sink. Al reves, el hilo estaria pintando en una RTV liberada.
+        VaciarGrafo();
         _compositor?.Dispose();
         _compositor = null;
         _sink?.Dispose();
@@ -294,10 +310,47 @@ internal sealed class SalidaGpu : IDisposable
         }
         catch (Exception exc)
         {
-            VideoOutputWindow.LogAviso(
-                $"No se pudo recrear el swapchain del compositor a {w}x{h}: {exc.Message} " +
-                "— esta salida se queda sin compositor.");
+            // Salida ROTA, y hay que decirlo por los tres sitios: al log, a la
+            // barra de estado, y —lo importante— a quien pida capa a partir de
+            // ahora, que se la encontrara lanzando (Insertar) y caera a la
+            // ruta clasica en vez de quedarse en negro para siempre.
+            // El grafo ya se vacio arriba: sin esto quedaban nodos zombis
+            // dentro de _raiz.Children y capas creyendose dentro del grafo.
+            string aviso = $"Compositor GPU de esta salida perdido al recrear el " +
+                $"swapchain a {w}x{h} ({exc.Message}). Los cues nuevos volveran a " +
+                "la ruta clasica.";
+            VideoOutputWindow.LogAviso(aviso);
+            AvisoEnPantalla?.Invoke($"[AVISO] {aviso}");
         }
+    }
+
+    /// <summary>Vacia el grafo SIN carrera con el hilo de render.
+    ///
+    /// Con compositor vivo va dentro de Mutate — es la unica forma legal de
+    /// tocar StackNode.Children. Sin compositor no hay hilo que lo recorra, y
+    /// no hay con quien competir. La distincion importa: OutputCompositor.
+    /// Dispose() hace Join(2 s) SIN mirar el resultado, asi que limpiar
+    /// «despues de disponer» no garantiza que el hilo haya muerto — si el Join
+    /// expira, se estaria vaciando la lista mientras StackNode.Render la
+    /// recorre por indice.</summary>
+    private void VaciarGrafo()
+    {
+        if (_compositor is { } c)
+        {
+            c.Mutate(_ =>
+            {
+                _raiz.Children.Clear();
+                _enElGrafo.Clear();
+            });
+        }
+        else
+        {
+            _raiz.Children.Clear();
+            _enElGrafo.Clear();
+        }
+        // Las capas ya no estan en el grafo: que no se crean dentro.
+        foreach (var capa in _capas)
+            capa.OlvidarQueEstaEnElGrafo();
     }
 
     /// <summary>Aviso a disco. Las capas lo usan cuando el puente no se puede
@@ -311,6 +364,11 @@ internal sealed class SalidaGpu : IDisposable
     {
         if (_dispuesta)
             return;
+        // El grafo se vacia DENTRO de Mutate y con el compositor todavia
+        // vivo: es la unica mutacion que quedaba fuera del lock, y no bastaba
+        // con hacerla «despues del Dispose» porque ese Dispose hace Join(2 s)
+        // sin comprobar el resultado (ver VaciarGrafo).
+        VaciarGrafo();
         _dispuesta = true;
 
         // Mismo orden que en Redimensionar: hilo de render parado antes de
@@ -323,7 +381,5 @@ internal sealed class SalidaGpu : IDisposable
         foreach (var capa in _capas.ToList())
             capa.Dispose();
         _capas.Clear();
-        _enElGrafo.Clear();
-        _raiz.Children.Clear();
     }
 }

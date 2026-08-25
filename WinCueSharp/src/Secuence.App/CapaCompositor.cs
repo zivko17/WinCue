@@ -21,6 +21,16 @@
 // forma no determinista (demostrado en la Tarea 4 — quitando el fence, la
 // prueba por pixel vuelve a rojo). WinCue, que hospeda la MISMA superficie en
 // su propio device D3D9Ex, devuelve false y sigue sin fence, que es lo suyo.
+//
+// LO QUE ESE FENCE CUESTA, ANOTADO A PROPOSITO: el copiador lo invoca el
+// compositor desde TryAcquire, o sea DENTRO de OutputCompositor._graphLock, y
+// CopyPresentFenced BLOQUEA hasta que la GPU termina lo encolado en el device
+// D3D9Ex. Es decir: el hilo de render se para ahi, con el lock del grafo
+// tomado, una vez por capa y por fotograma NUEVO (no por fotograma compuesto:
+// SharedSurfaceSource solo llama al copiador cuando mpv ha entregado algo).
+// Medido y aceptado — sin ese bloqueo se lee negro no determinista, que es
+// peor que esperar. Queda escrito porque si algun dia el peor fotograma del
+// compositor se dispara, este es el primer sitio donde mirar.
 // =============================================================================
 
 using WinCue.Core;
@@ -31,7 +41,12 @@ namespace Secuence.App;
 internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
 {
     private readonly SalidaGpu _salida;
-    private SharedSurfaceSource? _fuente;
+
+    // volatile por el mismo motivo que SharedSurfaceSource._disposed: lo LEE
+    // el HILO DE RENDER DE MPV en InvalidateFrame y lo ESCRIBE el principal en
+    // LiberarFuente. Sin volatile, un lector en otro nucleo podria no ver
+    // nunca la escritura y llamar a MarkFrameReady sobre una fuente liberada.
+    private volatile SharedSurfaceSource? _fuente;
     private OpacityNode? _nodo;
     private Action? _copiador;
     private int _ancho = 1, _alto = 1;
@@ -54,10 +69,6 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     public int? CueId { get; private set; }
     public SharedSurfaceSource? Fuente => _fuente;
     public GraphNode? Nodo => _nodo;
-
-    /// <summary>Falso si el puente no se pudo montar: la capa esta muerta y no
-    /// tiene nada que pintar.</summary>
-    public bool Viva => _fuente is not null;
 
     // ── IVideoLayerSurface ────────────────────────────────────────────
 
@@ -116,8 +127,26 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     public void AssignCue(int cueId)
     {
         CueId = cueId;
-        if (_nodo is null)
-            return;
+
+        // LANZAR, no volver en silencio. Una capa sin nodo es una capa MUERTA
+        // (su puente no se monto, o el anfitrion la solto al apagar el
+        // compositor), y el unico que sabe caer a la ruta clasica es
+        // VideoEngine — que solo se entera por una excepcion. Volviendo sin
+        // mas, mpv arrancaba con vo=libmpv pintando en la nada: negro
+        // permanente, con la barra de estado diciendo «Compositor GPU activo»
+        // y sin que _gpuFailed llegara a marcarse nunca.
+        if (_nodo is null || _fuente is null)
+            throw new InvalidOperationException(
+                $"La capa del compositor (pista {Layer + 1}, slot {Secuencia}) " +
+                "no tiene superficie: el puente no esta montado.");
+
+        // La superficie es AJENA y PERSISTENTE: todavia contiene el ultimo
+        // fotograma del cue ANTERIOR. Olvidarlo aqui evita el destello de esa
+        // imagen vieja mientras el cue nuevo arranca — el porque entero, y por
+        // que se reinicia la bandera y no la opacidad, en
+        // SharedSurfaceSource.ResetFrames().
+        _fuente.ResetFrames();
+
         // Insertar REINICIA la opacidad, y no es un detalle: las capas son
         // slots PERSISTENTES de un pool (auditoria 05), asi que el cue nuevo
         // hereda la opacidad —y la rampa— del que uso el slot antes. Un cue
@@ -125,8 +154,7 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
         // para siempre: sin reiniciar, el SIGUIENTE cue de esa pista nace
         // invisible. Medido en Secuence con el show de prueba: tras el
         // fade_out del 6.1 (pista 3), el 5.1 salia en negro.
-        // Una superficie recien tomada esta a plena opacidad, que es lo que
-        // en WPF significa un control nuevo.
+        // Tambien LANZA si la salida se quedo sin compositor.
         _salida.Insertar(this);
         _enElGrafo = true;
     }
@@ -176,6 +204,12 @@ internal sealed class CapaCompositor : IVideoLayerSurface, IDisposable
     /// porque —y el fallo real que lo motivo— viven en OpacityNode.Reset().
     /// LLAMAR SIEMPRE DENTRO DE Compositor.Mutate.</summary>
     internal void ReiniciarOpacidad() => _nodo?.Reset();
+
+    /// <summary>La salida vacio su grafo por debajo (recreacion de swapchain,
+    /// o cierre): esta capa ya NO esta dentro, aunque ella creyera que si. Sin
+    /// esto, un Quitar posterior no encontraria nada y un AssignCue se saltaria
+    /// la insercion por creerse ya colocada.</summary>
+    internal void OlvidarQueEstaEnElGrafo() => _enElGrafo = false;
 
     private void LiberarFuente()
     {

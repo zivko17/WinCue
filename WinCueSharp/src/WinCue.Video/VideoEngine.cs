@@ -252,6 +252,32 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // las viejas — soltarlas ANTES de cambiar de proveedor (si no, el slot
         // quedaría reservado para siempre por un cue que ya no existe).
         ReleaseFrozenSurfaces();
+
+        // ENCENDER O APAGAR EL COMPOSITOR TIRA LOS POOLS. Sin esto, los slots
+        // seguían vivos apuntando a superficies que el anfitrión ya había
+        // soltado: al volver a encenderlo, AcquireGpuSlot encontraba el slot
+        // viejo, NO volvía a pedir superficie (ese cableado solo ocurre al
+        // crear el pipeline) y hacía AssignCue sobre una superficie muerta.
+        // Resultado medido en Secuence: salida en NEGRO permanente, sin que
+        // _gpuFailed llegara a marcarse y sin caída a la ruta clásica — a un
+        // clic de la ventana de Ajustes.
+        //
+        // Solo cuando el modo CAMBIA de verdad (encendido↔apagado): guardar
+        // Ajustes sin tocar el interruptor vuelve a llamar aquí, y tirar los
+        // pipelines entonces mataría el vídeo que esté al aire por nada.
+        bool modeChanged = (_gpuSurfaces is null) != (provider is null);
+        if (modeChanged)
+        {
+            // Con los players parados ANTES: los motores propios tienen hilos
+            // vivos usando el device D3D de su slot (misma regla que Cleanup).
+            foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
+                         .Concat(_proresPlayers.Keys).ToList())
+            {
+                TerminatePlayer(cueId);
+            }
+            DiscardGpuPools();
+        }
+
         _gpuSurfaces = provider;
         _gpuFailed = false;
     }
@@ -692,27 +718,58 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             TerminatePlayer(cueId);
         }
+        DiscardGpuPools();
+    }
+
+    /// <summary>Desmonta los TRES pools del compositor: pipeline liberado y
+    /// sink desenganchado. Lo usan Cleanup() y el cambio de modo del
+    /// compositor (SetGpuLayerSurfaceProvider).
+    ///
+    /// LLAMAR CON LOS PLAYERS YA PARADOS: los motores propios tienen hilos
+    /// vivos usando el device D3D de su slot.</summary>
+    private void DiscardGpuPools()
+    {
         foreach (var slot in _gpuPool.ToList())
         {
+            DetachSinks(slot.Pipeline, slot.Sinks);
             slot.Pipeline.Dispose();
-            foreach (var s in slot.Sinks)
-                s.ClearSurface();
         }
         _gpuPool.Clear();
         foreach (var slot in _hapPool.ToList())
         {
-            slot.Pipeline.Dispose();
+            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
             slot.Sink.ClearSurface();
+            slot.Pipeline.Dispose();
         }
         _hapPool.Clear();
         foreach (var slot in _proresPool.ToList())
         {
+            slot.Pipeline.FrameRendered -= slot.Sink.InvalidateFrame;
+            slot.Sink.ClearSurface();
             // La sesión (ring de texturas de plano) muere ANTES que su device
             slot.Session?.Dispose();
             slot.Pipeline.Dispose();
-            slot.Sink.ClearSurface();
         }
         _proresPool.Clear();
+    }
+
+    /// <summary>Desengancha los sinks de un pipeline mpv: PRIMERO la
+    /// suscripción a FrameRendered y después ClearSurface.
+    ///
+    /// El orden importa y la suscripción también: un pipeline vivo con
+    /// `FrameRendered += sink.InvalidateFrame` MANTIENE VIVO al sink (el
+    /// evento guarda la referencia al objetivo del delegado). Sin este `-=`,
+    /// cada superficie descartada seguía colgando del pipeline — la misma
+    /// forma de fuga que la auditoría 05, y aquí las fugas ya salieron
+    /// caras una vez.</summary>
+    private static void DetachSinks(MpvGpuRenderer pipeline,
+        IReadOnlyList<IVideoLayerSurface> sinks)
+    {
+        foreach (var s in sinks)
+        {
+            pipeline.FrameRendered -= s.InvalidateFrame;
+            s.ClearSurface();
+        }
     }
 
     public void Dispose()
@@ -1521,24 +1578,43 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         {
             var pipeline = new MpvGpuRenderer(surfW, surfH, views);
             var sinks = new List<IVideoLayerSurface>();
-            for (int i = 0; i < pipeline.Views.Count; i++)
+            try
             {
-                var v = pipeline.Views[i];
-                int sinkScreen = views is not null ? v.Screen : Math.Max(0, screen);
-                var sink = _gpuSurfaces!(sinkScreen, layer, _gpuSlotSeq++);
-                sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
-                sink.SetSharedHandle(pipeline.ViewSharedHandle(i));
-                int viewIndex = i;
-                // FENCEADO solo para quien abra el handle en otro device
-                // (Secuence, D3D11): sin la barrera entre las dos colas lee
-                // negro de forma no determinista. WinCue hospeda la superficie
-                // en su propio device D3D9Ex y sigue con CopyPresent a secas,
-                // sin pagar un bloqueo por fotograma y por capa.
-                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                    ? () => pipeline.CopyPresentFenced(viewIndex)
-                    : () => pipeline.CopyPresent(viewIndex));
-                pipeline.FrameRendered += sink.InvalidateFrame;
-                sinks.Add(sink);
+                for (int i = 0; i < pipeline.Views.Count; i++)
+                {
+                    var v = pipeline.Views[i];
+                    int sinkScreen = views is not null ? v.Screen : Math.Max(0, screen);
+                    var sink = _gpuSurfaces!(sinkScreen, layer, _gpuSlotSeq++);
+                    sink.SetSurface(pipeline.ViewSurface(i), v.W, v.H);
+                    sink.SetSharedHandle(pipeline.ViewSharedHandle(i));
+                    int viewIndex = i;
+                    // FENCEADO solo para quien abra el handle en otro device
+                    // (Secuence, D3D11): sin la barrera entre las dos colas lee
+                    // negro de forma no determinista. WinCue hospeda la
+                    // superficie en su propio device D3D9Ex y sigue con
+                    // CopyPresent a secas, sin pagar un bloqueo por fotograma
+                    // y por capa.
+                    sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                        ? () => pipeline.CopyPresentFenced(viewIndex)
+                        : () => pipeline.CopyPresent(viewIndex));
+                    pipeline.FrameRendered += sink.InvalidateFrame;
+                    sinks.Add(sink);
+                }
+            }
+            catch (Exception)
+            {
+                // El proveedor de superficies puede LANZAR (Secuence lo hace
+                // cuando el puente D3D9Ex→D3D11 no se puede montar: es la
+                // única forma de que este método falle y el llamante caiga a
+                // la ruta clásica). Si se escapa sin pasar por aquí, este
+                // pipeline —device D3D9Ex, FBO, superficies compartidas,
+                // interop GL— no lo libera NADIE: la fuga de la auditoría 05
+                // por el borde de error. En la ruta mpv se pagaría una vez
+                // por sesión (_gpuFailed engancha), pero en HAP y ProRes no
+                // hay latch y sería una fuga POR CUE.
+                DetachSinks(pipeline, sinks);
+                pipeline.Dispose();
+                throw;
             }
             slot = new GpuSlot
             {
@@ -1588,9 +1664,10 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         if (!ok)
         {
             _gpuPool.Remove(slot);
+            // Desenganchar ANTES de liberar: mientras el pipeline conserve la
+            // suscripción a FrameRendered, mantiene vivos a sus sinks.
+            DetachSinks(slot.Pipeline, slot.Sinks);
             slot.Pipeline.Dispose();
-            foreach (var s in slot.Sinks)
-                s.ClearSurface();
         }
     }
 
@@ -1715,14 +1792,27 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 #pragma warning disable CA2000
             var pipeline = new HapGpuPipeline(surfW, surfH);
 #pragma warning restore CA2000
-            var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
-            sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
-            sink.SetSharedHandle(pipeline.PresentSharedHandle);
-            // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
-            sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                ? pipeline.CopyPresentFenced
-                : pipeline.CopyPresent);
-            pipeline.FrameRendered += sink.InvalidateFrame;
+            IVideoLayerSurface sink;
+            try
+            {
+                sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
+                sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+                sink.SetSharedHandle(pipeline.PresentSharedHandle);
+                // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
+                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                    ? pipeline.CopyPresentFenced
+                    : pipeline.CopyPresent);
+                pipeline.FrameRendered += sink.InvalidateFrame;
+            }
+            catch (Exception)
+            {
+                // Sin esto, un proveedor que lance (Secuence, cuando el
+                // puente no se puede montar) fugaría el pipeline ENTERO —
+                // y aquí, a diferencia de la ruta mpv, no hay _gpuFailed que
+                // enganche: sería una fuga POR CUE. Ver AcquireGpuSlot.
+                pipeline.Dispose();
+                throw;
+            }
             slot = new HapSlot
             {
                 Pipeline = pipeline, Sink = sink,
@@ -1928,14 +2018,25 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
 #pragma warning disable CA2000
             var pipeline = new ProResGpuPipeline(surfW, surfH);
 #pragma warning restore CA2000
-            var sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
-            sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
-            sink.SetSharedHandle(pipeline.PresentSharedHandle);
-            // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
-            sink.SetFrameCopier(sink.NeedsCrossDeviceFence
-                ? pipeline.CopyPresentFenced
-                : pipeline.CopyPresent);
-            pipeline.FrameRendered += sink.InvalidateFrame;
+            IVideoLayerSurface sink;
+            try
+            {
+                sink = _gpuSurfaces!(Math.Max(0, screen), layer, _gpuSlotSeq++);
+                sink.SetSurface(pipeline.PresentSurfacePointer, pipeline.Width, pipeline.Height);
+                sink.SetSharedHandle(pipeline.PresentSharedHandle);
+                // Fenceado solo entre devices distintos — ver AcquireGpuSlot.
+                sink.SetFrameCopier(sink.NeedsCrossDeviceFence
+                    ? pipeline.CopyPresentFenced
+                    : pipeline.CopyPresent);
+                pipeline.FrameRendered += sink.InvalidateFrame;
+            }
+            catch (Exception)
+            {
+                // Mismo motivo que en HAP: sin latch, un proveedor que lance
+                // fugaría un pipeline ProRes por cada cue.
+                pipeline.Dispose();
+                throw;
+            }
             slot = new ProResSlot
             {
                 Pipeline = pipeline, Sink = sink,

@@ -108,6 +108,34 @@ public sealed class SharedSurfaceSource : IVideoSource
         Interlocked.Exchange(ref _frameIsNew, 1);
     }
 
+    /// <summary>Olvida lo que hay en la superficie: hasta que el productor
+    /// avise de un fotograma NUEVO, esta fuente no tiene nada que enseñar.
+    ///
+    /// POR QUE HACE FALTA: la superficie es AJENA y PERSISTENTE — un slot de
+    /// un pool que se reparte entre cues sucesivos (auditoria 05). Cuando un
+    /// cue nuevo toma el slot, la superficie sigue conteniendo el ULTIMO
+    /// FOTOGRAMA DEL CUE ANTERIOR, y _hasFrame nunca baja por si solo: el
+    /// compositor —que pinta en su propio hilo, sin esperar a que el hilo de
+    /// interfaz ceda— puede presentar esa imagen vieja a plena opacidad en el
+    /// hueco entre tomar la capa y recibir la orden de opacidad del cue nuevo.
+    /// Un destello del cue anterior, corto pero visible en sala. Con WPF no
+    /// pasaba porque el DWM no compone hasta que el hilo de UI suelta.
+    ///
+    /// Se reinicia la BANDERA, no la opacidad: dejar la capa a opacidad 0 a la
+    /// espera de que alguien la suba haria el destello imposible, si — pero un
+    /// camino que asignara sin fijar opacidad despues dejaria el video
+    /// invisible PARA SIEMPRE, que es mucho peor que un destello.
+    ///
+    /// HILOS: lo llama el hilo principal al reasignar la capa, mientras el de
+    /// mpv puede estar en MarkFrameReady. La carrera es benigna en los dos
+    /// sentidos: o se pierde un aviso (un fotograma mas de espera) o llega
+    /// justo despues (se enseña ya el del cue nuevo, que es lo correcto).</summary>
+    public void ResetFrames()
+    {
+        _hasFrame = false;
+        Interlocked.Exchange(ref _frameIsNew, 0);
+    }
+
     public bool TryAcquire(double mediaTime, out FrameLease lease)
     {
         if (_disposed || !_hasFrame)

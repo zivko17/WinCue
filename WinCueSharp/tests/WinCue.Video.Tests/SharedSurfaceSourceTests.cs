@@ -106,6 +106,57 @@ public class SharedSurfaceSourceTests
     }
 
     [Fact]
+    public void CapaReasignada_NoEnsenaElUltimoFotogramaDelCueAnterior()
+    {
+        // La superficie es AJENA y PERSISTENTE (un slot del pool que se
+        // reparte entre cues sucesivos): cuando un cue nuevo la toma, todavia
+        // contiene el ULTIMO FOTOGRAMA DEL ANTERIOR, y _hasFrame no baja solo.
+        // Como el compositor pinta en su propio hilo —sin esperar a que el de
+        // interfaz ceda, que es lo que tapaba esto en WPF—, entre tomar la
+        // capa y recibir la opacidad del cue nuevo puede presentar esa imagen
+        // vieja a plena opacidad: un destello del cue anterior, visible en
+        // sala. ResetFrames() es lo que tiene que llamar quien reasigna.
+        //
+        // Si ResetFrames() dejara de bajar la bandera, la segunda afirmacion
+        // (TryAcquire devuelve false) se pondria roja.
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+            return;
+
+        nint d3d9 = 0;
+        try { d3d9 = D3D9Minimal.CreateDevice(0); }
+        catch (Exception) { return; }
+
+        try
+        {
+            var (surface, shared) = D3D9Minimal.CreateSharedRenderTarget(d3d9, 32, 32);
+            try
+            {
+                using var source = new SharedSurfaceSource(gpu, shared, 32, 32);
+
+                // El cue ANTERIOR dejo su fotograma en la superficie
+                source.MarkFrameReady();
+                Assert.True(source.HasFrames);
+                Assert.True(source.TryAcquire(0.0, out FrameLease viejo));
+                viejo.Dispose();
+
+                // El slot lo toma un cue NUEVO: lo de ahi dentro ya no vale
+                source.ResetFrames();
+                Assert.False(source.HasFrames);
+                Assert.False(source.TryAcquire(0.0, out FrameLease durante));
+                durante.Dispose();
+
+                // ...hasta que mpv entrega el primero del cue nuevo
+                source.MarkFrameReady();
+                Assert.True(source.TryAcquire(0.0, out FrameLease nuevo));
+                nuevo.Dispose();
+            }
+            finally { D3D9Minimal.Release(surface); }
+        }
+        finally { D3D9Minimal.Release(d3d9); }
+    }
+
+    [Fact]
     public void ElCopiador_LoLlamaElCONSUMIDOR_NoElProductor()
     {
         using var gpu = TryCreateGpu();

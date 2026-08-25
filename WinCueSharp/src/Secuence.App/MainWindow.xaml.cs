@@ -2125,6 +2125,10 @@ public sealed partial class MainWindow : Window, IShowView
         if (_videoOutputs[output] is { } existente)
             return existente;
         var w = new VideoOutputWindow { OutputNumber = output + 1 };
+        // Un fallo del compositor de esa salida (un swapchain que no se puede
+        // recrear) tiene que verse en la barra de estado, como cualquier otro
+        // aviso del motor — no solo en logsideo-output.log.
+        w.AvisoEnPantalla = FlashStatus;
         _videoOutputs[output] = w;
         return w;
     }
