@@ -330,7 +330,22 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
     /// que él mismo hace en EndCue, que saca el cue de <c>_running</c> ANTES de
     /// llamar al motor, y por eso una parada del operador no encadena—, no una
     /// señal más del motor. Eso ya no cabe aquí dentro: el motor no conoce
-    /// <c>_running</c> ni debe conocerlo.</summary>
+    /// <c>_running</c> ni debe conocerlo.
+    ///
+    /// ══ EL FUNDIDO EN MARCHA TAMPOCO SE DEJA VIVO ══
+    ///
+    /// Que el ESTADO no se toque no significa que todo lo demás pueda seguir
+    /// corriendo. Un <c>FadeVolume(..., stopAfter: true)</c> en curso es un
+    /// <see cref="System.Threading.Timer"/> que, al llegar a su fin, llama él
+    /// solo a <see cref="Stop"/> — y Stop sí publica <c>Stopped</c>. Si ese
+    /// fundido sobrevive a este método, la puerta de atrás que se acaba de
+    /// describir arriba sigue abierta: el compositor se apaga limpio, pero
+    /// unos segundos después el propio fundido dispara el AUTO_FOLLOW por su
+    /// cuenta. Por eso este método cancela el fundido de cada cue (mismo
+    /// <c>CancelFade</c> que usan <see cref="Stop"/> y <see cref="Cleanup"/>,
+    /// que tampoco lo dejan vivo) justo antes de terminar su player: cancelar
+    /// no publica nada, así que el estado sigue intacto tal y como se explica
+    /// arriba.</summary>
     public void DiscardCompositorPipelines()
     {
         // Los players PRIMERO: los motores propios tienen hilos vivos usando
@@ -340,9 +355,17 @@ public sealed class VideoEngine : IVideoEngine, IDisposable
         // TerminatePlayer y NO Stop(): Stop publica el estado, y publicar el
         // estado encadena el AUTO_FOLLOW del cue. Ver la cabecera — esto se
         // probó, se midió la consecuencia y se revirtió a propósito.
+        //
+        // CancelFade ANTES de TerminatePlayer, mismo orden que Stop(): un
+        // FadeVolume(..., stopAfter: true) en marcha llama a Stop(cueId) al
+        // llegar a su fin, y Stop SÍ publica Stopped — con eso bastaría para
+        // encadenar el AUTO_FOLLOW aunque el player ya no exista. No es un
+        // efecto secundario nuevo: es la misma fuga de estado que el resto de
+        // este método existe para evitar, solo que con retardo.
         foreach (int cueId in _players.Keys.Concat(_hapPlayers.Keys)
                      .Concat(_proresPlayers.Keys).ToList())
         {
+            CancelFade(cueId);
             TerminatePlayer(cueId);
         }
         DiscardGpuPools();
