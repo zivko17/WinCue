@@ -747,6 +747,15 @@ obligatoria:
   `Theme.GeometryBgBrush`, un `Rectangle` para el lienzo y cuatro `Border`
   con el color de `CanvasEditorLayout.OutputColors[i]`, rótulo `S1..S4` y un
   asa de 10×10 en la esquina inferior derecha.
+
+  **`Theme.GeometryBgBrush` y `Theme.GeometryGridBrush` NO existen todavía en
+  `Secuence.App/Theme.cs`** — comprobado. Los lienzos Win2D de Secuence
+  (`GeometryCanvas.cs`) usan `Palette.GeometryBg` / `Palette.GeometryGrid`
+  directamente con un `ToColor(uint)` local, pero este editor es XAML plano y
+  necesita `Brush`. **Añádelos a `Theme.cs` con el patrón que ese fichero ya
+  usa** (`Hex(Palette.GeometryBg)` + `Solid(...)`), respetando la
+  correspondencia por NOMBRE que exige el guardián de paleta: el campo de
+  `Theme` se llama igual que la constante de `Palette` a la que apunta.
 - Debajo: por salida, casilla de habilitada (salvo S1) y cuatro `NumberBox`
   (x, y, w, h).
 
