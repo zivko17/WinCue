@@ -219,6 +219,15 @@ public sealed class OutputCompositor : IDisposable
                 {
                     Renderer = _renderer,
                     Pool = _pool,
+                    // SOLO LECTURA, y es lo que hace que un monitor no le
+                    // cueste nada a la sala: MirrorRoot puede traer nodos de
+                    // OTRA salida (el PGM en modo LIENZO recompone el lienzo
+                    // entero), y muestrearlos "de verdad" pondría a ESTE hilo
+                    // —el que presenta en sala— a consumir la bandera de
+                    // fotograma nuevo de la otra salida y a esperar su fence
+                    // de GPU, con el lock del grafo tomado. Ver
+                    // IVideoSource.TryAcquireReadOnly.
+                    SoloLectura = true,
                 };
                 // Dimensiones del espejo, no las del principal: puede ser un
                 // PGM mas pequeno que la salida de sala.

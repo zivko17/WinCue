@@ -581,4 +581,112 @@ public class CompositorTests : IClassFixture<HapMediaFixture>
             DestroyWindow(hwnd);
         }
     }
+
+    // ------------------------------------------------------------------
+    // El pase de ESPEJO muestrea en SOLO LECTURA
+    // ------------------------------------------------------------------
+    // Por que importa, en una linea: si el espejo muestreara "de verdad", el
+    // hilo que presenta EN SALA acabaria consumiendo la bandera de fotograma
+    // nuevo de OTRA salida y esperando su fence de GPU, con el lock del grafo
+    // tomado, solo porque hay un monitor mirando (modo LIENZO del PGM de
+    // Secuence). Ver IVideoSource.TryAcquireReadOnly.
+
+    /// <summary>Fuente de mentira que solo CUENTA por que camino la muestrean.
+    /// Devuelve false siempre a proposito: asi la prueba no necesita GPU (sin
+    /// fotograma, SourceNode vuelve antes de tocar el renderer).</summary>
+    private sealed class FuenteContadora : IVideoSource
+    {
+        public int Normales { get; private set; }
+        public int SoloLectura { get; private set; }
+
+        public int Width => 16;
+        public int Height => 16;
+        public bool HasFrames => false;
+        public VideoSourceStats Stats { get; } = new();
+
+        public bool TryAcquire(double mediaTime, out FrameLease lease)
+        {
+            Normales++;
+            lease = default;
+            return false;
+        }
+
+        public bool TryAcquireReadOnly(double mediaTime, out FrameLease lease)
+        {
+            SoloLectura++;
+            lease = default;
+            return false;
+        }
+
+        public void Dispose() { }
+    }
+
+    [Fact]
+    public void SourceNode_ConSoloLectura_UsaElMuestreoSinEfectos()
+    {
+        // SIN GPU: el grafo se evalua a mano, que es donde vive la decision.
+        using var fuente = new FuenteContadora();
+        var nodo = new SourceNode(fuente);
+        var destino = new LayerTarget(null!, new DestRect(0, 0, 16, 16), UvRect.Full, 1f);
+
+        nodo.Render(new GraphFrame(0.0, new CompositorFrameStats()), destino);
+        Assert.Equal(1, fuente.Normales);
+        Assert.Equal(0, fuente.SoloLectura);
+
+        nodo.Render(
+            new GraphFrame(0.0, new CompositorFrameStats()) { SoloLectura = true }, destino);
+        Assert.Equal(1, fuente.Normales);
+        Assert.Equal(1, fuente.SoloLectura);
+    }
+
+    [Fact]
+    public void ElEspejoMuestreaEnSoloLectura_YElPrincipalNo()
+    {
+        // La misma decision, pero desde donde de verdad se toma: un fotograma
+        // completo del compositor con espejo puesto tiene que dar EXACTAMENTE
+        // un muestreo normal (el pase principal, que es el dueno) y EXACTAMENTE
+        // uno de solo lectura (el espejo). Si alguien quitara el SoloLectura
+        // del pase de espejo, aqui saldrian dos normales y cero de lectura.
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        using var principal = new TextureSink(gpu, W, H);
+        using var espejo = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, principal) { Mirror = espejo };
+
+        using var fuente = new FuenteContadora();
+        comp.Root = new SourceNode(fuente);
+        comp.RenderOnce(0.0);
+
+        _out.WriteLine($"GPU utilizable: normales={fuente.Normales}, " +
+            $"solo lectura={fuente.SoloLectura}");
+
+        Assert.Equal(1, fuente.Normales);
+        Assert.Equal(1, fuente.SoloLectura);
+    }
+
+    [Fact]
+    public void SinEspejo_NoHayNingunMuestreoDeSoloLectura()
+    {
+        using var gpu = TryCreateGpu();
+        if (gpu is null)
+        {
+            _out.WriteLine("SALTADA: sin GPU utilizable en esta maquina.");
+            return;
+        }
+
+        using var principal = new TextureSink(gpu, W, H);
+        using var comp = new OutputCompositor(gpu, principal);
+
+        using var fuente = new FuenteContadora();
+        comp.Root = new SourceNode(fuente);
+        comp.RenderOnce(0.0);
+
+        Assert.Equal(1, fuente.Normales);
+        Assert.Equal(0, fuente.SoloLectura);
+    }
 }

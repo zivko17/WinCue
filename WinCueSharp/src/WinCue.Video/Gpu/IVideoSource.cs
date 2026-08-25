@@ -44,5 +44,25 @@ public interface IVideoSource : IDisposable
     /// ha llegado a ese instante. El préstamo se libera con Dispose.</summary>
     bool TryAcquire(double mediaTime, out FrameLease lease);
 
+    /// <summary>Igual que <see cref="TryAcquire"/> pero SIN EFECTOS: quien
+    /// llama solo quiere MIRAR lo último que haya, y no debe consumir banderas
+    /// de "fotograma nuevo", ni disparar copias, ni mover contadores.
+    ///
+    /// POR QUÉ EXISTE: el pase de ESPEJO del compositor (el monitor PGM) puede
+    /// muestrear nodos que pertenecen a OTRA salida — el modo LIENZO recompone
+    /// el lienzo entero a partir de los grafos de todas—. Con el muestreo
+    /// normal, el hilo que va A LA SALA de una salida acabaría invocando el
+    /// copiador de OTRA (y, con el puente D3D9Ex, bloqueándose en un fence de
+    /// un device ajeno con el lock del grafo tomado) solo porque hay un
+    /// monitor mirando. La regla es que el monitor NO le cuesta nada a la
+    /// sala: el espejo mira lo último que el dueño copió y, como mucho, va un
+    /// fotograma por detrás — invisible en un monitor.
+    ///
+    /// El comportamiento POR DEFECTO es delegar en <see cref="TryAcquire"/>:
+    /// una fuente sin efectos secundarios (anillo con PTS) ya cumple el
+    /// contrato sin escribir nada. Solo lo redefine quien SÍ los tiene.</summary>
+    bool TryAcquireReadOnly(double mediaTime, out FrameLease lease) =>
+        TryAcquire(mediaTime, out lease);
+
     VideoSourceStats Stats { get; }
 }

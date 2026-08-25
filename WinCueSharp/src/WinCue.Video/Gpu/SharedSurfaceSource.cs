@@ -173,6 +173,38 @@ public sealed class SharedSurfaceSource : IVideoSource
         return true;
     }
 
+    /// <summary>Muestreo SIN EFECTOS, para el pase de espejo del compositor
+    /// (ver IVideoSource.TryAcquireReadOnly).
+    ///
+    /// Aquí la redefinición es OBLIGATORIA, y es el único sitio de todo el
+    /// motor donde lo es: esta fuente tiene DOS efectos secundarios en el
+    /// camino de muestreo —consumir <c>_frameIsNew</c> con un Interlocked e
+    /// invocar <c>FrameCopier</c>— y los dos le pertenecen al COMPOSITOR DUEÑO
+    /// de la salida. Con el modo LIENZO del PGM, el hilo de la salida
+    /// anfitriona muestrea nodos de OTRAS salidas; si consumiera la bandera,
+    /// le robaría la copia a su dueño (que repetiría fotograma) y —peor— se
+    /// bloquearía él mismo dentro de CopyPresentFenced, esperando a un fence
+    /// de GPU de OTRO device con el lock de su grafo tomado. O sea: el monitor
+    /// de control metiéndole latencia al hilo que va a la sala. Justo lo que
+    /// la cabecera de CapaCompositor.cs señala como «el primer sitio donde
+    /// mirar si el peor fotograma se dispara».
+    ///
+    /// Los CONTADORES tampoco se tocan: son el diagnóstico del dueño, y un
+    /// monitor mirando no debe inflarle ni Repeats ni Starvations.</summary>
+    public bool TryAcquireReadOnly(double mediaTime, out FrameLease lease)
+    {
+        if (_disposed || !_hasFrame)
+        {
+            lease = default;
+            return false;
+        }
+        // Lo ULTIMO que el dueño haya copiado. Si acaba de llegar un fotograma
+        // que el dueño todavía no ha copiado, aquí se ve el anterior: un
+        // fotograma de retraso, en un monitor.
+        lease = new FrameLease(_srv, _texture, mediaTime);
+        return true;
+    }
+
     public void Dispose()
     {
         if (_disposed)

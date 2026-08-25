@@ -38,6 +38,13 @@ public readonly record struct GraphFrame(double MediaTime, CompositorFrameStats 
 {
     internal LayerRenderer Renderer { get; init; }
     internal RtPool Pool { get; init; }
+
+    /// <summary>Este pase solo MIRA: no consume banderas de "fotograma nuevo"
+    /// ni dispara copias en las fuentes. Lo pone el pase de ESPEJO del
+    /// compositor, que puede recorrer nodos de OTRA salida — ver
+    /// IVideoSource.TryAcquireReadOnly para el porqué entero. Por defecto
+    /// false: el pase principal SÍ es el dueño y sí hace ese trabajo.</summary>
+    public bool SoloLectura { get; init; }
 }
 
 /// <summary>Contadores de UN fotograma del compositor. Se reinician por
@@ -87,7 +94,14 @@ public sealed class SourceNode : GraphNode
 
     public override void Render(in GraphFrame frame, in LayerTarget target)
     {
-        if (!_source.TryAcquire(frame.MediaTime + TimeOffset, out FrameLease lease))
+        // En un pase de SOLO LECTURA (el espejo) se mira lo último que haya
+        // sin tocar nada de la fuente: ni banderas ni copias. Ver
+        // IVideoSource.TryAcquireReadOnly.
+        double t = frame.MediaTime + TimeOffset;
+        bool hay = frame.SoloLectura
+            ? _source.TryAcquireReadOnly(t, out FrameLease lease)
+            : _source.TryAcquire(t, out lease);
+        if (!hay)
         {
             frame.Stats.Starved++;
             return;
