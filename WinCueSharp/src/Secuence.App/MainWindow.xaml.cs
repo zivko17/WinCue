@@ -699,8 +699,11 @@ public sealed partial class MainWindow : Window, IShowView
     /// entera de pistas, opacidades y cruces incluidos) y no decodifica nada.
     /// Sin compositor —ruta clásica HWND, y también HAP/ProRes por sus
     /// pipelines propios— no hay nada que espejar y el monitor reproduce el
-    /// archivo por su cuenta, mudo, exactamente como hace WinCue en ese
-    /// caso.</summary>
+    /// archivo por su cuenta, mudo, exactamente como hace WinCue en ese caso.
+    ///
+    /// Y un tercer caso, que es el que hace que el monitor no mienta: con el
+    /// cue al aire EN el compositor pero en otra salida distinta de la que el
+    /// PGM mira, el hueco dice «sin señal» en vez de caer a decodificar.</summary>
     private void UpdateProgramMonitor()
     {
         var info = _controller?.GetProgramVideo();
@@ -709,15 +712,60 @@ public sealed partial class MainWindow : Window, IShowView
             _cueEnPantalla = -1;
             if (_pgm.CurrentPath.Length > 0 || _pgm.Espejando)
                 _pgm.Clear("NEGRO");
+            _avisoPgm = "";
             return;
         }
         _cueEnPantalla = info.Value.CueId;
         _pgm.RefrescarEspejo(System.IO.Path.GetFileName(info.Value.FilePath));
         if (_pgm.Espejando)
             return;
+
+        // SIN ESPEJO. Dos motivos DISTINTOS, y confundirlos es hacer mentir al
+        // monitor:
+        //
+        //   · El cue al aire VA por el compositor, pero no por la fuente que el
+        //     PGM está mirando. Por esa salida no está saliendo nada, y hay que
+        //     DECIRLO. Caer aquí a decodificar el vídeo de programa sería
+        //     enseñar en el hueco de la «Salida 3» algo que la Salida 3 no está
+        //     dando — el mismo engaño que el blackout, con otra cara.
+        //
+        //   · El cue NO va por el compositor (compositor apagado, ruta clásica
+        //     HWND, HAP o ProRes por sus pipelines propios). Entonces no hay
+        //     nada que espejar de ninguna salida, y el monitor decodifica su
+        //     copia muda exactamente como hace WinCue en ese caso. Esa rama es
+        //     la de abajo y NO se toca.
+        if (CueConCapaDeCompositor(_cueEnPantalla))
+        {
+            string aviso = TextoSinSenal();
+            // Mismo criterio que la rama de NEGRO: no se re-limpia en cada tic
+            // si el aviso ya está puesto — Clear para el mpv del monitor, y
+            // pararlo cada medio segundo es una llamada al core para nada.
+            if (_pgm.CurrentPath.Length > 0 || _pgm.Espejando || _avisoPgm != aviso)
+            {
+                _pgm.Clear(aviso);
+                _avisoPgm = aviso;
+            }
+            return;
+        }
+
+        _avisoPgm = "";
         // Mismo archivo → solo re-sincroniza; archivo nuevo → carga y arranca ahí.
         _pgm.ShowVideo(info.Value.FilePath, info.Value.Elapsed, loop: false);
     }
+
+    /// <summary>Aviso que hay puesto ahora mismo en el hueco del PGM ("" = no
+    /// hay). Evita re-limpiar el monitor en cada tic mientras el aviso no
+    /// cambia.</summary>
+    private string _avisoPgm = "";
+
+    /// <summary>Lo que dice el hueco del PGM cuando por la fuente elegida no
+    /// está saliendo nada. Sin adornos: qué se está mirando y que no hay
+    /// señal.</summary>
+    private string TextoSinSenal() =>
+        _pgm.FuenteEspejo < 0
+            ? Loc.T("LIENZO — sin señal", "CANVAS — no signal")
+            : Loc.T($"Salida {_pgm.FuenteEspejo + 1} — sin señal",
+                    $"Output {_pgm.FuenteEspejo + 1} — no signal");
 
     /// <summary>Cue que el PGM está mirando ahora mismo. Lo apunta
     /// UpdateProgramMonitor para que PlanEspejoPgm —que corre justo después,
