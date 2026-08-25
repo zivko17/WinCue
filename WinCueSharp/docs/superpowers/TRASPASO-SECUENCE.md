@@ -453,9 +453,35 @@ mismos informes y en la «PREGUNTA ABIERTA» de arriba):
 
 ## Lo que falta
 
-**Inmediato: nada.** La lista de paridad con WinCue quedó CERRADA el
-2026-08-24 — inspector, tabla, timeline, barra de estado y menú contextual.
-Todo lo que había aquí está en la lista de arriba, verificado en pantalla.
+> **AVISO DEL 2026-08-25 — esta sección se quedó corta, y mucho.** Andrés probó
+> Secuence entera por primera vez y tres auditorías paralelas devolvieron
+> **114 hallazgos en Secuence y 14 que tocan WinCue**. Lo de abajo («inmediato:
+> nada») era cierto para la paridad *control a control* del inspector, y falso
+> para el producto mirado como un todo: faltaba, por ejemplo, **cualquier forma
+> de mover el playhead**. El trabajo está decompuesto en cinco tandas, con un
+> expediente por tanda en `.superpowers/sdd/2026-08-25-secuence-canvas-compositor/`
+> (no versionado; si desapareciera, la auditoría se rehace).
+>
+> **Y dos defectos activos que conviene conocer antes de tocar nada:**
+>
+> - **La imagen sale DEFORMADA con el compositor encendido y el canvas apagado.**
+>   Falta la sobrecarga `SurfaceDimensions(int screen)` en `Secuence.App`, así que
+>   cae en el valor por defecto de `IShowView`, que devuelve las dimensiones de la
+>   **salida 1**. Con el compositor ese número deja de ser coordenadas y pasa a ser
+>   el tamaño real del búfer de render, que se estira sin conservar aspecto:
+>   ~11 % en un 1280×800. En modo canvas queda tapado; en clásico es indiferente.
+>   **Diagnosticado leyendo el código, no medido en pantalla** — la sesión estaba
+>   desconectada. Confírmalo antes de darlo por bueno.
+> - **Pulsar «Guardar» en Ajustes corta en seco todo el audio al aire**, sin
+>   fundido, haya cambiado el dispositivo o no (`ApplyAudioDevice` →
+>   `AudioEngine.SetDevice` → `StopAll()`). **Afecta también a WinCue**, que está
+>   vendiéndose, así que tocarlo necesita permiso explícito. Es el gemelo de audio
+>   del fallo de vídeo que sí se arregló ese día (commit `a27d301a`).
+
+**Lo que decía esta sección, y que sigue siendo cierto en su alcance:** la lista
+de paridad con WinCue quedó CERRADA el 2026-08-24 — inspector, tabla, timeline,
+barra de estado y menú contextual. Todo lo que había aquí está en la lista de
+arriba, verificado en pantalla.
 
 Lo que sigue NO es paridad, sino producto nuevo: es lo de «anotado y sin
 hacer». Antes de abrir cualquiera de esos frentes conviene que Andrés repase
