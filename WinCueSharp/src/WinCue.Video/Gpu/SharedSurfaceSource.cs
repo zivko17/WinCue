@@ -49,7 +49,22 @@ public sealed class SharedSurfaceSource : IVideoSource
     private readonly ID3D11Texture2D _texture;
     private readonly ID3D11ShaderResourceView _srv;
     private volatile bool _hasFrame;
-    private bool _disposed;
+
+    // 0/1 en vez de bool: MarkFrameReady() lo ESCRIBE (hilo de render de
+    // mpv) y TryAcquire() lo LEE-Y-LIMPIA de forma atomica (Interlocked, ver
+    // abajo) para no perder un aviso concurrente ni copiar dos veces el
+    // mismo fotograma. Distingue "hay fotograma NUEVO" (dispara FrameCopier)
+    // de "hay algo que enseñar" (_hasFrame, una vez visto el primero, nunca
+    // baja): antes ambas preguntas eran la misma bandera, y FrameCopier se
+    // invocaba en CADA fotograma compuesto y por capa aunque mpv no hubiera
+    // producido nada nuevo.
+    private int _frameIsNew;
+
+    // volatile por la misma razon que TextureSink._disposed (OutputSinks.cs):
+    // se lee en TryAcquire (hilo del compositor) y se escribe en Dispose
+    // (puede ser otro hilo). Sin volatile, un lector en otro nucleo podria no
+    // ver NUNCA la escritura y usar un SRV/textura ya liberados.
+    private volatile bool _disposed;
 
     public int Width { get; }
     public int Height { get; }
@@ -84,8 +99,14 @@ public sealed class SharedSurfaceSource : IVideoSource
     }
 
     /// <summary>Hay un fotograma nuevo esperando en la superficie del interop.
-    /// HILO DE RENDER DE MPV: solo la bandera.</summary>
-    public void MarkFrameReady() => _hasFrame = true;
+    /// HILO DE RENDER DE MPV: solo levanta banderas (una asignacion y un
+    /// Interlocked.Exchange sin bloqueo) — nunca invoca FrameCopier ni espera
+    /// nada.</summary>
+    public void MarkFrameReady()
+    {
+        _hasFrame = true;
+        Interlocked.Exchange(ref _frameIsNew, 1);
+    }
 
     public bool TryAcquire(double mediaTime, out FrameLease lease)
     {
@@ -96,9 +117,29 @@ public sealed class SharedSurfaceSource : IVideoSource
             return false;
         }
 
-        // La copia va AQUI, en el hilo que muestrea, justo antes de dibujar.
-        FrameCopier?.Invoke();
-        Stats.Published++;
+        // Dos preguntas DISTINTAS, a proposito:
+        //   ¿hay fotograma NUEVO? -> Interlocked.Exchange consume la bandera
+        //   de un tiron (evita perder un MarkFrameReady concurrente y evita
+        //   copiar el mismo fotograma dos veces). Solo entonces se invoca
+        //   FrameCopier — el StretchRect real, que no es gratis.
+        //   ¿hay algo que ENSEÑAR? -> _hasFrame, ya comprobado arriba: en
+        //   cuanto llego el primer fotograma, siempre hay algo que devolver.
+        //   Si NO se consumiera asi, un video a 30p sobre una salida a 60 Hz
+        //   perderia la mitad de los fotogramas (TryAcquire devolveria false
+        //   en los intermedios) en vez de repetir el ultimo, que es lo que
+        //   hace cualquier otra fuente del motor.
+        bool isNew = Interlocked.Exchange(ref _frameIsNew, 0) != 0;
+        if (isNew)
+        {
+            // La copia va AQUI, en el hilo que muestrea, justo antes de
+            // dibujar — nunca en MarkFrameReady (ver cabecera del fichero).
+            FrameCopier?.Invoke();
+            Stats.Published++;
+        }
+        else
+        {
+            Stats.Repeats++;
+        }
 
         lease = new FrameLease(_srv, _texture, mediaTime);
         return true;

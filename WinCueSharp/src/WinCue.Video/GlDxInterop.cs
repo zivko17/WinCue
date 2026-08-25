@@ -68,7 +68,13 @@ internal static class D3D9Minimal
     private const int VtblQueryGetData = 7;         // IDirect3DQuery9
 
     private const uint D3DQUERYTYPE_EVENT = 8;
-    private const uint D3DISSUE_END = 2;
+    // D3DISSUE_END = (1 << 0) = 1. OJO: NO es 2 (ese es D3DISSUE_BEGIN, y
+    // D3DQUERYTYPE_EVENT solo admite END). Con el valor equivocado,
+    // Issue() devuelve D3DERR_INVALIDCALL sobre una query EVENT — mudo si no
+    // se comprueba el HRESULT — la query nunca queda pendiente, y GetData
+    // devuelve S_OK a la primera vuelta: cero espera real, aunque el bucle
+    // "parezca" sondear.
+    private const uint D3DISSUE_END = 1;
     private const uint D3DGETDATA_FLUSH = 1;
     private const int S_FALSE = 1;
 
@@ -127,53 +133,96 @@ internal static class D3D9Minimal
     internal static int ColorFill(nint device, nint surface, uint color) =>
         Method<ColorFillFn>(device, VtblColorFill)(device, surface, 0, color);
 
-    /// <summary>Fuerza a la GPU a terminar TODO lo pendiente en <paramref
-    /// name="device"/> y espera (acotado) a que sea visible. SOLO lo llama el
-    /// PRODUCTOR — quien acaba de escribir en la superficie compartida — justo
-    /// antes de avisar al consumidor. Nunca el consumidor: eso convertiría un
-    /// muestreo en una espera de GPU ajena.
+    /// <summary>Crea un event query D3D9 sobre <paramref name="device"/> —
+    /// el recurso que reutiliza <see cref="FlushQuery(nint,int)"/> para
+    /// pedirle al driver "avisame cuando la GPU haya vaciado la cola hasta
+    /// aqui". 0 si el driver no la soporta (el llamante decide que hacer).
+    ///
+    /// SEPARADA de FlushQuery a proposito: crear/destruir un objeto COM
+    /// por fotograma y por capa (lo que hara la Task 5) es la misma forma que
+    /// la fuga de VRAM de la auditoria 05. La query se crea UNA vez por
+    /// fuente y se reutiliza; solo el atajo de un solo uso (pruebas, codigo
+    /// de una vez) crea-y-libera con la sobrecarga por device.</summary>
+    internal static nint CreateEventQuery(nint device)
+    {
+        int hr = Method<CreateQueryFn>(device, VtblCreateQuery)(
+            device, D3DQUERYTYPE_EVENT, out nint query);
+        return hr < 0 ? 0 : query;
+    }
+
+    /// <summary>Marca el punto actual de la cola de <paramref name="query"/>
+    /// (Issue END) y espera —ACOTADO, nunca indefinido— a que la GPU la haya
+    /// vaciado hasta ahi. SOLO lo llama el PRODUCTOR — quien acaba de escribir
+    /// en la superficie compartida — justo antes de avisar al consumidor.
+    /// Nunca el consumidor: eso convertiria un muestreo en una espera de GPU
+    /// ajena.
     ///
     /// POR QUE HACE FALTA — el hallazgo caro de esta tarea: una superficie
-    /// D3D9Ex compartida NO trae sincronización implícita entre devices. Un
+    /// D3D9Ex compartida NO trae sincronizacion implicita entre devices. Un
     /// IDirect3DDevice9Ex y un ID3D11Device son colas de comandos DISTINTAS
-    /// sobre la MISMA GPU física; que ColorFill/StretchRect devuelvan S_OK
-    /// solo dice que el comando se ENCOLÓ, no que la GPU ya lo ejecutó. Medido
-    /// en esta máquina (RTX 5070 Ti): sin este flush, leer desde D3D11
-    /// inmediatamente después de escribir por D3D9 falla de forma NO
-    /// determinista incluso con un Thread.Sleep(100) de por medio — así que no
-    /// es "cuestión de darle tiempo", es la ausencia de una barrera real.
-    ///
-    /// CÓMO: un event query D3D9 (D3DQUERYTYPE_EVENT) es la forma estándar de
-    /// pedirle al driver "avísame cuando la GPU haya vaciado la cola hasta
-    /// aquí" — Issue(END) marca el punto, GetData(D3DGETDATA_FLUSH) fuerza el
-    /// flush del command buffer y se sondea hasta que deja de devolver
-    /// S_FALSE (pendiente).
+    /// sobre la MISMA GPU fisica; que ColorFill/StretchRect devuelvan S_OK
+    /// solo dice que el comando se ENCOLO, no que la GPU ya lo ejecuto. Medido
+    /// en esta maquina (RTX 5070 Ti): sin este flush, leer desde D3D11
+    /// inmediatamente despues de escribir por D3D9 falla de forma NO
+    /// determinista incluso con un Thread.Sleep(100) de por medio — asi que
+    /// no es "cuestion de darle tiempo", es la ausencia de una barrera real.
+    /// Y lo contrario tambien es cierto y costo una ronda de revision
+    /// encontrarlo: con D3DISSUE_END mal puesto (2 en vez de 1, el valor de
+    /// D3DISSUE_BEGIN, que EVENT no admite), Issue() fallaba MUDO —el
+    /// HRESULT no se comprobaba—, la query nunca quedaba pendiente y GetData
+    /// devolvia S_OK a la primera vuelta: el bucle "sondeaba" sin esperar
+    /// nada. Por eso ahora SI se comprueba el HRESULT de Issue.
     ///
     /// ESPERA ACOTADA, NO INDEFINIDA: esto puede acabar corriendo en el hilo
     /// que presenta durante un show en directo. Preferimos un fotograma
-    /// repetido (el consumidor no ve bandera nueva y reenseña el anterior) a
-    /// colgar ese hilo si el driver tarda o la query nunca se resuelve. Si no
-    /// se pudo crear la query, o el plazo expira, se vuelve sin más: el
-    /// llamante decide si aun así publica.</summary>
+    /// repetido (el consumidor no ve bandera nueva y reensena el anterior) a
+    /// colgar ese hilo si el driver tarda o la query nunca se resuelve. Si
+    /// Issue falla, si no hay query, o si el plazo expira, se vuelve sin mas:
+    /// el llamante decide si aun asi publica.
+    ///
+    /// SIN ASIGNACIONES POR VUELTA: los delegados de Issue/GetData se
+    /// resuelven UNA vez antes del bucle, no en cada iteracion — esto puede
+    /// sondear varias veces por milisegundo en el hilo de render, y ese hilo
+    /// tiene la misma regla de cero asignaciones por fotograma que
+    /// MpvSource.</summary>
+    internal static void FlushQuery(nint query, int timeoutMs = 100)
+    {
+        if (query == 0)
+            return;
+
+        var issue = Method<QueryIssueFn>(query, VtblQueryIssue);
+        var getData = Method<QueryGetDataFn>(query, VtblQueryGetData);
+
+        int hrIssue = issue(query, D3DISSUE_END);
+        if (hrIssue < 0)
+            return;   // Issue fallo: no hay nada pendiente que esperar
+
+        var deadline = Environment.TickCount64 + timeoutMs;
+        while (Environment.TickCount64 < deadline)
+        {
+            int hrData = getData(query, 0, 0, D3DGETDATA_FLUSH);
+            if (hrData != S_FALSE)
+                return;   // S_OK (termino) o error: en ambos casos, dejar de esperar
+
+            // Ceder el nucleo en vez de martillear GetData: sin esto, el
+            // plazo entero (hasta 100 ms) es un spin al 100% de un nucleo.
+            Thread.Yield();
+        }
+    }
+
+    /// <summary>Conveniencia de un solo uso: crea la query, fencea y la
+    /// libera. Para el caso normal (Task 5, por fotograma y por capa) se debe
+    /// cachear la query con <see cref="CreateEventQuery"/> y llamar a
+    /// <see cref="FlushQuery(nint,int)"/> directamente — ver su comentario.</summary>
     internal static void FlushAndWait(nint device, int timeoutMs = 100)
     {
-        int hrQuery = Method<CreateQueryFn>(device, VtblCreateQuery)(
-            device, D3DQUERYTYPE_EVENT, out nint query);
-        if (hrQuery < 0 || query == 0)
+        nint query = CreateEventQuery(device);
+        if (query == 0)
             return;   // sin query no hay barrera que esperar; el llamante decide
 
         try
         {
-            Method<QueryIssueFn>(query, VtblQueryIssue)(query, D3DISSUE_END);
-
-            var deadline = Environment.TickCount64 + timeoutMs;
-            while (Environment.TickCount64 < deadline)
-            {
-                int hrData = Method<QueryGetDataFn>(query, VtblQueryGetData)(
-                    query, 0, 0, D3DGETDATA_FLUSH);
-                if (hrData != S_FALSE)
-                    return;   // S_OK (terminó) o error: en ambos casos, dejar de esperar
-            }
+            FlushQuery(query, timeoutMs);
         }
         finally
         {

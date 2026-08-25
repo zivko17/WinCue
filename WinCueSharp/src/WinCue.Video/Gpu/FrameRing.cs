@@ -38,11 +38,20 @@ public readonly record struct FrameLease : IDisposable
     private readonly FrameRing? _ring;
     private readonly int _index;
 
+    // Campo de validez EXPLICITO, separado de _ring. Antes IsValid miraba
+    // _ring is not null, lo que declaraba invalido TODO prestamo sin anillo
+    // — incluido el puente D3D9Ex→D3D11 (SharedSurfaceSource), que es un
+    // prestamo perfectamente real, solo que sin slot que devolver. Sin este
+    // campo, cualquier consumidor futuro que confiara en IsValid (las Tasks
+    // 5 y 7 la necesitan) descartaria fotogramas validos del puente.
+    private readonly bool _valid;
+
     internal FrameLease(FrameRing ring, int index, ID3D11ShaderResourceView srv,
         ID3D11Texture2D texture, double pts)
     {
         _ring = ring;
         _index = index;
+        _valid = true;
         View = srv;
         Texture = texture;
         Pts = pts;
@@ -51,11 +60,13 @@ public readonly record struct FrameLease : IDisposable
     /// <summary>Prestamo SIN anillo: un unico recurso que vive fuera (una
     /// superficie compartida de otro device, como el puente D3D9Ex→D3D11).
     /// Dispose es no-op porque no hay slot que devolver — _ring queda null y
-    /// Dispose ya es null-safe.</summary>
+    /// Dispose ya es null-safe. IsValid sigue siendo true: este prestamo SI
+    /// representa un fotograma real, solo que sin anillo detras.</summary>
     internal FrameLease(ID3D11ShaderResourceView srv, ID3D11Texture2D texture, double pts)
     {
         _ring = null;
         _index = -1;
+        _valid = true;
         View = srv;
         Texture = texture;
         Pts = pts;
@@ -72,7 +83,10 @@ public readonly record struct FrameLease : IDisposable
     /// <summary>Marca de tiempo del fotograma, en segundos del medio.</summary>
     public double Pts { get; }
 
-    public bool IsValid => _ring is not null;
+    /// <summary>true si este prestamo representa un fotograma de verdad
+    /// (con anillo o sin él). false solo en el default(FrameLease) que
+    /// devuelven los TryAcquire que fallan.</summary>
+    public bool IsValid => _valid;
 
     public void Dispose() => _ring?.Release(_index);
 }
