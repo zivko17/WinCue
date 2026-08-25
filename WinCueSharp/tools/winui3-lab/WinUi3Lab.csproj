@@ -22,6 +22,35 @@
     <RuntimeIdentifier>win-x64</RuntimeIdentifier>
   </PropertyGroup>
 
+  <!-- ==========================================================================
+       Resolución de AppxMSBuildToolsPath — sin esto, `dotnet build` sobre este
+       proyecto falla con MSB4062 («no se pudo cargar la tarea
+       ExpandPriContent») y el laboratorio queda inservible: $(MSBuildExtensionsPath)
+       apunta al SDK de .NET cuando se compila con `dotnet`, y ahí las tareas
+       Appx de MrtCore.PriGen.targets no existen.
+
+       Es EL MISMO bloque que Secuence.App.csproj —la trampa está descrita en
+       INFORME.md desde el hito 0—, y estaba puesto allí y no aquí: el
+       laboratorio se quedó dependiendo de que quien lo usara supiera pasar
+       -p:AppxMSBuildToolsPath=... a mano. Se descubrió al volver a usarlo para
+       el spike del teclado de la tanda de urgencias, veinte minutos peleándose
+       con el build antes de poder medir nada. Que la carpeta esté marcada como
+       DESECHABLE no significa que deba estar rota: mientras exista, tiene que
+       arrancar a la primera.
+
+       Se evalúa antes de que Sdk.targets importe los .targets del paquete
+       WindowsAppSDK, que es cuando hace falta tener ya el valor puesto, y la
+       condición de la primera línea deja ganar a un -p:AppxMSBuildToolsPath=...
+       explícito de la línea de comandos.
+       ========================================================================== -->
+  <PropertyGroup Condition="'$(AppxMSBuildToolsPath)' == ''">
+    <_LabVsRoot Condition="Exists('C:\Program Files\Microsoft Visual Studio\2022\Enterprise\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Enterprise</_LabVsRoot>
+    <_LabVsRoot Condition="'$(_LabVsRoot)' == '' AND Exists('C:\Program Files\Microsoft Visual Studio\2022\Professional\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Professional</_LabVsRoot>
+    <_LabVsRoot Condition="'$(_LabVsRoot)' == '' AND Exists('C:\Program Files\Microsoft Visual Studio\2022\Community\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files\Microsoft Visual Studio\2022\Community</_LabVsRoot>
+    <_LabVsRoot Condition="'$(_LabVsRoot)' == '' AND Exists('C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage')">C:\Program Files (x86)\Microsoft Visual Studio\2022\BuildTools</_LabVsRoot>
+    <AppxMSBuildToolsPath Condition="'$(_LabVsRoot)' != ''">$(_LabVsRoot)\MSBuild\Microsoft\VisualStudio\v17.0\AppxPackage\</AppxMSBuildToolsPath>
+  </PropertyGroup>
+
   <ItemGroup>
     <!-- Versiones verificadas en la cache local: 1.6.250602001 y
          10.0.22621.756. No las subas "porque hay una mas nueva" sin
