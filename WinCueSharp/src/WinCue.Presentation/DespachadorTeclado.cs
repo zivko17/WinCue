@@ -63,8 +63,10 @@ namespace WinCue.Presentation;
 //     show, no editar su estructura -- a diferencia de Copiar/Pegar/
 //     Duplicar/Agrupar.
 //   - Agrupar (Ctrl+G) SI lleva el candado de modo SHOW: modifica la
-//     estructura del show igual que las otras cuatro de edicion. Quedarse
-//     fuera de esa lista era un fallo del brief original, no del codigo.
+//     estructura del show igual que Copiar, Pegar y Duplicar (con las que
+//     comparte el candado) y que Eliminar y Renombrar (que llevan uno
+//     equivalente, aparte). Quedarse fuera de esa lista era un fallo del
+//     brief original, no del codigo.
 //   - Eliminar (Supr) y Renombrar (F2) se movieron por DEBAJO de los hotkeys
 //     por cue, alineados con WinCue. A diferencia del transporte -que si
 //     diverge deliberadamente y por encima de los hotkeys, para proteger la
@@ -72,6 +74,15 @@ namespace WinCue.Presentation;
 //     divergir: un cue con hotkey Supr debe dispararse igual en los dos
 //     productos, y divergir sin motivo es como dos productos acaban
 //     comportandose distinto sin que nadie sepa por que.
+//
+// SEGUNDO BARRIDO DE MUTACION (2026-08-26): quedaban tres agujeros de
+// cobertura sobre codigo que ya era correcto (ninguno exigio cambiar la
+// logica, solo afirmarla): Ctrl+B y Shift+B no tenian prueba de que NO
+// hacen blackout (el candado de "sin modificadores" ya los cubria);
+// BufferBorrar no se afirmaba nunca en positivo (solo se probaba con el
+// buffer vacio, que un borrado sin implementar tambien cumple); y el punto
+// de la fila superior (OEM_PERIOD) no tenia prueba propia, solo el del
+// numerico -- la mitad de lo que usa un operador en un portatil.
 // ==============================================================================
 
 /// <summary>Que hay que hacer con una tecla. <c>Nada</c> significa
@@ -183,11 +194,13 @@ public static class DespachadorTeclado
             if (accionCtrl != AccionTecla.Nada)
             {
                 // En modo SHOW la edicion de la ESTRUCTURA del show esta
-                // bloqueada: Agrupar la modifica igual que Copiar/Pegar/
-                // Duplicar (quedarse fuera de esta lista era un fallo del
-                // brief original). PausarCue NO entra: pausar un cue
-                // concreto durante el show es operarlo, no editar su
-                // estructura.
+                // bloqueada: Agrupar la modifica igual que Copiar, Pegar y
+                // Duplicar, que comparten este candado (quedarse fuera de
+                // esta lista era un fallo del brief original). Eliminar y
+                // Renombrar llevan el candado equivalente mas abajo, aparte,
+                // porque no pasan por este switch de Ctrl. PausarCue NO
+                // entra en ninguno de los dos: pausar un cue concreto
+                // durante el show es operarlo, no editar su estructura.
                 var esDeEdicion = accionCtrl is AccionTecla.Copiar or AccionTecla.Pegar
                     or AccionTecla.Duplicar or AccionTecla.Agrupar;
                 if (esDeEdicion && estado.ModoShow)

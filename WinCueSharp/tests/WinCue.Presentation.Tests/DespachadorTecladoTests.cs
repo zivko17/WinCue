@@ -10,7 +10,7 @@ public class DespachadorTecladoTests
                       VkDelete = 0x2E, Vk1 = 0x31, VkBack = 0x08,
                       VkO = 0x4F, VkG = 0x47, VkY = 0x59, VkV = 0x56,
                       VkD = 0x44, VkC = 0x43, VkQ = 0x51, VkF2 = 0x71,
-                      VkDecimal = 0x6E;
+                      VkDecimal = 0x6E, VkPeriodOem = 0xBE;
 
     private static readonly IReadOnlyDictionary<int, int> SinHotkeys =
         new Dictionary<int, int>();
@@ -71,6 +71,23 @@ public class DespachadorTecladoTests
         var hotkeys = new Dictionary<int, int> { [VkB] = 42 };
         var d = DespachadorTeclado.Resolver(VkB, false, false, false, Normal, hotkeys);
         Assert.Equal(AccionTecla.Blackout, d.Accion);
+    }
+
+    [Fact]
+    public void CtrlB_NoHaceBlackout()
+    {
+        // El candado de "sin modificadores" tambien cubre Blackout: en una
+        // aplicacion de teatro, un blackout disparado por una combinacion
+        // que nadie pretendia pulsar es un apagon en escena.
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkB, ctrl: true, false, false, Normal, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void ShiftB_NoHaceBlackout()
+    {
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkB, false, shift: true, false, Normal, SinHotkeys).Accion);
     }
 
     [Fact]
@@ -173,12 +190,35 @@ public class DespachadorTecladoTests
     }
 
     [Fact]
+    public void PuntoDeLaFilaSuperior_AlimentaElBufferConPunto()
+    {
+        // El del numerico ya estaba probado; este es el que usa la mitad de
+        // los operadores en un portatil sin numerico separado. Quitar
+        // VkPeriodOem de la condicion no lo detectaba ninguna prueba.
+        var d = DespachadorTeclado.Resolver(VkPeriodOem, false, false, false, Normal, SinHotkeys);
+        Assert.Equal(AccionTecla.BufferDigito, d.Accion);
+        Assert.Equal('.', d.Caracter);
+    }
+
+    [Fact]
     public void ConBufferVacio_RetrocesoYEnterNoSonDelBuffer()
     {
         Assert.Equal(AccionTecla.Nada,
             DespachadorTeclado.Resolver(VkBack, false, false, false, Normal, SinHotkeys).Accion);
         Assert.Equal(AccionTecla.Nada,
             DespachadorTeclado.Resolver(VkEnter, false, false, false, Normal, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void ConDigitosEnElBuffer_RetrocesoBorra()
+    {
+        // BufferBorrar no se afirmaba nunca en positivo: la unica prueba de
+        // Retroceso era con el buffer vacio, y esa la cumple igual un codigo
+        // que no implemente el borrado. Quitar el bloque entero dejaba las
+        // 46 anteriores en verde.
+        var estado = Normal with { HayDigitosEnBuffer = true };
+        Assert.Equal(AccionTecla.BufferBorrar,
+            DespachadorTeclado.Resolver(VkBack, false, false, false, estado, SinHotkeys).Accion);
     }
 
     [Fact]
@@ -299,9 +339,12 @@ public class DespachadorTecladoTests
     public void CtrlMasTecla_ResuelveArchivoOEdicion(int vk, bool shift, AccionTecla esperado)
     {
         // Solo Ctrl+Z tenia prueba antes de esta tanda; el resto de la
-        // familia Ctrl (Abrir, Guardar, GuardarComo, Agrupar, Rehacer,
-        // Copiar, Pegar, Duplicar, PausarCue) se podia poner a Nada sin que
-        // ninguna prueba lo detectara.
+        // familia Ctrl que ya existia (Abrir, Guardar, GuardarComo, Agrupar,
+        // Rehacer, Copiar, Pegar, Duplicar) se podia poner a Nada sin que
+        // ninguna prueba lo detectara. PausarCue es distinto: no es que
+        // faltara la prueba, es que antes de esta tanda no habia ningun
+        // camino que lo produjera -- era el valor del enum que nada
+        // alcanzaba.
         var d = DespachadorTeclado.Resolver(vk, ctrl: true, shift, false, Normal, SinHotkeys);
         Assert.Equal(esperado, d.Accion);
     }
