@@ -32,7 +32,8 @@ namespace WinCue.Presentation;
 //      alimentar el buffer.
 //   3. Los hotkeys por cue solo se miran cuando NO hay ningun modificador
 //      (ctrl/shift/alt) pulsado. Por eso Ctrl+Z deshace en vez de disparar un
-//      cue cuya hotkey sea Z.
+//      cue cuya hotkey sea Z, y por lo mismo Shift+Q o Alt+Q tampoco disparan
+//      un cue de hotkey Q.
 //
 // Y una divergencia DELIBERADA con WinCue, tambien con su prueba: aqui todo
 // el transporte (Go, StopAll, StopSeleccionado, PlayheadAnterior/Siguiente,
@@ -41,6 +42,36 @@ namespace WinCue.Presentation;
 // puede asignarle a un cue la flecha abajo o la P y robarle al operador la
 // navegacion del playhead -- que es precisamente el gesto que esta tanda
 // viene a proteger. Aqui eso no puede pasar.
+//
+// NOTA (no es un hueco, es lo que pide el brief): con el foco en un campo de
+// escritura, WinCue hace que Escape devuelva el foco a la tabla de cues
+// (MainWindow.xaml.cs:2092-2093). Aqui Escape con FocoEnCampoDeEscritura es
+// Nada sin mas: mover el foco es un efecto sobre la UI, y esta funcion no
+// toca UI. Queda escrito para quien consuma esto.
+//
+// REVISION CON PRUEBAS DE MUTACION (2026-08-26): la primera version tenia 15
+// pruebas en verde y 20 mutaciones aplicadas al fichero dejaban 11 vivas.
+// Se corrigio una regresion real y se tomaron tres decisiones de producto:
+//
+//   - C1 (regresion real): el buffer de "ir a cue" solo aceptaba digitos de
+//     la fila superior y el "." de esa fila. El teclado NUMERICO
+//     (NumPad0..NumPad9 y su punto decimal, que es como se teclea casi
+//     siempre un numero de cue en directo) no alimentaba el buffer. Ahora
+//     alimenta igual que la fila superior.
+//   - PausarCue se implementa en Ctrl+P (WinCue: OnPauseCueToggle). NO lleva
+//     el candado de modo SHOW: pausar UN cue durante el show es operar el
+//     show, no editar su estructura -- a diferencia de Copiar/Pegar/
+//     Duplicar/Agrupar.
+//   - Agrupar (Ctrl+G) SI lleva el candado de modo SHOW: modifica la
+//     estructura del show igual que las otras cuatro de edicion. Quedarse
+//     fuera de esa lista era un fallo del brief original, no del codigo.
+//   - Eliminar (Supr) y Renombrar (F2) se movieron por DEBAJO de los hotkeys
+//     por cue, alineados con WinCue. A diferencia del transporte -que si
+//     diverge deliberadamente y por encima de los hotkeys, para proteger la
+//     navegacion del playhead- aqui no hay ninguna razon equivalente para
+//     divergir: un cue con hotkey Supr debe dispararse igual en los dos
+//     productos, y divergir sin motivo es como dos productos acaban
+//     comportandose distinto sin que nadie sepa por que.
 // ==============================================================================
 
 /// <summary>Que hay que hacer con una tecla. <c>Nada</c> significa
@@ -85,7 +116,6 @@ public static class DespachadorTeclado
     private const int VkDelete = 0x2E;
     private const int Vk0 = 0x30;
     private const int Vk9 = 0x39;
-    private const int VkPeriodOem = 0xBE; // OEM_PERIOD, el "." de la fila principal
     private const int VkB = 0x42;
     private const int VkC = 0x43;
     private const int VkD = 0x44;
@@ -96,7 +126,11 @@ public static class DespachadorTeclado
     private const int VkV = 0x56;
     private const int VkY = 0x59;
     private const int VkZ = 0x5A;
+    private const int VkNumPad0 = 0x60;
+    private const int VkNumPad9 = 0x69;
+    private const int VkDecimal = 0x6E;   // "." del teclado numerico
     private const int VkF2 = 0x71;
+    private const int VkPeriodOem = 0xBE; // OEM_PERIOD, el "." de la fila superior
 
     /// <param name="vk">Codigo de tecla virtual de Windows. En WinUI 3 es
     /// <c>(int)e.Key</c> directamente; en WPF, <c>KeyInterop.VirtualKeyFromKey</c>.
@@ -115,14 +149,19 @@ public static class DespachadorTeclado
         // 2. Un campo de escritura se queda con todo. El despachador no sabe
         // que control tiene el foco; el llamante ya decidio si ese control
         // (p.ej. el selector del PGM) cuenta como campo de escritura o no.
+        // Esta guarda y la de arriba van ANTES del bloque de Ctrl a
+        // proposito: sin ese orden, un dialogo modal abierto dejaria pasar
+        // Ctrl+S (guardar) y escribir el nombre de un cue dejaria pasar
+        // Ctrl+D (duplicar).
         if (estado.FocoEnCampoDeEscritura)
             return new DecisionTecla(AccionTecla.Nada);
 
         var sinModificadores = !ctrl && !shift && !alt;
 
-        // 3. Con Ctrl: archivo y edicion. Se miran antes que el transporte
-        // porque comparten Ctrl con el resto y no colisionan con el (ninguna
-        // tecla de transporte usa Ctrl).
+        // 3. Con Ctrl: archivo y edicion. Se exige "ctrl && !alt", no solo
+        // "ctrl": en teclado espanol (y otros) AltGr se reporta como
+        // Ctrl+Alt (la tecla Alt derecha), y AltGr+C debe escribir un
+        // caracter, no disparar Copiar.
         if (ctrl && !alt)
         {
             var accionCtrl = vk switch
@@ -137,29 +176,25 @@ public static class DespachadorTeclado
                 VkC => AccionTecla.Copiar,
                 VkV => AccionTecla.Pegar,
                 VkD => AccionTecla.Duplicar,
+                VkP => AccionTecla.PausarCue,
                 _ => AccionTecla.Nada,
             };
 
             if (accionCtrl != AccionTecla.Nada)
             {
-                // En modo SHOW la edicion del show esta bloqueada: solo se
-                // opera, no se modifica la estructura mientras suena.
+                // En modo SHOW la edicion de la ESTRUCTURA del show esta
+                // bloqueada: Agrupar la modifica igual que Copiar/Pegar/
+                // Duplicar (quedarse fuera de esta lista era un fallo del
+                // brief original). PausarCue NO entra: pausar un cue
+                // concreto durante el show es operarlo, no editar su
+                // estructura.
                 var esDeEdicion = accionCtrl is AccionTecla.Copiar or AccionTecla.Pegar
-                    or AccionTecla.Duplicar;
+                    or AccionTecla.Duplicar or AccionTecla.Agrupar;
                 if (esDeEdicion && estado.ModoShow)
                     return new DecisionTecla(AccionTecla.Nada);
 
                 return new DecisionTecla(accionCtrl);
             }
-        }
-
-        // Eliminar y Renombrar no llevan Ctrl pero son de edicion: mismo
-        // candado de modo SHOW.
-        if (sinModificadores && (vk == VkDelete || vk == VkF2))
-        {
-            if (estado.ModoShow)
-                return new DecisionTecla(AccionTecla.Nada);
-            return new DecisionTecla(vk == VkDelete ? AccionTecla.Eliminar : AccionTecla.Renombrar);
         }
 
         // 4. Transporte. Por encima de los hotkeys siempre -- divergencia
@@ -187,17 +222,43 @@ public static class DespachadorTeclado
         }
 
         // 6. Hotkeys por cue. Solo sin modificadores: Ctrl+Z deshace, no
-        // dispara un cue cuya hotkey sea Z.
+        // dispara un cue cuya hotkey sea Z; Shift+Q o Alt+Q tampoco disparan
+        // un cue de hotkey Q.
         if (sinModificadores && hotkeysPorCue.TryGetValue(vk, out var cueId))
             return new DecisionTecla(AccionTecla.DispararCue, CueId: cueId);
 
+        // 7. Eliminar (Supr) y Renombrar (F2), DEBAJO de los hotkeys por
+        // cue -- alineado con WinCue. A diferencia del transporte, que si
+        // diverge deliberadamente y por encima (proteger el playhead es una
+        // razon; no hay ninguna equivalente aqui), un cue con hotkey Supr
+        // debe dispararse igual en los dos productos.
+        if (sinModificadores && (vk == VkDelete || vk == VkF2))
+        {
+            if (estado.ModoShow)
+                return new DecisionTecla(AccionTecla.Nada);
+            return new DecisionTecla(vk == VkDelete ? AccionTecla.Eliminar : AccionTecla.Renombrar);
+        }
+
         if (sinModificadores)
         {
-            // 7. Buffer de "ir a cue". Va DESPUES de los hotkeys: si el digito
-            // ya disparo un cue arriba, nunca llega aqui.
-            if ((vk >= Vk0 && vk <= Vk9) || vk == VkPeriodOem)
+            // 8. Buffer de "ir a cue". Va DESPUES de los hotkeys: si el
+            // digito ya disparo un cue arriba, nunca llega aqui. Acepta
+            // digitos de la fila superior, del teclado NUMERICO
+            // (NumPad0..NumPad9) y el punto decimal en cualquiera de sus dos
+            // teclas (OEM_PERIOD de la fila superior y Decimal del
+            // numerico) -- en directo, un numero de cue se teclea casi
+            // siempre en el numerico.
+            if ((vk >= Vk0 && vk <= Vk9) || (vk >= VkNumPad0 && vk <= VkNumPad9)
+                || vk == VkPeriodOem || vk == VkDecimal)
             {
-                var caracter = vk == VkPeriodOem ? '.' : (char)('0' + (vk - Vk0));
+                char caracter;
+                if (vk >= VkNumPad0 && vk <= VkNumPad9)
+                    caracter = (char)('0' + (vk - VkNumPad0));
+                else if (vk == VkPeriodOem || vk == VkDecimal)
+                    caracter = '.';
+                else
+                    caracter = (char)('0' + (vk - Vk0));
+
                 return new DecisionTecla(AccionTecla.BufferDigito, Caracter: caracter);
             }
 
@@ -207,7 +268,7 @@ public static class DespachadorTeclado
                 if (vk == VkEnter) return new DecisionTecla(AccionTecla.BufferSaltar);
             }
 
-            // 8. Enter con el buffer vacio: solo lleva el playhead a la
+            // 9. Enter con el buffer vacio: solo lleva el playhead a la
             // seleccion si el foco esta en la tabla de cues. Fuera de la
             // tabla, Nada -- de eso depende que Tab+Enter siga activando
             // botones, ya que Espacio dejo de hacerlo (linea 4, arriba).
