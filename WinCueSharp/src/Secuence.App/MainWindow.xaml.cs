@@ -2512,7 +2512,7 @@ public sealed partial class MainWindow : Window, IShowView
     /// la contradicción se resuelve quitando la BANDERA, no la comprobación.
     /// Meterlo todo en el preview la resolvía al revés y se llevaba por delante
     /// la navegación de la tabla y la del único <c>Slider</c> de la ventana
-    /// (la barra de progreso del previo PVW/PGM — Secuence no tiene mezclador
+    /// (la barra de progreso del previo PVW — Secuence no tiene mezclador
     /// con deslizadores, así que no es ese el ejemplo que aplica aquí).
     ///
     /// Con un hotkey en la flecha ABAJO y la tabla enfocada, tres resultados
