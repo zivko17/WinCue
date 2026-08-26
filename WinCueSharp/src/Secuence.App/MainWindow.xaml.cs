@@ -13,6 +13,7 @@
 // =============================================================================
 
 using System.Collections.ObjectModel;
+using System.Diagnostics;
 using Microsoft.UI;
 using Microsoft.UI.Dispatching;
 using Microsoft.UI.Windowing;
@@ -136,15 +137,24 @@ public sealed partial class MainWindow : Window, IShowView
     /// mitad de una edición que él mismo acaba de comprometer.</summary>
     private bool _suppressSelectionSync;
 
-    /// <summary>Buffer de «ir a cue» tecleando su número (estilo QLab).
-    /// DECLARADO AQUÍ, en la tanda de la navegación por teclado, aunque quien
-    /// lo RELLENA es la tarea siguiente (<c>TratarBufferIrACue</c>, aún sin
-    /// escribir): la resolución de <c>Enter</c> en <see cref="OnKeyDownHotkeys"/>
-    /// ya necesita comprobar si está vacío HOY, para que esa tarea no tenga
-    /// que reordenar nada — ver el porqué completo ahí. Mientras no exista
-    /// quien lo rellene, se queda vacío siempre y esa comprobación es un
-    /// no-op deliberado, no un descuido.</summary>
+    /// <summary>Buffer de «ir a cue» tecleando su número (estilo QLab): el
+    /// texto acumulado. Lo rellena <see cref="TratarBufferIrACue"/>, llamado
+    /// desde <see cref="OnKeyDownHotkeys"/> DESPUÉS de comprobar los hotkeys
+    /// por cue — ver el porqué completo ahí.
+    ///
+    /// Es lo único de todo el despachador que no puede vivir en
+    /// <c>WinCue.Presentation.DespachadorTeclado</c> (una función pura no
+    /// tiene memoria entre teclas): esta ventana solo guarda el texto y CUÁNDO
+    /// se tecleó el último carácter (<see cref="_bufferIrACueTicks"/>); qué
+    /// hacer con cada tecla lo sigue decidiendo el despachador, envuelto para
+    /// la parte de estado en <c>WinCue.Presentation.ProcesadorBufferIrACue</c>.</summary>
     private string _bufferIrACue = "";
+
+    /// <summary>Cuándo se tecleó el último carácter del buffer de arriba —un
+    /// <see cref="Stopwatch.GetTimestamp"/>, no un reloj de pared—, para poder
+    /// medir la caducidad de 4 s con <see cref="Stopwatch.GetElapsedTime(long)"/>.
+    /// Sin valor mientras el buffer esté vacío.</summary>
+    private long _bufferIrACueTicks;
 
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
@@ -2607,45 +2617,144 @@ public sealed partial class MainWindow : Window, IShowView
             return;
         }
 
-        // ── Enter: se resuelve en ESTE ÚNICO sitio, y a propósito no en el
-        // túnel de arriba (OnPreviewKeyDownGlobal) ──
+        // ── Ir a cue (dígitos) y Enter: TratarBufferIrACue, y a propósito no
+        // en el túnel de arriba (OnPreviewKeyDownGlobal) ──
         //
         // El plan original de esta tanda ponía Enter junto a las flechas, en
-        // el transporte. Se corrigió a mano porque choca de frente con la
-        // tarea siguiente («ir a cue» tecleando su número): ese buffer
-        // también resuelve Enter, y tiene que verlo ANTES que nadie cuando
-        // hay dígitos escritos — si Enter se resolviera en el túnel (que
-        // llega primero por diseño, ver arriba), teclear «5» «.» «1» y Enter
-        // saltaría a la SELECCIÓN en vez de al cue 5.1: el túnel se habría
-        // comido la tecla antes de que el buffer llegara a verla.
+        // el transporte. Se corrigió a mano porque choca de frente con «ir a
+        // cue» tecleando su número: ese buffer también resuelve Enter, y
+        // tiene que verlo ANTES que nadie cuando hay dígitos escritos — si
+        // Enter se resolviera en el túnel (que llega primero por diseño, ver
+        // arriba), teclear «5» «.» «1» y Enter saltaría a la SELECCIÓN en vez
+        // de al cue 5.1: el túnel se habría comido la tecla antes de que el
+        // buffer llegara a verla.
         //
-        // La regla completa, en un solo sitio:
-        //   · buffer de «ir a cue» con dígitos  → salta a ESE cue (lo hace
-        //     TratarBufferIrACue, tarea siguiente — se enganchará AQUÍ MISMO,
-        //     antes de esta comprobación, y devolverá true/Handled primero);
-        //   · buffer vacío y el foco está en la tabla → playhead a la fila
-        //     seleccionada (lo de abajo);
-        //   · si no (buffer vacío y el foco NO está en la tabla) → Enter
-        //     sigue siendo de quien tenga el foco, sin marcar Handled. Es lo
-        //     que mantiene viva la ruta Tab+Enter sobre un botón: al vivir en
-        //     el KeyDown que BURBUJEA (sin handledEventsToo, como los
-        //     hotkeys de arriba), un botón enfocado ya ha consumido su Enter
-        //     —e invocado su Click— ANTES de que este método llegue a verlo.
-        //
-        // _bufferIrACue vive declarado más arriba desde ESTA tanda aunque
-        // nadie lo rellena todavía (ver su comentario): hoy la primera rama
-        // de la regla nunca se alcanza, y eso es correcto, no un hueco.
-        if (e.Key == Windows.System.VirtualKey.Enter
-            && _bufferIrACue.Length == 0
-            && EstaEnLaTabla(foco))
+        // TratarBufferIrACue resume la regla completa (dígitos se acumulan;
+        // Retroceso borra el último SOLO si hay dígitos; Enter con dígitos
+        // salta a ESE cue; Enter con el buffer vacío y el foco en la tabla es
+        // «playhead a la selección»; cualquier otra tecla, o Enter fuera de
+        // la tabla con el buffer vacío, no es suya y no marca Handled — lo
+        // que mantiene viva la ruta Tab+Enter sobre un botón: al vivir este
+        // método en el KeyDown que BURBUJEA, sin handledEventsToo, un botón
+        // enfocado ya ha consumido su Enter —e invocado su Click— ANTES de
+        // que llegue aquí). Se llama DESPUÉS del TryGetValue de arriba a
+        // propósito: un cue cuya hotkey sea un dígito ya disparó ese cue, y
+        // el dígito nunca llega a alimentar el buffer.
+        TratarBufferIrACue(e);
+    }
+
+    /// <summary>Hotkeys por cue vacío, para pasárselo a
+    /// <see cref="WinCue.Presentation.DespachadorTeclado.Resolver"/> desde
+    /// <see cref="TratarBufferIrACue"/>: esa llamada ocurre DESPUÉS de que
+    /// <see cref="OnKeyDownHotkeys"/> ya haya mirado <c>_cueHotkeys</c> de
+    /// verdad (arriba, en este mismo método) y no haya encontrado nada — a
+    /// este punto los hotkeys por cue ya están resueltos, y no hay que
+    /// volver a mirarlos una segunda vez.</summary>
+    private static readonly IReadOnlyDictionary<int, int> SinHotkeysPorCue =
+        new Dictionary<int, int>();
+
+    /// <summary>«Ir a cue» al estilo QLab: se teclea el NÚMERO del cue y
+    /// Enter. Devuelve true si consumió la tecla.
+    ///
+    /// QUÉ hacer con la tecla lo decide <c>WinCue.Presentation.
+    /// DespachadorTeclado.Resolver</c> — la misma función pura y con pruebas
+    /// que ya resuelve el resto del despachador de esta ventana (hotkeys por
+    /// cue arriba, en <see cref="OnKeyDownHotkeys"/>). Esta ventana solo
+    /// aporta lo que esa función, siendo pura, no puede recordar entre
+    /// teclas: el texto acumulado y CUÁNDO se tecleó el último carácter
+    /// (<see cref="_bufferIrACue"/> / <see cref="_bufferIrACueTicks"/>),
+    /// envueltos para esa parte de estado en
+    /// <c>WinCue.Presentation.ProcesadorBufferIrACue</c>, más las dos cosas
+    /// que dependen de ESTA ventana: casar el texto contra
+    /// <c>Cue.DisplayNumber</c> —«1.1», NO por índice: el operador teclea el
+    /// número que VE— y avisar en la barra de estado, bilingüe.</summary>
+    private bool TratarBufferIrACue(KeyRoutedEventArgs e)
+    {
+        object? foco = FocusManager.GetFocusedElement(Content.XamlRoot);
+        var estado = new EstadoTeclado(
+            DialogoAbierto: _dialogosAbiertos > 0,
+            FocoEnCampoDeEscritura: EsCampoDeEscritura(foco),
+            FocoEnTablaDeCues: EstaEnLaTabla(foco),
+            // Recalculada dentro de ProcesadorBufferIrACue.Procesar DESPUÉS
+            // de mirar la caducidad -aquí solo hace falta un valor de partida
+            // honesto, no el definitivo.
+            HayDigitosEnBuffer: _bufferIrACue.Length > 0,
+            ModoShow: EditingLocked);
+
+        // ctrl/shift/alt van fijos a false: OnKeyDownHotkeys, el ÚNICO
+        // llamante, ya ha vuelto sin entrar aquí si hay algún modificador
+        // pulsado (ver el guardián de arriba). Si algún día este método se
+        // llamara desde otro sitio, habría que leerlos de verdad.
+        long ahora = Stopwatch.GetTimestamp();
+        var resultado = ProcesadorBufferIrACue.Procesar(
+            new EstadoBufferIrACue(_bufferIrACue, _bufferIrACueTicks), ahora,
+            (int)e.Key, ctrl: false, shift: false, alt: false,
+            estado, SinHotkeysPorCue);
+
+        _bufferIrACue = resultado.Estado.Texto;
+        _bufferIrACueTicks = resultado.Estado.UltimoTimestamp;
+
+        switch (resultado.Accion)
         {
-            if (CueList.SelectedItem is CueRow fila)
-            {
-                int idx = _model.IndexOfId(fila.CueId);
-                if (idx >= 0)
-                    _controller.OnSetPlayhead(idx);
-            }
-            e.Handled = true;
+            case AccionTecla.BufferDigito:
+                FlashStatus(Loc.T(
+                    $"Ir a cue: {_bufferIrACue}{Icons.Bar}  (Enter salta · Retroceso borra)",
+                    $"Go to cue: {_bufferIrACue}{Icons.Bar}  (Enter jumps · Backspace deletes)"));
+                e.Handled = true;
+                return true;
+
+            case AccionTecla.BufferBorrar:
+                FlashStatus(_bufferIrACue.Length > 0
+                    ? Loc.T($"Ir a cue: {_bufferIrACue}{Icons.Bar}", $"Go to cue: {_bufferIrACue}{Icons.Bar}")
+                    : "");
+                e.Handled = true;
+                return true;
+
+            case AccionTecla.BufferSaltar:
+                {
+                    string objetivo = resultado.CueObjetivo ?? "";
+                    int fila = -1;
+                    for (int i = 0; i < _model.Count; i++)
+                        if (_model.Cues[i].DisplayNumber == objetivo)
+                        {
+                            fila = i;
+                            break;
+                        }
+
+                    if (fila >= 0)
+                    {
+                        _controller?.OnSetPlayhead(fila);
+                        FlashStatus(Loc.T($"Playhead → cue {objetivo}", $"Playhead → cue {objetivo}"));
+                    }
+                    else
+                    {
+                        FlashStatus(Loc.T($"No hay ningún cue con número «{objetivo}»",
+                                          $"There is no cue numbered «{objetivo}»"));
+                    }
+                    e.Handled = true;
+                    return true;
+                }
+
+            case AccionTecla.PlayheadASeleccion:
+                // Enter con el buffer vacío y el foco en la tabla — el gesto
+                // de la tarea 2, sin cambios de comportamiento.
+                if (CueList.SelectedItem is CueRow filaSeleccionada)
+                {
+                    int idx = _model.IndexOfId(filaSeleccionada.CueId);
+                    if (idx >= 0)
+                        _controller?.OnSetPlayhead(idx);
+                }
+                e.Handled = true;
+                return true;
+
+            default:
+                // Nada -o cualquier otra acción que el despachador resuelva
+                // para esta tecla, como StopAll si e.Key fuera Escape- no es
+                // de este método. Escape en concreto no llega ni siquiera a
+                // probarse: lo resuelve el túnel de arriba
+                // (OnPreviewKeyDownGlobal) y marca Handled ahí, y este
+                // manejador, sin handledEventsToo, no vuelve a verlo.
+                return false;
         }
     }
 
