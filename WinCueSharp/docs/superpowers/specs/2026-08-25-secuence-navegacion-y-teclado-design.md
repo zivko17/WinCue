@@ -58,21 +58,44 @@ Las del proyecto siguen en pie. Las tres que más mandan aquí:
 | ¿Selección = playhead? | **NO, separados** | Elección de Andrés. Permite mirar el cue 47 en mitad del acto sin que el GO deje de disparar el 12 |
 | ¿Qué hacen `↑`/`↓`? | **Mueven el playhead** | Elección de Andrés. En función las manos están en el teclado: retroceder un cue tras un fallo es una tecla |
 | ¿Atajos configurables? | **Todos clavados, de momento** | Elección de Andrés. Acorta la tanda; `keyboard_*` queda para más adelante |
-| ¿Dónde vive el mapa de teclas? | **Dentro de `Secuence.App`** | Elección de Andrés, contra mi recomendación. Ver el coste, abajo |
+| ¿Dónde vive el mapa de teclas? | **En `WinCue.Presentation`, con pruebas** | Cambiado el 2026-08-26. Ver abajo |
 | `Ctrl+F` | **Fuera** | En Secuence no hay buscar cues. No se cablea lo que no existe |
 
-### El coste de la última, escrito para que nadie lo descubra tarde
+### La última cambió a mitad de ejecución, y el porqué importa
 
-Yo recomendé subir el mapa y las precedencias a `WinCue.Presentation` con
-pruebas, consumido de momento solo por Secuence. Andrés eligió tenerlo dentro
-de `Secuence.App`. **Ningún proyecto de pruebas referencia `Secuence.App`**, así
-que la consecuencia es concreta y hay que asumirla: **todo lo de esta tanda se
-verifica midiendo, no con pruebas automáticas**, y nada de ello corre en el CI.
-El método está en la sección 4 y ya ha funcionado hoy; pero es trabajo manual
-que habrá que repetir cada vez que alguien toque el despachador.
+El 25 de agosto Andrés eligió tener el mapa **dentro de `Secuence.App`**. El
+precio que le presenté entonces era: «se verifica midiendo, no con pruebas
+automáticas».
 
-Lo que **sí** nos llevamos de aquella recomendación, porque no dependía de
-dónde viva el código, es el orden de precedencia escrito y explícito.
+**El 26 se descubrió que el precio real era otro**, y peor. En esta máquina **no
+se puede simular una pulsación de tecla**:
+
+- `keybd_event` / `SendInput` van **al que tenga el foco**, y en esa máquina hay
+  una ventana de escritorio remoto conectada a equipo de audio de un local real.
+  Prohibido, y con motivo: un clic sintético ya se perdió ahí una vez.
+- `PostMessage` a un HWND concreto **sí** es seguro por construcción, pero al
+  HWND de nivel superior **no llega**: WinUI 3 pone el XAML en una isla aparte.
+  Y el intento contra el HWND del bridge lo **bloqueó el clasificador de
+  seguridad** de la sesión, que no se rodea.
+
+O sea que el coste no era «verificación manual» sino **«verificación imposible
+sin que Andrés esté delante pulsando teclas»** — cada vez, para siempre, cada
+vez que alguien toque el despachador.
+
+Con esa premisa nueva, Andrés cambió la decisión. **La decisión de qué hace cada
+tecla se extrae a `WinCue.Presentation` como una función PURA con pruebas**, y
+Secuence la consume. Lo que queda en `Secuence.App` es el cableado: leer la
+tecla, preguntar qué hacer, y hacerlo.
+
+Lo que se gana: **el orden de precedencia, el guardián de escritura, la regla de
+`B` antes de los hotkeys, la de que el buffer va después, y la resolución de
+`Enter` pasan a estar cubiertos por pruebas que corren en el CI**, sin GPU, sin
+ventana y sin que nadie pulse nada. Lo único que seguirá necesitando ojos es el
+cableado: que la tecla llegue y que la acción se ejecute.
+
+Lo que NO cambia: **WinCue no lo consume todavía**. Se extrae de forma aditiva y
+WinCue lo adopta cuando toque tocarlo, con su propia verificación en pantalla.
+La regla de que este producto no cambia de comportamiento sigue intacta.
 
 ---
 
@@ -237,10 +260,17 @@ WinCue sí lee). Decisión de Andrés para acortar esta tanda.
 
 ## Sección 4 — Cómo se verifica
 
-**Sin pruebas automáticas, y hay que decirlo sin adornos.** Ningún proyecto de
-pruebas referencia `Secuence.App`, así que la suite de 1.229 seguirá en verde
-diga lo que diga este código: es no-regresión del motor compartido, **no
-evidencia de nada de esta tanda**.
+**Se parte en dos, y esa es la razón de ser del cambio de decisión.**
+
+**La decisión de qué hace cada tecla SÍ tiene pruebas**, porque vive en
+`WinCue.Presentation`: precedencias, guardián de escritura, `B` antes de los
+hotkeys, el buffer después, la resolución de `Enter` y el candado de modo SHOW
+se afirman con pruebas puras que corren en el CI, sin GPU y sin ventana.
+
+**El cableado no**, y hay que decirlo sin adornos: ningún proyecto de pruebas
+referencia `Secuence.App`. Que la tecla llegue de verdad al despachador y que la
+acción se ejecute solo se comprueba mirando. La suite seguirá en verde diga lo
+que diga ese cableado.
 
 Lo que sostiene esta tanda son mediciones, con el método que ya funcionó hoy:
 UI Automation para colocar el foco y `keybd_event` para las teclas, leyendo el

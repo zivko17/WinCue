@@ -15,7 +15,8 @@ playhead de la selección, y se traen los `KeyboardAccelerator` sueltos al
 despachador para que respeten el contador de diálogos.
 
 **Tech Stack:** C# / .NET 8 (SDK clavado en 8.0.423), WinUI 3 (Windows App SDK,
-desempaquetado). UI Automation + `keybd_event` para verificar.
+desempaquetado). Pruebas puras en `WinCue.Presentation` para la decision; UI
+Automation **por patrones** para el cableado.
 
 **Spec:** `docs/superpowers/specs/2026-08-25-secuence-navegacion-y-teclado-design.md`
 — léelo entero antes de la primera tarea. Trae las decisiones de Andrés y el
@@ -53,14 +54,35 @@ orden de precedencia verificado en el código de WinCue.
   tanda anterior hubo que arreglar tres comentarios falsos y se coló uno nuevo
   por el camino.
 
-### El método de medición, que es el mismo para todas las tareas
+### El método de medición — CAMBIADO EL 2026-08-26, léelo entero
 
-UI Automation para colocar el foco (`AutomationElement` acotado a **tu** PID) y
-`keybd_event` para las teclas. Se lee el resultado del estado real: playhead,
-selección, texto de la barra de estado, luma de la salida.
+**NO SE PUEDE SIMULAR UNA TECLA EN ESTA MÁQUINA.** No es una preferencia:
 
-**Control negativo en cada caso**: rompe el arreglo a propósito, comprueba que
-la medición lo caza, y revierte. Esta sesión ha tenido **tres verdes por el
+- `keybd_event` / `SendInput` van **al que tenga el foco**, y en esta máquina hay
+  una ventana de escritorio remoto conectada a **equipo de audio de un local
+  real**. Un clic sintético por coordenadas ya se perdió ahí una vez. Prohibido.
+- `PostMessage` a un HWND concreto sí es seguro por construcción, pero al HWND
+  de nivel superior **no llega**: WinUI 3 pone el XAML en una isla. Y el intento
+  contra el HWND del bridge lo **bloquea el clasificador de seguridad** de la
+  sesión. **Ese bloqueo no se rodea.**
+
+Por eso existe la Task 3: la **decisión** de qué hace cada tecla se prueba como
+función pura, sin ventana y sin pulsar nada, y eso sí corre en el CI.
+
+**Para el cableado, lo único permitido es UI Automation POR PATRONES**, acotado
+al PID de Secuence: `SelectionItemPattern.Select()`, `InvokePattern.Invoke()`.
+Apunta a un elemento de un proceso concreto y **no puede aterrizar en otra
+aplicación aunque el foco cambie**. Cero coordenadas de pantalla.
+
+Las capturas, **recortadas a la ventana de Secuence** (`GetWindowRect` sobre su
+HWND). Si al recortar ves que otra ventana la tapa, **para y dilo** en vez de
+medir píxeles de otra aplicación.
+
+**Y si un paso te pide de verdad entrada sintética: para y pregunta.** No lo
+improvises y no falsees la medición.
+
+**Control negativo siempre que midas**: rompe el arreglo a propósito, comprueba
+que la medición lo caza, y revierte. Esta sesión ha tenido **tres verdes por el
 motivo equivocado**, y los tres los destapó ese control y ninguna otra cosa.
 
 ---
@@ -71,12 +93,14 @@ motivo equivocado**, y los tres los destapó ese control y ninguna otra cosa.
 
 | Fichero | Cambio |
 |---|---|
+| `src/WinCue.Presentation/DespachadorTeclado.cs` | **NUEVO** — la decision de que hace cada tecla, pura y probada |
+| `tests/WinCue.Presentation.Tests/DespachadorTecladoTests.cs` | **NUEVO** — sus pruebas |
 | `src/Secuence.App/CueRow.cs:105-127` | El playhead deja de teñir el fondo; expone la marca de borde |
 | `src/Secuence.App/MainWindow.xaml` | La plantilla de fila pinta la marca; fuera los cuatro `KeyboardAccelerator` |
 | `src/Secuence.App/MainWindow.xaml.cs` | Doble clic, despachador ampliado, buffer de ir-a-cue, aviso de colisión |
 | `docs/superpowers/TRASPASO-SECUENCE.md`, `ARRANQUE-SESION-LOCAL.md` | Estado y matriz de verificación |
 
-**Orden y dependencias:** 1 → 2 → 3 → 4 → 5 → 6, en serie. La 2 depende de que
+**Orden y dependencias:** 1 → 2 → 3 → 4 → 5 → 6 → 7, en serie. La 3 es la que se anadio el 26 (el despachador puro con pruebas) y las 4-7 son las que antes eran 3-6. La 2 depende de que
 la 1 haya separado los dos estados visualmente (si no, no se puede *ver* que
 funciona), y la 4 depende del despachador que amplía la 2.
 
@@ -318,7 +342,322 @@ git commit -m "feat(secuence): el operador ya elige el siguiente cue"
 
 ---
 
-### Task 3: «Ir a cue» tecleando su número
+### Task 3: La decisión de qué hace cada tecla, pura y con pruebas
+
+> **AÑADIDA EL 2026-08-26, y las tareas 4-7 son las que antes eran 3-6.**
+> Andrés había elegido tener el mapa dentro de `Secuence.App`. El precio que se
+> le presentó era «se verifica midiendo». El precio real resultó ser **«no se
+> puede verificar sin él delante pulsando teclas»**: `keybd_event` va al que
+> tenga el foco y en esa máquina hay un escritorio remoto a equipo de audio de
+> un local; `PostMessage` al HWND de nivel superior no llega porque WinUI 3 pone
+> el XAML en una isla; y el intento contra el HWND del bridge lo bloqueó el
+> clasificador de seguridad, que no se rodea. Con esa premisa nueva cambió la
+> decisión.
+
+**Files:**
+- Create: `src/WinCue.Presentation/DespachadorTeclado.cs`
+- Test: `tests/WinCue.Presentation.Tests/DespachadorTecladoTests.cs`
+
+**Interfaces:**
+- Consumes: nada. **Función pura, sin dependencias de framework** —
+  `WinCue.Presentation` es `net8.0` a secas y si algo de aquí necesitara
+  `VirtualKey` o `Key`, estaría en el sitio equivocado.
+- Produces:
+
+```csharp
+namespace WinCue.Presentation;
+
+/// <summary>Qué hay que hacer con una tecla. `Nada` significa
+/// «no es mía»: el llamante NO debe marcarla como tratada.</summary>
+public enum AccionTecla
+{
+    Nada,
+    Go, StopAll, StopSeleccionado, PausaGlobal, Blackout,
+    PlayheadAnterior, PlayheadSiguiente, PlayheadASeleccion,
+    DispararCue,
+    BufferDigito, BufferBorrar, BufferSaltar,
+    Abrir, Guardar, GuardarComo, Agrupar,
+    Deshacer, Rehacer, Copiar, Pegar, Duplicar, PausarCue, Eliminar, Renombrar,
+}
+
+/// <summary>La decisión. `CueId` solo para DispararCue; `Caracter` solo
+/// para BufferDigito.</summary>
+public readonly record struct DecisionTecla(
+    AccionTecla Accion, int CueId = 0, char Caracter = '\0');
+
+/// <summary>Lo que el despachador necesita saber del mundo, y que no puede
+/// averiguar por sí mismo sin dejar de ser puro.</summary>
+public readonly record struct EstadoTeclado(
+    bool DialogoAbierto,
+    bool FocoEnCampoDeEscritura,
+    bool FocoEnTablaDeCues,
+    bool HayDigitosEnBuffer,
+    bool ModoShow);
+
+public static class DespachadorTeclado
+{
+    /// <param name="vk">Código de tecla virtual de Windows. En WinUI 3 es
+    /// <c>(int)e.Key</c> directamente; en WPF, <c>KeyInterop.VirtualKeyFromKey</c>.
+    /// Se usa el número y no un enum propio para que los dos productos puedan
+    /// llamar sin traducir.</param>
+    /// <param name="hotkeysPorCue">vk → id de cue, del show cargado.</param>
+    public static DecisionTecla Resolver(
+        int vk, bool ctrl, bool shift, bool alt,
+        in EstadoTeclado estado,
+        IReadOnlyDictionary<int, int> hotkeysPorCue);
+}
+```
+
+**EL ORDEN, que es lo que esta tarea existe para poder probar.** Verificado en
+el código de WinCue (`WinCue.App/MainWindow.xaml.cs:2084-2180`), con la
+divergencia deliberada del transporte por encima de los hotkeys — el porqué
+está en el spec:
+
+1. `DialogoAbierto` → **`Nada`**, siempre. Ni una tecla pasa.
+2. `FocoEnCampoDeEscritura` → **`Nada`**, salvo que el llamante ya haya
+   decidido exceptuar ese control (el selector del PGM). El despachador no
+   conoce controles: recibe el booleano ya resuelto.
+3. Con `ctrl` → archivo y edición. Las de edición (`Copiar`, `Pegar`,
+   `Duplicar`, `Eliminar`, `Renombrar`) devuelven **`Nada` si `ModoShow`**.
+4. **Transporte**: `Go` (espacio), `StopAll` (escape), `StopSeleccionado` (`S`),
+   `PlayheadAnterior` (`↑`/`←`), `PlayheadSiguiente` (`↓`/`→`), `PausaGlobal`
+   (`P`).
+5. **Seguridad**: `Blackout` (`B`). **Antes de los hotkeys**, como WinCue.
+6. **Hotkeys por cue** → `DispararCue` con su id.
+7. **Buffer de ir a cue**: dígitos y `.` → `BufferDigito`; y **solo si
+   `HayDigitosEnBuffer`**, `Retroceso` → `BufferBorrar` y `Enter` →
+   `BufferSaltar`.
+8. **`Enter` con el buffer vacío**: `PlayheadASeleccion` **solo si
+   `FocoEnTablaDeCues`**; si no, **`Nada`** — de eso depende que `Tab`+`Enter`
+   siga activando botones.
+
+- [ ] **Step 1: Escribir las pruebas que fallan**
+
+Crear `tests/WinCue.Presentation.Tests/DespachadorTecladoTests.cs`. Como mínimo
+estas, que son las reglas que han costado sangre en este proyecto:
+
+```csharp
+using WinCue.Presentation;
+
+namespace WinCue.Presentation.Tests;
+
+public class DespachadorTecladoTests
+{
+    private const int VkSpace = 0x20, VkEscape = 0x1B, VkEnter = 0x0D,
+                      VkUp = 0x26, VkDown = 0x28, VkLeft = 0x25, VkRight = 0x27,
+                      VkB = 0x42, VkS = 0x53, VkP = 0x50, VkZ = 0x5A,
+                      VkDelete = 0x2E, Vk1 = 0x31, VkBack = 0x08;
+
+    private static readonly IReadOnlyDictionary<int, int> SinHotkeys =
+        new Dictionary<int, int>();
+
+    private static EstadoTeclado Normal => new(
+        DialogoAbierto: false, FocoEnCampoDeEscritura: false,
+        FocoEnTablaDeCues: false, HayDigitosEnBuffer: false, ModoShow: false);
+
+    [Fact]
+    public void ConDialogoAbierto_NoPasaNiUnaTecla()
+    {
+        var estado = Normal with { DialogoAbierto = true };
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkSpace, false, false, false, estado, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkEscape, false, false, false, estado, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void EscribiendoEnUnCampo_ElEspacioNoDispara()
+    {
+        // La mitad peor del fallo original: un TextBox no marca el espacio
+        // como tratado, asi que escribir un espacio en el nombre de un cue
+        // disparaba el GO del show.
+        var estado = Normal with { FocoEnCampoDeEscritura = true };
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkSpace, false, false, false, estado, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkEscape, false, false, false, estado, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void Blackout_GanaAlHotkeyDeCue()
+    {
+        // Sin esto, un show con un cue de hotkey B hace blackout en WinCue y
+        // saca ese cue A SALA en Secuence, con el mismo archivo.
+        var hotkeys = new Dictionary<int, int> { [VkB] = 42 };
+        var d = DespachadorTeclado.Resolver(VkB, false, false, false, Normal, hotkeys);
+        Assert.Equal(AccionTecla.Blackout, d.Accion);
+    }
+
+    [Fact]
+    public void ElTransporte_GanaAlHotkeyDeCue()
+    {
+        // Divergencia deliberada con WinCue: si un show puede asignar la
+        // flecha abajo como hotkey, le roba al operador la navegacion del
+        // playhead, que es el gesto principal de esta tanda.
+        var hotkeys = new Dictionary<int, int> { [VkDown] = 7, [VkP] = 8, [VkS] = 9 };
+        Assert.Equal(AccionTecla.PlayheadSiguiente,
+            DespachadorTeclado.Resolver(VkDown, false, false, false, Normal, hotkeys).Accion);
+        Assert.Equal(AccionTecla.PausaGlobal,
+            DespachadorTeclado.Resolver(VkP, false, false, false, Normal, hotkeys).Accion);
+        Assert.Equal(AccionTecla.StopSeleccionado,
+            DespachadorTeclado.Resolver(VkS, false, false, false, Normal, hotkeys).Accion);
+    }
+
+    [Fact]
+    public void UnHotkeyQueNoEsDeTransporte_SiDispara()
+    {
+        var hotkeys = new Dictionary<int, int> { [0x51] = 13 };   // Q
+        var d = DespachadorTeclado.Resolver(0x51, false, false, false, Normal, hotkeys);
+        Assert.Equal(AccionTecla.DispararCue, d.Accion);
+        Assert.Equal(13, d.CueId);
+    }
+
+    [Fact]
+    public void ElBuffer_VaDESPUESDeLosHotkeys()
+    {
+        // Un cue cuya hotkey sea un digito dispara, y ese digito nunca llega
+        // al buffer. Es el orden de WinCue, verificado en su codigo.
+        var hotkeys = new Dictionary<int, int> { [Vk1] = 5 };
+        var d = DespachadorTeclado.Resolver(Vk1, false, false, false, Normal, hotkeys);
+        Assert.Equal(AccionTecla.DispararCue, d.Accion);
+        Assert.Equal(5, d.CueId);
+    }
+
+    [Fact]
+    public void SinHotkeyEnEseDigito_AlimentaElBuffer()
+    {
+        var d = DespachadorTeclado.Resolver(Vk1, false, false, false, Normal, SinHotkeys);
+        Assert.Equal(AccionTecla.BufferDigito, d.Accion);
+        Assert.Equal('1', d.Caracter);
+    }
+
+    [Fact]
+    public void ConBufferVacio_RetrocesoYEnterNoSonDelBuffer()
+    {
+        Assert.NotEqual(AccionTecla.BufferBorrar,
+            DespachadorTeclado.Resolver(VkBack, false, false, false, Normal, SinHotkeys).Accion);
+        Assert.NotEqual(AccionTecla.BufferSaltar,
+            DespachadorTeclado.Resolver(VkEnter, false, false, false, Normal, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void ConDigitosEnElBuffer_EnterSalta()
+    {
+        var estado = Normal with { HayDigitosEnBuffer = true, FocoEnTablaDeCues = true };
+        Assert.Equal(AccionTecla.BufferSaltar,
+            DespachadorTeclado.Resolver(VkEnter, false, false, false, estado, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void EnterEnLaTabla_SinBuffer_LlevaElPlayheadALaSeleccion()
+    {
+        var estado = Normal with { FocoEnTablaDeCues = true };
+        Assert.Equal(AccionTecla.PlayheadASeleccion,
+            DespachadorTeclado.Resolver(VkEnter, false, false, false, estado, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void EnterFueraDeLaTabla_NO_EsDelDespachador()
+    {
+        // De esto depende que Tab+Enter siga activando botones, que es la
+        // concesion de accesibilidad que paga que Espacio ya no active el
+        // control con foco.
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkEnter, false, false, false, Normal, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void EnModoShow_LasDeEdicionNoHacenNada()
+    {
+        var estado = Normal with { ModoShow = true };
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(VkDelete, false, false, false, estado, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.Nada,
+            DespachadorTeclado.Resolver(0x43, ctrl: true, false, false, estado, SinHotkeys).Accion);  // Ctrl+C
+    }
+
+    [Fact]
+    public void EnModoShow_ElTransporteSIFunciona()
+    {
+        var estado = Normal with { ModoShow = true };
+        Assert.Equal(AccionTecla.Go,
+            DespachadorTeclado.Resolver(VkSpace, false, false, false, estado, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.Blackout,
+            DespachadorTeclado.Resolver(VkB, false, false, false, estado, SinHotkeys).Accion);
+    }
+
+    [Fact]
+    public void CtrlZ_NoDisparaUnCueCuyaHotkeySeaZ()
+    {
+        var hotkeys = new Dictionary<int, int> { [VkZ] = 3 };
+        var d = DespachadorTeclado.Resolver(VkZ, ctrl: true, false, false, Normal, hotkeys);
+        Assert.Equal(AccionTecla.Deshacer, d.Accion);
+    }
+
+    [Fact]
+    public void LasCuatroFlechas_MuevenElPlayhead()
+    {
+        Assert.Equal(AccionTecla.PlayheadAnterior,
+            DespachadorTeclado.Resolver(VkUp, false, false, false, Normal, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.PlayheadAnterior,
+            DespachadorTeclado.Resolver(VkLeft, false, false, false, Normal, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.PlayheadSiguiente,
+            DespachadorTeclado.Resolver(VkDown, false, false, false, Normal, SinHotkeys).Accion);
+        Assert.Equal(AccionTecla.PlayheadSiguiente,
+            DespachadorTeclado.Resolver(VkRight, false, false, false, Normal, SinHotkeys).Accion);
+    }
+}
+```
+
+- [ ] **Step 2: Verlas fallar**
+
+```powershell
+cd C:\Proyectos\ffmpeg-gui\WinCueSharp
+dotnet test tests\WinCue.Presentation.Tests\WinCue.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~DespachadorTecladoTests"
+```
+
+Esperado: **no compila** — `DespachadorTeclado` no existe. Es el fallo correcto
+en C#; no busques un rojo de aserción.
+
+- [ ] **Step 3: Escribir `DespachadorTeclado`**
+
+Con el orden de arriba, tal cual, y una cabecera que explique **por qué existe
+este fichero**: porque la decisión de qué hace cada tecla es lo único de todo
+el teclado que se puede probar sin una ventana, sin GPU y sin que nadie pulse
+nada — y en esta máquina resultó que pulsar no se puede.
+
+Documenta dentro las tres reglas que no son obvias y que se leyeron del código
+de WinCue: `B` antes de los hotkeys, el buffer después de los hotkeys, y que
+los hotkeys solo se miran **sin modificadores**.
+
+- [ ] **Step 4: Verlas pasar**
+
+```powershell
+dotnet test tests\WinCue.Presentation.Tests\WinCue.Presentation.Tests.csproj -c Release --filter "FullyQualifiedName~DespachadorTecladoTests"
+```
+
+Esperado: **15 en verde**.
+
+- [ ] **Step 5: Suite entera y commit**
+
+```powershell
+dotnet build WinCueSharp.sln -c Release -p:TreatWarningsAsErrors=true
+dotnet test WinCueSharp.sln -c Release --filter "Requiere!=libmpv"
+```
+
+`MpvPropertyTests.FadeVolume_ReachesTarget` puede salir rojo por temporización:
+es el flake conocido y pasa en solitario.
+
+```bash
+cd /c/Proyectos/ffmpeg-gui
+git add WinCueSharp/src/WinCue.Presentation/DespachadorTeclado.cs \
+        WinCueSharp/tests/WinCue.Presentation.Tests/DespachadorTecladoTests.cs
+git commit -m "feat(presentation): la decision de que hace cada tecla, pura y con pruebas"
+```
+
+---
+
+### Task 4: «Ir a cue» tecleando su número
 
 **Files:**
 - Modify: `src/Secuence.App/MainWindow.xaml.cs`
@@ -480,7 +819,7 @@ git commit -m "feat(secuence): ir a cue tecleando su numero"
 
 ---
 
-### Task 4: Los atajos que faltan, y los aceleradores al despachador
+### Task 5: Los atajos que faltan, y los aceleradores al despachador
 
 **Files:**
 - Modify: `src/Secuence.App/MainWindow.xaml.cs` (despachador, `AddAccelerator`)
@@ -618,7 +957,7 @@ git commit -m "feat(secuence): los 17 atajos que faltaban, y el menu deja de men
 
 ---
 
-### Task 5: Avisar cuando un show usa teclas de transporte como hotkey
+### Task 6: Avisar cuando un show usa teclas de transporte como hotkey
 
 **Files:**
 - Modify: `src/Secuence.App/MainWindow.xaml.cs` (donde se reconstruye el mapa de
@@ -706,7 +1045,7 @@ git commit -m "fix(secuence): avisar si un show usa teclas de transporte como ho
 
 ---
 
-### Task 6: Documentación al día
+### Task 7: Documentación al día
 
 **Files:**
 - Modify: `docs/superpowers/TRASPASO-SECUENCE.md`
@@ -742,11 +1081,12 @@ git commit -m "docs(secuence): estado al dia tras la navegacion y el teclado"
 
 ## Dónde se puede parar
 
+- **Tras la 3** — la decision de que hace cada tecla ya esta cubierta por pruebas en el CI.
 - **Tras la 2** — el operador ya puede elegir el siguiente cue. Es el 80 % del
   valor de la tanda; todo lo demás es comodidad.
-- **Tras la 4** — el menú contextual deja de mentir y el conflicto de `B` entre
+- **Tras la 5** — el menú contextual deja de mentir y el conflicto de `B` entre
   productos desaparece.
-- **Tras la 5** — nadie se lleva una sorpresa en una función.
+- **Tras la 6** — nadie se lleva una sorpresa en una función.
 
 ## Riesgos
 
@@ -755,7 +1095,7 @@ git commit -m "docs(secuence): estado al dia tras la navegacion y el teclado"
    control de no-regresión.
 2. **`Enter` resuelto por foco** es lo más fácil de romper sin darse cuenta:
    cualquier cambio futuro en quién tiene el foco cambia lo que hace la tecla.
-3. **Sin pruebas automáticas.** La matriz de la tarea 6 es la mitigación, y por
+3. **El CABLEADO sigue sin pruebas automáticas** (la decisión ya no). La matriz de la tarea 6 es la mitigación, y por
    eso no es documentación de adorno.
 
 **Desconfía del plan antes que del ejecutor.** En este proyecto los defectos han
