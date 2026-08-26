@@ -2511,25 +2511,31 @@ public sealed partial class MainWindow : Window, IShowView
     /// acto seguido hacía <c>if (e.Handled) return</c>, que anulaba justo eso—;
     /// la contradicción se resuelve quitando la BANDERA, no la comprobación.
     /// Meterlo todo en el preview la resolvía al revés y se llevaba por delante
-    /// la navegación de la tabla y la de los deslizadores del mezclador.
+    /// la navegación de la tabla y la del único <c>Slider</c> de la ventana
+    /// (la barra de progreso del previo PVW/PGM — Secuence no tiene mezclador
+    /// con deslizadores, así que no es ese el ejemplo que aplica aquí).
     ///
-    /// MEDIDO, con un hotkey en la flecha ABAJO y la tabla enfocada — tres
-    /// resultados en tres momentos distintos de este archivo, y hay que
-    /// mantener los tres escritos porque cada uno fue real en su momento:
-    ///   · con los hotkeys metidos en el preview (primer intento, descartado):
-    ///     el cue SE DISPARA y la selección se queda clavada en 0 — la
-    ///     navegación, muerta;
-    ///   · con los hotkeys aquí (KeyDown sin handledEventsToo) y las flechas
-    ///     TODAVÍA sin ser transporte: la flecha MUEVE la selección
+    /// Con un hotkey en la flecha ABAJO y la tabla enfocada, tres resultados
+    /// en tres momentos distintos de este archivo — hay que mantener los tres
+    /// escritos porque cada uno fue real en su momento, pero NO los tres son
+    /// del mismo tipo de evidencia, y hay que decirlo con esas palabras:
+    ///   · MEDIDO — con los hotkeys metidos en el preview (primer intento,
+    ///     descartado): el cue SE DISPARA y la selección se queda clavada en
+    ///     0 — la navegación, muerta;
+    ///   · MEDIDO — con los hotkeys aquí (KeyDown sin handledEventsToo) y las
+    ///     flechas TODAVÍA sin ser transporte: la flecha MUEVE la selección
     ///     (fila 0 → 1) y el cue NO se dispara — el ListView se la come y la
     ///     marca Handled;
-    ///   · HOY, con las flechas ya convertidas en transporte en el preview de
-    ///     arriba (<see cref="OnPreviewKeyDownGlobal"/>, caso 3): NINGUNO de
-    ///     los dos. El preview se come la tecla y la marca <c>Handled</c>
-    ///     antes de que este método —que va después, en la burbuja— llegue a
-    ///     verla: ni se mueve la selección ni se dispara el cue. Es la
+    ///   · RAZONADO POR LECTURA DEL CÓDIGO, PENDIENTE DE COMPROBAR EN LA
+    ///     PASADA MANUAL (NO MEDIDO con una tecla real) — HOY, con las
+    ///     flechas ya convertidas en transporte en el preview de arriba
+    ///     (<see cref="OnPreviewKeyDownGlobal"/>, caso 3): el preview marca
+    ///     <c>Handled</c> sin excepción por foco, y este método se suscribe
+    ///     sin <c>handledEventsToo</c>, así que el evento no debería llegar
+    ///     aquí — ni se movería la selección ni se dispararía el cue. Es la
     ///     regresión de los hotkeys en tecla de flecha que se documenta en
-    ///     <see cref="RebuildHotkeys"/>, y que se deja así a propósito.
+    ///     <see cref="RebuildHotkeys"/>, y que se deja así a propósito; falta
+    ///     confirmarla con teclado real (ver el informe de la tanda).
     ///
     /// El type-ahead de la tabla NO entra en esta decisión, y conviene que
     /// quede escrito porque parece que sí: está medido en los DOS binarios que
