@@ -136,6 +136,16 @@ public sealed partial class MainWindow : Window, IShowView
     /// mitad de una edición que él mismo acaba de comprometer.</summary>
     private bool _suppressSelectionSync;
 
+    /// <summary>Buffer de «ir a cue» tecleando su número (estilo QLab).
+    /// DECLARADO AQUÍ, en la tanda de la navegación por teclado, aunque quien
+    /// lo RELLENA es la tarea siguiente (<c>TratarBufferIrACue</c>, aún sin
+    /// escribir): la resolución de <c>Enter</c> en <see cref="OnKeyDownHotkeys"/>
+    /// ya necesita comprobar si está vacío HOY, para que esa tarea no tenga
+    /// que reordenar nada — ver el porqué completo ahí. Mientras no exista
+    /// quien lo rellene, se queda vacío siempre y esa comprobación es un
+    /// no-op deliberado, no un descuido.</summary>
+    private string _bufferIrACue = "";
+
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
     // MainController.Clock, no lo mide por su cuenta— pero con su PROPIO
     // timer, porque IShowView.UpdateCountdown no lo alimenta a él (ver más
@@ -492,7 +502,17 @@ public sealed partial class MainWindow : Window, IShowView
     /// <summary>Selección de fila en la tabla: repuebla el inspector con el
     /// cue elegido (o lo deshabilita si no hay selección). Se suprime
     /// mientras RefreshRow reasigna la selección tras un commit propio del
-    /// inspector — ver _suppressSelectionSync.</summary>
+    /// inspector — ver _suppressSelectionSync.
+    ///
+    /// DELIBERADAMENTE NO TOCA EL PLAYHEAD, y es la mitad del modelo de esta
+    /// tanda: la selección es lo que el operador está MIRANDO (puebla el
+    /// inspector), el playhead es lo que disparará el próximo GO, y un clic
+    /// simple no puede confundir el uno con el otro — así se puede repasar el
+    /// cue 47 en mitad del acto sin que el GO deje de disparar el 12. Quien
+    /// mueve el playhead son los cinco gestos de <see cref="OnPreviewKeyDownGlobal"/>,
+    /// <see cref="OnKeyDownHotkeys"/> y <see cref="OnCueListDoubleTapped"/> —
+    /// nunca este manejador. Si alguna vez alguien añade aquí una llamada a
+    /// <c>OnSetPlayhead</c>, es un bug, no una mejora.</summary>
     private void OnCueSelectionChanged(object sender, SelectionChangedEventArgs e)
     {
         if (_suppressSelectionSync)
@@ -1258,6 +1278,28 @@ public sealed partial class MainWindow : Window, IShowView
             .ShowAt(CueList, new Microsoft.UI.Xaml.Controls.Primitives.FlyoutShowOptions
             { Position = e.GetPosition(CueList) });
         e.Handled = true;
+    }
+
+    /// <summary>Doble clic en una fila: uno de los cinco gestos que SÍ mueven
+    /// el playhead (ver la nota de <see cref="OnCueSelectionChanged"/>). El
+    /// primer clic del par ya disparó SelectionChanged y pobló el inspector,
+    /// como cualquier clic simple — este manejador solo AÑADE el salto de
+    /// playhead encima, sin decidir selección.
+    ///
+    /// Mismo patrón que <see cref="OnCueListRightTapped"/> para encontrar la
+    /// fila bajo el gesto: <c>e.OriginalSource</c> como <c>FrameworkElement</c>
+    /// y su <c>DataContext</c> como <c>CueRow</c>, en vez de fiarse de
+    /// <c>CueList.SelectedItem</c> (que con selección extendida podría no ser
+    /// la fila que el operador acaba de tocar).</summary>
+    private void OnCueListDoubleTapped(object sender, DoubleTappedRoutedEventArgs e)
+    {
+        if (_controller is null)
+            return;
+        if ((e.OriginalSource as FrameworkElement)?.DataContext is not CueRow row)
+            return;
+        int idx = _model.IndexOfId(row.CueId);
+        if (idx >= 0)
+            _controller.OnSetPlayhead(idx);
     }
 
     private MenuFlyout BuildCueMenu(int row)
@@ -2389,7 +2431,16 @@ public sealed partial class MainWindow : Window, IShowView
             || IsDown(Windows.System.VirtualKey.Shift))
             return;
 
-        // ── 3 · Los dos atajos de directo ──
+        // ── 3 · Los atajos de directo y el playhead ──
+        // ↑/← y ↓/→ son TRANSPORTE, igual que Espacio/Escape: tienen que
+        // ganarle a la navegación nativa de la tabla (que hasta esta tanda
+        // era la dueña de esas teclas), y por eso van AQUÍ y no en
+        // OnKeyDownHotkeys — mismo argumento, ya medido más abajo, de por qué
+        // Espacio/Escape viven en el túnel.
+        //
+        // Enter TAMBIÉN es un gesto de playhead (Enter con el foco en la
+        // tabla) pero, a propósito, NO vive en este switch — ver el porqué
+        // completo en OnKeyDownHotkeys, justo donde se resuelve.
         switch (e.Key)
         {
             case Windows.System.VirtualKey.Space:
@@ -2398,6 +2449,16 @@ public sealed partial class MainWindow : Window, IShowView
                 return;
             case Windows.System.VirtualKey.Escape:
                 _controller.OnStopPressed();
+                e.Handled = true;
+                return;
+            case Windows.System.VirtualKey.Up:
+            case Windows.System.VirtualKey.Left:
+                _controller.OnPrevPressed();
+                e.Handled = true;
+                return;
+            case Windows.System.VirtualKey.Down:
+            case Windows.System.VirtualKey.Right:
+                _controller.OnNextPressed();
                 e.Handled = true;
                 return;
         }
@@ -2493,7 +2554,69 @@ public sealed partial class MainWindow : Window, IShowView
             // Dispara SIN mover el playhead, igual que en WinCue.
             _controller.TriggerCueId(cueId);
             e.Handled = true;
+            return;
         }
+
+        // ── Enter: se resuelve en ESTE ÚNICO sitio, y a propósito no en el
+        // túnel de arriba (OnPreviewKeyDownGlobal) ──
+        //
+        // El plan original de esta tanda ponía Enter junto a las flechas, en
+        // el transporte. Se corrigió a mano porque choca de frente con la
+        // tarea siguiente («ir a cue» tecleando su número): ese buffer
+        // también resuelve Enter, y tiene que verlo ANTES que nadie cuando
+        // hay dígitos escritos — si Enter se resolviera en el túnel (que
+        // llega primero por diseño, ver arriba), teclear «5» «.» «1» y Enter
+        // saltaría a la SELECCIÓN en vez de al cue 5.1: el túnel se habría
+        // comido la tecla antes de que el buffer llegara a verla.
+        //
+        // La regla completa, en un solo sitio:
+        //   · buffer de «ir a cue» con dígitos  → salta a ESE cue (lo hace
+        //     TratarBufferIrACue, tarea siguiente — se enganchará AQUÍ MISMO,
+        //     antes de esta comprobación, y devolverá true/Handled primero);
+        //   · buffer vacío y el foco está en la tabla → playhead a la fila
+        //     seleccionada (lo de abajo);
+        //   · si no (buffer vacío y el foco NO está en la tabla) → Enter
+        //     sigue siendo de quien tenga el foco, sin marcar Handled. Es lo
+        //     que mantiene viva la ruta Tab+Enter sobre un botón: al vivir en
+        //     el KeyDown que BURBUJEA (sin handledEventsToo, como los
+        //     hotkeys de arriba), un botón enfocado ya ha consumido su Enter
+        //     —e invocado su Click— ANTES de que este método llegue a verlo.
+        //
+        // _bufferIrACue vive declarado más arriba desde ESTA tanda aunque
+        // nadie lo rellena todavía (ver su comentario): hoy la primera rama
+        // de la regla nunca se alcanza, y eso es correcto, no un hueco.
+        if (e.Key == Windows.System.VirtualKey.Enter
+            && _bufferIrACue.Length == 0
+            && EstaEnLaTabla(foco))
+        {
+            if (CueList.SelectedItem is CueRow fila)
+            {
+                int idx = _model.IndexOfId(fila.CueId);
+                if (idx >= 0)
+                    _controller.OnSetPlayhead(idx);
+            }
+            e.Handled = true;
+        }
+    }
+
+    /// <summary>¿El elemento con foco es la tabla de cues, o algo dentro de
+    /// ella (una fila, una celda)? NO basta con comparar por tipo contra
+    /// <c>ListView</c>: en WinUI, navegar una lista con el teclado deja el
+    /// foco real en el <c>ListViewItem</c> concreto, no en el <c>ListView</c>
+    /// contenedor — y tras esta misma tanda (↑/↓ ya son transporte, ver
+    /// OnPreviewKeyDownGlobal) el clic sigue siendo la única forma de
+    /// enfocar una fila, así que es el caso que hay que cubrir. Por eso se
+    /// sube por el árbol visual hasta encontrar <c>CueList</c> o quedarse sin
+    /// padre.</summary>
+    private bool EstaEnLaTabla(object? foco)
+    {
+        for (var actual = foco as DependencyObject; actual is not null;
+             actual = VisualTreeHelper.GetParent(actual))
+        {
+            if (ReferenceEquals(actual, CueList))
+                return true;
+        }
+        return false;
     }
 
     /// <summary>¿Hay una lista desplegada AHORA MISMO? Mientras la haya, sus

@@ -740,6 +740,7 @@
             <ListView x:Name="CueList" Grid.Row="1" SelectionMode="Extended"
                       SelectionChanged="OnCueSelectionChanged"
                       RightTapped="OnCueListRightTapped"
+                      DoubleTapped="OnCueListDoubleTapped"
                       AllowDrop="True"
                       DragOver="OnCueListDragOver" Drop="OnCueListDrop"
                       CanDragItems="True" DragItemsStarting="OnCueListDragStarting"
