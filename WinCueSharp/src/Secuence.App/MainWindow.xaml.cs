@@ -153,7 +153,10 @@ public sealed partial class MainWindow : Window, IShowView
     /// <summary>Cuándo se tecleó el último carácter del buffer de arriba —un
     /// <see cref="Stopwatch.GetTimestamp"/>, no un reloj de pared—, para poder
     /// medir la caducidad de 4 s con <see cref="Stopwatch.GetElapsedTime(long)"/>.
-    /// Sin valor mientras el buffer esté vacío.</summary>
+    /// NO se resetea a la vez que el texto: tras un Retroceso que deja
+    /// <see cref="_bufferIrACue"/> vacío, este campo conserva el timestamp
+    /// del carácter borrado (inofensivo — con el texto vacío nadie mira ya
+    /// la caducidad — pero hay que decirlo bien: no queda "sin valor").</summary>
     private long _bufferIrACueTicks;
 
     // Reloj del show (fila 0, centro): igual reparto que WinCue.App —lee
@@ -2749,11 +2752,33 @@ public sealed partial class MainWindow : Window, IShowView
 
             default:
                 // Nada -o cualquier otra acción que el despachador resuelva
-                // para esta tecla, como StopAll si e.Key fuera Escape- no es
-                // de este método. Escape en concreto no llega ni siquiera a
-                // probarse: lo resuelve el túnel de arriba
-                // (OnPreviewKeyDownGlobal) y marca Handled ahí, y este
-                // manejador, sin handledEventsToo, no vuelve a verlo.
+                // para esta tecla- no es de este método, y no se ejecuta.
+                //
+                // OJO, para quien añada un case a este switch (la tarea 5,
+                // previsiblemente, con StopAll/Blackout/etc.): Escape SÍ
+                // puede llegar aquí, y no es un caso de laboratorio.
+                //
+                // Con el foco en un campo de escritura, OnPreviewKeyDownGlobal
+                // mueve el foco a CueList para Escape Y SALE SIN MARCAR
+                // Handled (ver ese método, :2445-2447 -es lo mismo que hace
+                // WinCue-). El evento sigue bubbling; OnKeyDownHotkeys VUELVE
+                // A LEER el foco -que ya es CueList-, pasa el guardián de
+                // escritura, no encuentra hotkey, y llega hasta aquí con
+                // FocoEnTablaDeCues=true. Resolver ve Escape sin modificadores
+                // y devuelve StopAll ANTES de mirar el buffer (transporte por
+                // encima de todo, ver DespachadorTeclado). Hoy es inofensivo
+                // porque este default no ejecuta nada. En cuanto exista un
+                // case AccionTecla.StopAll aquí, Escape dentro de un TextBox
+                // devolverá el foco a la tabla Y ADEMÁS parará el show -la
+                // MISMA regresión que el comentario de OnPreviewKeyDownGlobal,
+                // :2438-2452, documenta como ya arreglada una vez-. Este
+                // método, tal y como está, no tiene forma de distinguir
+                // «Escape que acaba de mover el foco» de «Escape con el foco
+                // ya en la tabla»: los dos casos llegan idénticos. Antes de
+                // añadir ese case, alguien tiene que decidir cómo romper esa
+                // ambigüedad -lo más directo: marcar Handled en el propio
+                // OnPreviewKeyDownGlobal cuando mueve el foco-, no simplemente
+                // añadir el case y confiar en que no vuelva a pasar.
                 return false;
         }
     }

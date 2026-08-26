@@ -6,7 +6,7 @@ namespace WinCue.Presentation.Tests;
 public class ProcesadorBufferIrACueTests
 {
     private const int Vk1 = 0x31, Vk2 = 0x32, VkBack = 0x08, VkEnter = 0x0D,
-                      VkEscape = 0x1B, VkPeriodOem = 0xBE, VkS = 0x53;
+                      VkEscape = 0x1B, VkPeriodOem = 0xBE, VkS = 0x53, VkQ = 0x51;
 
     private static readonly IReadOnlyDictionary<int, int> SinHotkeys =
         new Dictionary<int, int>();
@@ -189,5 +189,56 @@ public class ProcesadorBufferIrACueTests
 
         Assert.Equal(AccionTecla.StopSeleccionado, r.Accion);
         Assert.Equal("9", r.Estado.Texto);
+    }
+
+    // ── Los tres huecos que dejó la primera vuelta: Procesar corrige
+    // "HayDigitosEnBuffer" con el valor POST-caducidad antes de llamar a
+    // Resolver, y nada lo comprobaba. Si esa corrección se pierde:
+    //   · Retroceso sobre un buffer ya caducado resolvería BufferBorrar
+    //     sobre un texto ya vacío -> "" [..^1] -> ArgumentOutOfRangeException,
+    //     en directo;
+    //   · Enter sobre un buffer ya caducado, con el foco en la tabla,
+    //     resolvería BufferSaltar con CueObjetivo == "" en vez de
+    //     PlayheadASeleccion.
+    // Y el hermano: la rama "_" tiene que devolver "estado" (post-caducidad),
+    // no "estadoPrevio" -si no, una tecla ajena tras caducar dejaría vivo el
+    // texto viejo en vez de vaciarlo-.
+
+    [Fact]
+    public void BufferCaducado_ConRetroceso_NoRevientaYDevuelveNada()
+    {
+        var expirado = new EstadoBufferIrACue("5", T0);
+
+        var r = ProcesadorBufferIrACue.Procesar(
+            expirado, T0 + Segundos(5), VkBack, false, false, false, Normal, SinHotkeys);
+
+        Assert.Equal(AccionTecla.Nada, r.Accion);
+        Assert.Equal("", r.Estado.Texto);
+    }
+
+    [Fact]
+    public void BufferCaducado_ConEnterYFocoEnLaTabla_EsPlayheadASeleccion()
+    {
+        var expirado = new EstadoBufferIrACue("5", T0);
+        var estado = Normal with { FocoEnTablaDeCues = true };
+
+        var r = ProcesadorBufferIrACue.Procesar(
+            expirado, T0 + Segundos(5), VkEnter, false, false, false, estado, SinHotkeys);
+
+        Assert.Equal(AccionTecla.PlayheadASeleccion, r.Accion);
+        Assert.Null(r.CueObjetivo);
+        Assert.Equal("", r.Estado.Texto);
+    }
+
+    [Fact]
+    public void BufferCaducado_ConTeclaAjena_DevuelveElEstadoYaVacio_NoElPrevio()
+    {
+        var expirado = new EstadoBufferIrACue("5", T0);
+
+        var r = ProcesadorBufferIrACue.Procesar(
+            expirado, T0 + Segundos(5), VkQ, false, false, false, Normal, SinHotkeys);
+
+        Assert.Equal(AccionTecla.Nada, r.Accion);
+        Assert.Equal("", r.Estado.Texto);
     }
 }
