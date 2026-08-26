@@ -2312,7 +2312,28 @@ public sealed partial class MainWindow : Window, IShowView
     private readonly Dictionary<Windows.System.VirtualKey, int> _cueHotkeys = new();
 
     /// <summary>Reconstruye el mapa. Lo llama el controlador cada vez que la
-    /// lista cambia (es parte de IShowView).</summary>
+    /// lista cambia (es parte de IShowView).
+    ///
+    /// REGRESIÓN CONOCIDA, DEJADA A PROPÓSITO — no la "arregles" aquí: un cue
+    /// cuya hotkey sea una flecha (<c>"Up"</c>/<c>"Down"</c>/<c>"Left"</c>/
+    /// <c>"Right"</c>, las cuatro se parsean bien y entran en el diccionario)
+    /// YA NO DISPARA. Desde que ↑/←/↓/→ son transporte
+    /// (<see cref="OnPreviewKeyDownGlobal"/>, caso 3), el túnel se come esas
+    /// cuatro teclas —y las marca <c>Handled</c>— antes de que lleguen a
+    /// <see cref="OnKeyDownHotkeys"/>, que es quien mira este diccionario. En
+    /// WinCue sí disparan, porque allí los hotkeys se resuelven ANTES que las
+    /// flechas de playhead, dentro del mismo despachador túnel.
+    ///
+    /// No se excluyen aquí las cuatro flechas de <c>_cueHotkeys</c> para
+    /// compensar: hacerlo cambiaría en silencio lo que significa un show YA
+    /// GUARDADO con esa hotkey, y la razón de fondo por la que el transporte
+    /// va por encima de los hotkeys es precisamente que un archivo de show no
+    /// pueda desactivarle al operador la navegación del playhead — permitir
+    /// la excepción inversa (que un hotkey desactive el transporte) sería la
+    /// misma trampa al revés. La mitigación es que esto no se descubra en
+    /// mitad de una función: la Task 6 avisa al cargar un show cuyos hotkeys
+    /// pisen teclas de transporte, y las cuatro flechas están en esa
+    /// lista.</summary>
     public void RebuildHotkeys()
     {
         _cueHotkeys.Clear();
@@ -2370,10 +2391,13 @@ public sealed partial class MainWindow : Window, IShowView
     /// precio que WinCue ya paga hoy—, y dejar Enter fuera mantiene Tab+Enter
     /// como ruta de activación accesible.
     ///
-    /// ALCANCE: esta tanda solo arregla Espacio y Escape (y de paso arregla los
-    /// hotkeys por cue, que sufrían el mismo fallo, ver más abajo). Los otros
-    /// 18 atajos de WinCue que faltan —S, flechas, B, P, Supr, F2, ir a cue por
-    /// número, Ctrl+Z/Y/C/V/D/P/F— son de la tanda siguiente y NO están aquí.
+    /// ALCANCE: la tanda que dio origen a este método solo arreglaba Espacio y
+    /// Escape (y de paso los hotkeys por cue, que sufrían el mismo fallo, ver
+    /// más abajo). Las flechas de playhead (↑/←, ↓/→) SÍ están aquí desde la
+    /// tanda siguiente — ver el caso 3 del switch — con el mismo argumento de
+    /// «tiene que ganarle al control con foco» que ya valía para Espacio y
+    /// Escape. Lo que sigue sin estar es el resto de los 18 atajos de WinCue
+    /// que faltan —S, B, P, Supr, F2, ir a cue por número, Ctrl+Z/Y/C/V/D/P/F—.
     ///
     /// Ctrl+O / Ctrl+S / Ctrl+Shift+S / Ctrl+G siguen siendo
     /// <c>KeyboardAccelerator</c> (ver el constructor): ningún control se come
@@ -2489,13 +2513,23 @@ public sealed partial class MainWindow : Window, IShowView
     /// Meterlo todo en el preview la resolvía al revés y se llevaba por delante
     /// la navegación de la tabla y la de los deslizadores del mezclador.
     ///
-    /// MEDIDO, con un hotkey en la flecha ABAJO y la tabla enfocada:
-    ///   · antes de esta tanda: la flecha MUEVE la selección (fila 0 → 1) y el
-    ///     cue NO se dispara — el ListView se la come y la marca Handled;
-    ///   · con los hotkeys en el preview: el cue SE DISPARA y la selección se
-    ///     queda clavada en 0 — la navegación, muerta;
-    ///   · aquí, en el KeyDown sin handledEventsToo: vuelve a mover la
-    ///     selección y a no disparar.
+    /// MEDIDO, con un hotkey en la flecha ABAJO y la tabla enfocada — tres
+    /// resultados en tres momentos distintos de este archivo, y hay que
+    /// mantener los tres escritos porque cada uno fue real en su momento:
+    ///   · con los hotkeys metidos en el preview (primer intento, descartado):
+    ///     el cue SE DISPARA y la selección se queda clavada en 0 — la
+    ///     navegación, muerta;
+    ///   · con los hotkeys aquí (KeyDown sin handledEventsToo) y las flechas
+    ///     TODAVÍA sin ser transporte: la flecha MUEVE la selección
+    ///     (fila 0 → 1) y el cue NO se dispara — el ListView se la come y la
+    ///     marca Handled;
+    ///   · HOY, con las flechas ya convertidas en transporte en el preview de
+    ///     arriba (<see cref="OnPreviewKeyDownGlobal"/>, caso 3): NINGUNO de
+    ///     los dos. El preview se come la tecla y la marca <c>Handled</c>
+    ///     antes de que este método —que va después, en la burbuja— llegue a
+    ///     verla: ni se mueve la selección ni se dispara el cue. Es la
+    ///     regresión de los hotkeys en tecla de flecha que se documenta en
+    ///     <see cref="RebuildHotkeys"/>, y que se deja así a propósito.
     ///
     /// El type-ahead de la tabla NO entra en esta decisión, y conviene que
     /// quede escrito porque parece que sí: está medido en los DOS binarios que
@@ -2506,30 +2540,40 @@ public sealed partial class MainWindow : Window, IShowView
     /// resolver. El día que la tabla tenga búsqueda de verdad habrá que decidir
     /// de quién es la letra, y esa decisión será de producto, no de teclado.
     ///
-    /// ══ ESTO ES UNA DIVERGENCIA CONSCIENTE CON WinCue, NO UNA RESTAURACIÓN ══
+    /// ══ ESTO ES UNA DIVERGENCIA CONSCIENTE CON WinCue, Y SIGUE SIÉNDOLO ══
     ///
-    /// Que quede claro para la tanda de los 18 atajos, porque va a chocar de
-    /// frente con esto: en WinCue los hotkeys por cue NO viven en un manejador
-    /// aparte. Están dentro del MISMO despachador túnel
-    /// (<c>OnKeyDownGlobal</c>, WinCue.App/MainWindow.xaml.cs:2126), o sea en
-    /// la posición que aquí se acaba de descartar. WinCue puede permitírselo
-    /// porque su tabla NUNCA VE LAS FLECHAS: ↑ y ↓ los reclama el propio
-    /// despachador para mover el playhead (<c>OnPrevPressed</c> /
-    /// <c>OnNextPressed</c>, <c>:2171-2178</c>) y los marca <c>Handled</c>, así
-    /// que en WinCue no hay navegación de <c>DataGrid</c> que proteger: se la
-    /// quitó a propósito.
+    /// En WinCue los hotkeys por cue NO viven en un manejador aparte. Están
+    /// dentro del MISMO despachador túnel (<c>OnKeyDownGlobal</c>,
+    /// WinCue.App/MainWindow.xaml.cs:2126), o sea en la posición que aquí se
+    /// descartó. WinCue puede permitírselo porque su tabla NUNCA VE LAS
+    /// FLECHAS: ↑ y ↓ los reclama el propio despachador para mover el
+    /// playhead (<c>OnPrevPressed</c>/<c>OnNextPressed</c>, <c>:2171-2178</c>)
+    /// y los marca <c>Handled</c>, así que en WinCue no hay navegación de
+    /// <c>DataGrid</c> que proteger: se la quitó a propósito.
     ///
-    /// Secuence hoy NO tiene ↑/↓ de playhead —son de la tanda siguiente—, así
-    /// que aquí las flechas todavía son de la tabla y hay que respetárselas.
-    /// CUANDO ESA TANDA LLEGUE, esta separación se queda coja: en cuanto ↑/↓
-    /// pasen a ser transporte y se marquen Handled en el preview, la tabla deja
-    /// de verlas igual que en WinCue, y entonces mantener los hotkeys en un
-    /// enganche distinto ya no compra navegación — compra otra cosa (que un
-    /// hotkey no le robe una tecla a un deslizador o a un futuro campo), que
-    /// puede seguir valiendo la pena o no. Es una decisión que hay que TOMAR
-    /// entonces, a la vista de la lista completa de atajos, y no heredarla sin
-    /// mirar. Lo que no se puede es dejar los dos productos divergiendo sin que
-    /// nadie lo haya escrito: por eso está escrito aquí.</summary>
+    /// Secuence YA TIENE ↑/←/↓/→ de playhead (<see
+    /// cref="OnPreviewKeyDownGlobal"/>, caso 3, misma tanda que este
+    /// comentario) con exactamente ese criterio, y con ellas convertidas en
+    /// transporte la tabla de Secuence TAMPOCO ve ya las flechas — igual que
+    /// en WinCue. Esta es la decisión que el propio comentario, en su versión
+    /// anterior, dejaba pendiente para "cuando esa tanda llegara": llegó, y
+    /// la pregunta que responde es «si la tabla ya no necesita protegerse de
+    /// las flechas, ¿por qué seguir separando los hotkeys del preview, en vez
+    /// de fundirlos ahí como hace WinCue?».
+    ///
+    /// DECISIÓN, TOMADA EN ESTA MISMA TANDA: SE MANTIENEN SEPARADOS. El
+    /// motivo ya no es la tabla — es que un hotkey puede caer en CUALQUIER
+    /// tecla, no solo en las cuatro flechas, y el contrato «la tecla que el
+    /// control con foco ya ha consumido no dispara nada» sigue vivo para
+    /// TODAS las demás: una letra mientras se edita el nombre de un cue en el
+    /// inspector, o una tecla que un control futuro necesite para su propio
+    /// gesto. Fundir los hotkeys en el preview le devolvería a cualquier
+    /// control con foco el mismo riesgo que esta separación existe para
+    /// evitar —perder una tecla propia porque coincide con el hotkey de
+    /// algún cue del show—, solo que ahora sobre las 34 teclas restantes en
+    /// vez de sobre las cuatro flechas. Que las flechas concretas ya no
+    /// necesiten esa protección no hace desaparecer la necesidad para el
+    /// resto.</summary>
     private void OnKeyDownHotkeys(object sender, KeyRoutedEventArgs e)
     {
         // Con un diálogo modal delante, tampoco: teclear en Ajustes no puede
