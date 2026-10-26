@@ -101,7 +101,7 @@ la ruta clásica.
 
 | Códec / formato | Ruta | Detalle |
 |---|---|---|
-| **HAP / HAP Alpha / HAP Q** | Motor propio | Parser propio de la spec de Vidvox (Hap1/Hap5/HapY; segunda etapa None, Snappy o *chunked*). La GPU descomprime el DXT al muestrear. HapQ: shader YCoCg escalado→RGB (PSNR 51,6 dB contra ffmpeg) |
+| **HAP / HAP Alpha / HAP Q** | Motor propio | Parser propio de la spec de Vidvox (Hap1/Hap5/HapY; segunda etapa None, Snappy o *chunked*). La GPU descomprime el DXT al muestrear. HapQ: shader YCoCg escalado→RGB (PSNR 51,6 dB contra ffmpeg). **No soporta HAP Q Alpha (`HapM`), HAP R (`Hap7`) ni HAP HDR (`HapH`)**: esos ficheros caen a mpv, que los descomprime en CPU |
 | **ProRes 422 Proxy/LT/422/HQ, 4444, 4444 XQ** | Motor propio | Decodificador de FFmpeg en proceso, `FF_THREAD_SLICE`, hilos por capa ≈ núcleos lógicos/capas (2-8). Planos `R16_UNORM`, conversión YUV→RGB en shader (BT.709/601/2020, rango limitado o completo, 10/12 bits). Croma POINT para igualar a swscale/mpv |
 | H.264, HEVC, VP9, AV1, MPEG-2, DNxHD… | mpv (`hwdec=auto`) | Todo lo que soporte libmpv; decodificación por hardware cuando la hay |
 | Imágenes (jpg, png, bmp, gif, tif, webp) | mpv | Fotograma fijo (`image-display-duration=inf`) |
@@ -248,9 +248,10 @@ opcional.
 
 ## 10. Plantilla de comparación
 
-Columna WinCue rellenada con lo de arriba. Las demás columnas son un **punto de
-partida de memoria, no verificado**: hay que contrastarlas con la versión concreta
-de cada producto antes de sacar conclusiones.
+> **La comparación verificada, con fuentes y centrada en HAP y ProRes, está en
+> [comparativa-motores-video.md](comparativa-motores-video.md).** La tabla de
+> abajo es el borrador inicial, hecho de memoria; donde no coincida, manda la
+> comparativa.
 
 | Eje | WinCue (hoy) | OBS Studio | vMix | Resolume Arena | Watchout |
 |---|---|---|---|---|---|
