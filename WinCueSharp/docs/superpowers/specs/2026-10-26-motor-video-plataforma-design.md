@@ -1,7 +1,7 @@
 # Motor de vídeo como plataforma — documento de diseño
 
 *Escrito 2026-10-26 a partir de la sesión de brainstorming con Andrés.
-Estado: **pendiente de revisión por Andrés**. No hay código escrito para este
+Estado: **aprobado por Andrés el 2026-10-26**. No hay código escrito para este
 diseño.*
 
 Documentos de contexto:
